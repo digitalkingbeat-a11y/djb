@@ -1,0 +1,20 @@
+{
+  "belts": [
+    { "code": "white", "name": "White", "order": 1, "minScore": 0 },
+    { "code": "yellow", "name": "Yellow", "order": 2, "minScore": 60 },
+    { "code": "orange", "name": "Orange", "order": 3, "minScore": 70 },
+    { "code": "green", "name": "Green", "order": 4, "minScore": 76 },
+    { "code": "blue", "name": "Blue", "order": 5, "minScore": 82 },
+    { "code": "purple", "name": "Purple", "order": 6, "minScore": 86 },
+    { "code": "brown", "name": "Brown", "order": 7, "minScore": 90 },
+    { "code": "black", "name": "Black", "order": 8, "minScore": 94 }
+  ],
+  "components": [
+    { "id":"timing", "weight": 0.25 },
+    { "id":"beatmatching", "weight": 0.15 },
+    { "id":"phrasing", "weight": 0.15 },
+    { "id":"transitions", "weight": 0.15 },
+    { "id":"eq_gain", "weight": 0.1 },
+    { "id":"creativity", "weight": 0.2 }
+  ]
+}

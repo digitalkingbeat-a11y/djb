@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="data:," />
+  <title>DJ Battle — Battle Studio</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="battle-room.css" />
+  <link rel="stylesheet" href="hardware.css" />
+  <link rel="stylesheet" href="operations.css" />
+  <link rel="stylesheet" href="battle-results.css" />
+  <link rel="stylesheet" href="battle-history.css" />
+  <link rel="stylesheet" href="verified-results.css" />
+  <link rel="stylesheet" href="rankings.css" />
+  <link rel="stylesheet" href="challenges.css" />
+  <link rel="stylesheet" href="music-library.css" />
+  <link rel="stylesheet" href="professional-redesign.css" />
+  <style>
+    /* Ensure battle meta has 4 columns for additional metadata */
+    .battle-meta{grid-template-columns:repeat(4,1fr) !important}
+    @media (max-width:760px){.battle-meta{grid-template-columns:repeat(2,1fr) !important}}
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">DB</div>
+        <div><strong>DJ BATTLE</strong><span>Battle • Community • Studio</span></div>
+      </div>
+      <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Collapse sidebar" title="Collapse sidebar">Collapse</button>
+      <nav id="nav">
+        <button class="nav-btn active" data-view="battles" title="Battles"><b>BT</b><span>Battles</span></button>
+        <button class="nav-btn" data-view="studio" title="Battle Studio"><b>ST</b><span>Battle Studio</span></button>
+        <button class="nav-btn" data-view="library" title="Music Library"><b>ML</b><span>Music Library</span></button>
+        <button class="nav-btn" data-view="community" title="Community"><b>CM</b><span>Community</span></button>
+        <button class="nav-btn" data-view="rankings" title="Rankings"><b>RK</b><span>Rankings</span></button>
+        <button class="nav-btn" data-view="tour" title="Virtual Tour"><b>VT</b><span>Virtual Tour</span></button>
+        <button class="nav-btn" data-view="activity" title="Activity"><b>AC</b><span>Activity</span><span id="notification-count-pill">0</span></button>
+        <button class="nav-btn" data-view="profile" title="Profile"><b>PR</b><span>Profile</span></button>
+        <button class="nav-btn" data-view="settings" title="Settings"><b>SE</b><span>Settings</span></button>
+      </nav>
+      <button class="nav-btn operator-only hidden" id="operator-nav" data-view="operations" type="button" title="Judging Operations"><b>OP</b><span>Judging Ops</span></button>
+      <div class="side-card premium-card">
+        <span class="eyebrow">PREMIUM</span>
+        <strong>Unlock Stems</strong>
+        <p>Stem-enabled battles, more storage, own-selection battles and advanced AI feedback.</p>
+        <button class="primary small" data-action="premium">See Premium</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <span class="eyebrow">DJ BATTLE CONTROL</span>
+          <h1 id="page-title">Battles</h1>
+        </div>
+        <div class="top-actions">
+          <button class="ghost" id="quick-upload">Add Music</button>
+          <button class="ghost" id="auth-button">Sign In</button>
+          <button class="profile-chip" data-view-target="profile"><span class="avatar">DK</span><span id="profile-name">Digital King</span><span id="profile-belt" class="belt-badge" title="Belt rank">White</span></button>
+        </div>
+      </header>
+
+      <section id="dashboard" class="view">
+        <div class="hero">
+          <div>
+            <span class="eyebrow accent">DJ VS DJ</span>
+            <h2>Think you’re better?<br><em>Prove it.</em></h2>
+            <p>Get assigned tracks, race the clock, submit your performance, and let AI + the community decide who won.</p>
+            <div class="hero-actions"><button class="primary" data-view-target="battles">Enter a Battle</button><button class="ghost" data-view-target="studio">Open Battle Studio</button></div>
+          </div>
+          <div class="score-orbit">
+            <div class="score-ring"><span>AI</span><strong>91</strong><small>/100</small></div>
+            <div class="orbit-tag top">Phrasing 19/20</div><div class="orbit-tag right">Timing 18/20</div><div class="orbit-tag bottom">Creativity 17/20</div>
+          </div>
+        </div>
+
+        <div class="section-head"><div><span class="eyebrow">ACTIVE NOW</span><h3>Featured Battles</h3></div><button class="text-btn" data-view-target="battles">View all →</button></div>
+        <div class="card-grid" id="featured-battles"></div>
+
+        <div class="two-col">
+          <div class="panel">
+            <div class="section-head compact"><div><span class="eyebrow">COMMUNITY</span><h3>Latest Drops</h3></div><button class="text-btn" data-view-target="community">Open forum →</button></div>
+            <div id="latest-posts" class="feed-list"></div>
+          </div>
+          <div class="panel">
+            <div class="section-head compact"><div><span class="eyebrow">YOUR PATH</span><h3>Battle Record</h3></div></div>
+            <div class="stats"><div><strong>12</strong><span>Wins</span></div><div><strong>4</strong><span>Losses</span></div><div><strong>87</strong><span>AI Avg</span></div><div><strong>#18</strong><span>Rank</span></div></div>
+            <div class="progress-wrap"><div class="progress-label"><span>Judge XP</span><strong>620 / 1,000</strong></div><div class="progress"><i style="width:62%"></i></div><p>Judge battles to earn XP and unlock higher-weight community judging.</p></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="battle-room" class="view">
+        <div class="section-head"><div><span class="eyebrow accent">BATTLE ROOM</span><h3 id="br-title">Preparing Battle</h3></div><button class="text-btn" id="br-leave">← Back</button></div>
+        <div class="battle-room-grid">
+          <div class="panel players">
+            <div class="player-card" id="br-dj1"><div class="avatar">DK</div><div><strong id="br-dj1-name">Digital King</strong><div id="br-dj1-meta">Tampa • White Belt</div></div><div class="belt">White</div></div>
+            <div class="player-card" id="br-dj2"><div class="avatar">AI</div><div><strong id="br-dj2-name">Solo Mode</strong><div id="br-dj2-meta">—</div></div><div class="belt" id="br-dj2-belt">—</div></div>
+            <div class="battle-meta panel" id="br-meta">
+              <div><span>Mode</span><strong id="br-mode">—</strong></div>
+              <div><span>Genre</span><strong id="br-genre">—</strong></div>
+              <div><span>Duration</span><strong id="br-duration">—</strong></div>
+              <div><span>Status</span><strong id="br-status">Waiting</strong></div>
+            </div>
+          </div>
+
+          <div class="panel assigned">
+            <div style="display:flex;justify-content:space-between;align-items:center"><span class="eyebrow">ASSIGNED TRACKS</span><div id="br-track-count"></div></div>
+            <div id="br-tracks" class="assigned-tracks"></div>
+            <div style="margin-top:12px;display:flex;gap:8px"><button class="primary" id="br-start">Start Battle</button><button class="ghost" id="br-pause">Pause</button><button class="ghost" id="br-end">End</button></div>
+            <div style="margin-top:12px" class="panel"><span class="eyebrow">BATTLE TIMER</span><div id="br-clock" class="battle-clock">10:00</div><div id="br-timer-note" style="color:var(--muted);font-size:12px;margin-top:6px">Ready</div></div>
+          </div>
+
+          <div class="panel upload-panel">
+            <div><span class="eyebrow">SUBMISSION</span><h3 id="br-upload-title">Upload your battle mix</h3></div>
+            <div style="margin-top:10px"><input type="file" id="br-upload-file" accept="audio/*"></div>
+            <div style="margin-top:10px"><div class="progress" id="br-upload-progress"><i style="width:0%"></i></div><small id="br-upload-status" style="color:var(--muted)">No file selected</small></div>
+            <div style="margin-top:12px;display:flex;gap:8px"><button class="primary" id="br-upload-btn">Upload Securely</button><button class="ghost" id="br-submit-btn">Retry Upload</button></div>
+            <div id="br-judge-placeholder" style="margin-top:12px"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="battles" class="view active">
+        <div class="product-page-head">
+          <div>
+            <span class="eyebrow accent">BATTLE MARKET</span>
+            <h2>Battles</h2>
+          </div>
+          <button class="primary compact" id="create-battle">Create Battle</button>
+        </div>
+        <div class="tabs compact-tabs" id="battle-tabs" role="tablist" aria-label="Battle lists">
+          <button class="active" data-battle-tab="open" type="button">Open Battles</button>
+          <button data-battle-tab="mine" type="button">My Battles</button>
+          <button data-battle-tab="invites" type="button">Invites</button>
+          <button data-battle-tab="completed" type="button">Completed</button>
+        </div>
+        <div class="battle-layout-switch" role="group" aria-label="Battle layout">
+          <button class="active" data-battle-layout="list" type="button">List</button>
+          <button data-battle-layout="grid" type="button">Grid</button>
+        </div>
+        <div class="battle-filter-row" aria-label="Battle filters">
+          <label>Mode<select id="battle-lobby-mode-filter"></select></label>
+          <label>Genre<select id="battle-lobby-genre-filter"></select></label>
+          <label>Duration<select id="battle-lobby-duration-filter"><option value="all">Any</option><option value="short">2-10 min</option><option value="medium">20-30 min</option><option value="long">60 min</option></select></label>
+          <label>Entry<select id="battle-lobby-entry-filter"><option value="all">Any</option><option value="assigned">Assigned Tracks</option><option value="own_selection">Own Selection</option><option value="premium">Premium</option></select></label>
+          <label class="battle-search">Search<input id="battle-lobby-search-filter" type="search" placeholder="Battle, host, genre"></label>
+          <label>Sort<select id="battle-lobby-sort"><option value="ending_soon">Ending Soon</option><option value="newest">Newest</option><option value="players">Most Players</option><option value="rating">Rating Range</option></select></label>
+        </div>
+        <div class="battle-format-tour" id="battle-format-filter" aria-label="Battle formats">
+          <button class="active" data-battle-format="all"><span>All</span><b>Formats</b></button>
+          <button data-battle-format="transition_battle"><span>Transition</span><b>Bass House</b></button>
+          <button data-battle-format="scratching_battle"><span>Scratch</span><b>Assigned</b></button>
+          <button data-battle-format="five_song_mix_battle"><span>5-Song</span><b>Mix</b></button>
+          <button data-battle-format="own_selection_battle"><span>10-Min</span><b>Open Mix</b></button>
+          <button data-battle-format="half_hour_mix_battle"><span>30-Minute</span><b>Mix</b></button>
+          <button data-battle-format="full_mix_battle"><span>60-Minute</span><b>Mix</b></button>
+        </div>
+        <div class="segmented hidden" id="genre-filter"><button class="active" data-genre="All">All</button></div>
+        <div id="battle-grid" class="battle-list"></div>
+      </section>
+
+      <section id="notifications" class="view">
+        <div class="section-head">
+          <div><span class="eyebrow accent">PRIVATE ALERTS</span><h3>Notification Center</h3></div>
+          <div class="challenge-actions"><button class="ghost small" id="notification-refresh" type="button">Refresh</button><button class="ghost small" id="notification-mark-all" type="button">Mark All Read</button></div>
+        </div>
+        <div id="notification-center" class="challenge-console"></div>
+      </section>
+
+      <section id="studio" class="view">
+        <div class="studio-head"><div><span class="eyebrow accent">BATTLE STUDIO</span><h2>Decks • Browser • Battle</h2><p>Studio workspace: load tracks, browse the library, and manage battles.</p></div><div class="timer-card"><span>BATTLE CLOCK</span><strong id="battle-clock">10:00</strong><button class="ghost small" id="timer-toggle">Start</button></div></div>
+
+        <div class="studio-toolbar"><button class="ghost" id="record-mix">● Record Mix</button><button class="ghost" id="stop-record" disabled>■ Stop</button><span id="record-status">Recorder idle</span></div>
+
+        <div class="studio-grid" style="display:grid;grid-template-columns:360px 1fr 360px;gap:12px;align-items:start">
+          <!-- DECK A -->
+          <div class="deck deck-left" data-deck="a" style="padding:12px">
+            <div class="deck-top"><span>DECK A</span><span id="meta-a">No track loaded</span></div>
+            <div style="display:flex;gap:8px;align-items:flex-start;margin-top:8px">
+              <div style="width:110px;height:110px;border-radius:6px;overflow:hidden;background:#071017;border:1px solid #0f1720;display:grid;place-items:center;font-size:12px;color:var(--muted)" id="art-a">ART</div>
+              <div style="flex:1">
+                <div class="lcd-screen small" id="readout-a"><div style="display:flex;justify-content:space-between;align-items:center"><div><strong id="name-a">No Track</strong><div style="color:var(--muted);font-size:12px" id="artist-a">—</div></div><div style="text-align:right"><div class="readout" style="margin-bottom:6px"><div class="big" id="bpm-a">—</div><small style="color:var(--muted)">BPM</small></div><div class="readout"><div class="big" id="key-a">—</div><small style="color:var(--muted)">KEY</small></div></div></div></div>
+                <div class="wave" id="wave-a" style="margin-top:10px;height:72px"></div>
+                <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+                  <div class="hardware-controls">
+                    <button class="ghost small" data-cue="a">Cue</button>
+                    <button class="ghost small" data-play="a">Play</button>
+                    <button class="ghost small" data-sync="a">Sync</button>
+                    <button class="ghost small" data-keylock="a">Key</button>
+                    <button class="ghost small" data-loop="a">Loop</button>
+                    <button class="ghost small" data-set-cue="a">Set Cue</button>
+                    <button class="ghost small" data-hotcue="a">Hotcue</button>
+                  </div>
+                  <div style="margin-left:auto;display:flex;gap:8px;align-items:center"><div class="meter" id="meter-a"><i></i></div><div class="lcd-screen small" id="time-a">0:00</div></div>
+                </div>
+                <div class="deck-cues" id="cues-a"></div>
+              </div>
+                </div>
+                <div style="margin-top:8px"><button class="primary small" data-load="a">Load</button></div>
+                <input type="file" id="file-a" accept="audio/*" hidden>
+            <audio id="audio-a"></audio>
+          </div>
+
+          <!-- CENTER: BROWSER + BATTLE INFO -->
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div class="panel" style="padding:12px;display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <div class="hardware-source" style="flex:1">
+                  <button class="ghost small active" data-src="MY_LIBRARY">MY LIBRARY</button>
+                  <button class="ghost small" data-src="PLATFORM">BATTLE LIBRARY</button>
+                  <button class="ghost small" data-src="STREAMING">STREAMING</button>
+                </div>
+                <input id="studio-search" placeholder="Search studio library" style="width:320px;padding:8px;border-radius:6px;background:#071018;border:1px solid #0f1720;color:#fff;font-size:13px" />
+                <button class="ghost small" id="open-studio-library-drawer" type="button">Library Drawer</button>
+              </div>
+              <div id="studio-library-rule-status" class="library-rule-status"></div>
+              <div class="table-wrap" style="margin-top:6px"><table style="width:100%"><thead><tr><th></th><th>Track</th><th>Artist</th><th>BPM</th><th>Key</th><th>Genre</th><th>Source</th><th>Rights</th><th>Elig.</th><th>Dur</th></tr></thead><tbody id="studio-library-table"></tbody></table></div>
+            </div>
+            <div id="studio-library-drawer" class="studio-library-drawer hidden"></div>
+
+            <div class="panel" id="mini-battle-panel" style="display:flex;align-items:center;justify-content:space-between;padding:12px">
+              <div style="display:flex;gap:12px;align-items:center">
+                <div style="display:flex;flex-direction:column"><strong id="mini-dj1">Digital King</strong><small id="mini-meta1" style="color:var(--muted)">White • Tampa</small></div>
+                <div style="font-size:18px;font-weight:900;color:var(--accent)">VS</div>
+                <div style="display:flex;flex-direction:column"><strong id="mini-dj2">Solo Mode</strong><small id="mini-meta2" style="color:var(--muted)">—</small></div>
+              </div>
+              <div style="text-align:right"><div class="battle-clock" id="mini-battle-clock">10:00</div><div style="color:var(--muted);font-size:12px">Mode: <span id="mini-mode">Practice</span> • Genre: <span id="mini-genre">Global</span></div></div>
+            </div>
+          </div>
+
+          <!-- DECK B -->
+          <div class="deck deck-right" data-deck="b" style="padding:12px">
+            <div class="deck-top"><span>DECK B</span><span id="meta-b">No track loaded</span></div>
+            <div style="display:flex;gap:8px;align-items:flex-start;margin-top:8px">
+              <div style="width:110px;height:110px;border-radius:6px;overflow:hidden;background:#071017;border:1px solid #0f1720;display:grid;place-items:center;font-size:12px;color:var(--muted)" id="art-b">ART</div>
+              <div style="flex:1">
+                <div class="lcd-screen small" id="readout-b"><div style="display:flex;justify-content:space-between;align-items:center"><div><strong id="name-b">No Track</strong><div style="color:var(--muted);font-size:12px" id="artist-b">—</div></div><div style="text-align:right"><div class="readout" style="margin-bottom:6px"><div class="big" id="bpm-b">—</div><small style="color:var(--muted)">BPM</small></div><div class="readout"><div class="big" id="key-b">—</div><small style="color:var(--muted)">KEY</small></div></div></div></div>
+                <div class="wave" id="wave-b" style="margin-top:10px;height:72px"></div>
+                <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+                  <div class="hardware-controls">
+                    <button class="ghost small" data-cue="b">Cue</button>
+                    <button class="ghost small" data-play="b">Play</button>
+                    <button class="ghost small" data-sync="b">Sync</button>
+                    <button class="ghost small" data-keylock="b">Key</button>
+                    <button class="ghost small" data-loop="b">Loop</button>
+                    <button class="ghost small" data-set-cue="b">Set Cue</button>
+                    <button class="ghost small" data-hotcue="b">Hotcue</button>
+                  </div>
+                  <div style="margin-left:auto;display:flex;gap:8px;align-items:center"><div class="meter" id="meter-b"><i></i></div><div class="lcd-screen small" id="time-b">0:00</div></div>
+                </div>
+                <div class="deck-cues" id="cues-b"></div>
+              </div>
+            </div>
+            <div style="margin-top:8px"><button class="primary small" data-load="b">Load</button></div>
+            <input type="file" id="file-b" accept="audio/*" hidden>
+            <audio id="audio-b"></audio>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:12px;margin-top:12px">
+          <div class="panel ai-panel" style="flex:1"><div><span class="eyebrow">JUDGE PANEL</span><h3>Battle Judging</h3><p style="color:var(--muted)">Timing • Beatmatching • Transitions • Creativity • Technical</p></div><div style="width:220px;display:flex;flex-direction:column;gap:8px"><button class="primary" id="judge-score-preview">Generate Practice Score</button><div id="score-breakdown" class="score-breakdown"></div></div></div>
+          <div class="panel" id="how-close-wrap" style="width:360px"><div><span class="eyebrow">HOW CLOSE WAS I?</span><h3>Timing Accuracy Inspector</h3><p style="color:var(--muted)">Compare ideal landings with your actual timing. Click markers to jump to moments.</p></div><div style="margin-top:8px"><button class="ghost" id="hc-run-timing">Analyze Timing</button> <button class="ghost" id="run-judge-analysis">Run Judge Analysis</button></div></div>
+        </div>
+
+      </section>
+
+      <section id="library" class="view">
+        <div class="toolbar"><div><span class="eyebrow">CENTRAL DJ LIBRARY</span><h2>My Music</h2><p>Upload once, then reuse the track in your profile, forum posts, own-selection battles and Battle Studio.</p></div><label class="primary file-button">＋ Upload Tracks<input type="file" id="library-upload" accept="audio/*" multiple hidden></label></div>
+        <div class="storage"><span>Local storage tier</span><div class="progress"><i id="storage-progress" style="width:0%"></i></div><strong id="storage-label">0 / 5 tracks</strong></div>
+        <div id="library-sync-status" class="library-sync-status offline"><span></span><strong>OFFLINE CACHE</strong><small>Local mode</small></div>
+        <div class="music-library-workstation" id="music-library-workstation">
+          <aside class="library-panel library-crates" id="library-crates">
+            <div><span class="eyebrow">CRATES</span><h3>Library</h3></div>
+            <button class="active" data-library-crate="all"><span>All Tracks</span><strong id="crate-count-all">0</strong></button>
+            <button data-library-crate="my"><span>My Uploads</span><strong id="crate-count-my">0</strong></button>
+            <button data-library-crate="platform"><span>Battle Library</span><strong id="crate-count-platform">0</strong></button>
+            <button data-library-crate="battle_ready"><span>Battle Ready</span><strong id="crate-count-ready">0</strong></button>
+            <button data-library-crate="missing_artwork"><span>Needs Artwork</span><strong id="crate-count-artwork">0</strong></button>
+            <div class="library-mini-panel">
+              <span class="eyebrow">PLAYLISTS</span>
+              <button class="text-btn" id="open-playlists">Open</button>
+              <button class="text-btn" id="new-playlist">+ New Playlist</button>
+              <div id="playlists-list" class="library-playlist-list"></div>
+            </div>
+          </aside>
+          <section class="library-panel library-browser" id="library-browser">
+            <div class="library-console">
+              <input id="global-search" placeholder="Search title, artist, genre, BPM or key" />
+              <select id="library-sort-field" aria-label="Sort music library">
+                <option value="title">Title</option>
+                <option value="artist">Artist</option>
+                <option value="bpm">BPM</option>
+                <option value="key">Key</option>
+                <option value="genre">Genre</option>
+                <option value="source">Source</option>
+                <option value="uploaded">Uploaded</option>
+              </select>
+              <button class="ghost" id="library-sort-direction" type="button">ASC</button>
+              <label class="library-toggle">Compatible<input type="checkbox" id="library-compatible-only"></label>
+            </div>
+            <div class="library-status-strip" id="library-status-strip"></div>
+            <div class="table-wrap library-table-wrap"><table><thead><tr><th>Art</th><th>Track</th><th>Artist</th><th>Source</th><th>Genre</th><th>BPM</th><th>Key</th><th>Rights</th><th>Actions</th></tr></thead><tbody id="library-table"></tbody></table></div>
+          </section>
+          <aside class="library-panel library-inspector" id="library-inspector">
+            <div id="library-detail"></div>
+            <div class="compatible-rack">
+              <span class="eyebrow">COMPATIBLE TRACKS</span>
+              <div id="compatible-track-list"></div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="community" class="view">
+        <div class="section-head">
+          <div><span class="eyebrow accent">SERVER COMMUNITY</span><h2>DJ Feed</h2></div>
+          <div class="community-actions">
+            <button class="ghost" id="community-refresh" type="button">Refresh</button>
+            <button class="primary" id="new-post" type="button">New Post</button>
+          </div>
+        </div>
+        <div class="community-console">
+          <div class="community-filters">
+            <label>Feed<select id="community-feed-view"><option value="recent">Recent</option><option value="following">Following</option><option value="popular">Popular</option><option value="my_posts">My Posts</option></select></label>
+            <label>Category<select id="community-category-filter"><option value="all">All Categories</option></select></label>
+            <button class="ghost small" id="community-load-more" type="button">Load More</button>
+          </div>
+          <div id="community-status" class="community-status-strip"></div>
+        </div>
+        <div class="community-layout">
+          <div>
+            <div id="forum-feed" class="forum-feed"></div>
+          </div>
+          <aside class="panel forum-side">
+            <div><span class="eyebrow">CATEGORIES</span><h3>Rooms</h3></div>
+            <div id="community-category-rail"></div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="verified-results" class="view">
+        <div class="section-head">
+          <div><span class="eyebrow accent">PUBLIC VERIFIED RESULTS</span><h2>Verified Results</h2></div>
+          <div class="verified-actions"><button class="ghost" id="verified-refresh">Refresh</button><button class="ghost" id="verified-load-more">Load More</button></div>
+        </div>
+        <div class="verified-discovery-panel">
+          <div class="verified-filters">
+            <label>Country<select id="verified-filter-country"></select></label>
+            <label>Mode<select id="verified-filter-mode"></select></label>
+            <label>Genre<select id="verified-filter-genre"></select></label>
+            <label>Source<select id="verified-filter-source"></select></label>
+            <label>Belt<select id="verified-filter-belt"></select></label>
+            <label>Opponent<select id="verified-filter-opponent"></select></label>
+            <label>Date<select id="verified-filter-date"></select></label>
+            <label>Sort<select id="verified-sort"></select></label>
+          </div>
+          <div id="verified-discovery-status" class="verified-status-strip"></div>
+          <div id="verified-results-list" class="verified-results-list"></div>
+        </div>
+        <div class="panel verified-ranking-panel">
+          <div class="section-head compact"><div><span class="eyebrow">COUNTRY-AWARE RANKINGS</span><h3>Verified Public Rankings</h3></div></div>
+          <div id="verified-ranking-categories" class="verified-ranking-categories"></div>
+        </div>
+      </section>
+
+      <section id="rankings" class="view">
+        <div class="section-head">
+          <div><span class="eyebrow accent">AUTHORITATIVE RANKINGS</span><h2>Rankings</h2></div>
+          <div class="rankings-actions">
+            <button class="ghost" id="rankings-refresh" type="button">Refresh</button>
+            <button class="ghost" id="rankings-load-more" type="button">Load More</button>
+          </div>
+        </div>
+        <div class="rankings-shell">
+          <div class="rankings-console panel">
+            <div id="rankings-category-tabs" class="rankings-tabs" role="tablist" aria-label="Ranking categories"></div>
+            <div class="rankings-filter-panel">
+              <label>Country<select id="rankings-filter-country"></select></label>
+              <label>Belt<select id="rankings-filter-belt"></select></label>
+              <label>Discovery<select id="rankings-filter-relationship"></select></label>
+              <button class="ghost small" id="rankings-my-country" type="button">My Country</button>
+              <button class="ghost small" id="rankings-global" type="button">Global</button>
+              <button class="ghost small" id="rankings-reset" type="button">Reset</button>
+            </div>
+            <div id="rankings-active-filters" class="rankings-active-filters"></div>
+            <div id="rankings-status" class="rankings-status-strip"></div>
+            <div id="rankings-list" class="rankings-list"></div>
+            <div id="rankings-empty" class="rankings-empty hidden"></div>
+          </div>
+          <aside class="rankings-side">
+            <div class="panel rankings-personal-panel">
+              <div class="section-head compact"><div><span class="eyebrow">YOUR SERVER RANK</span><h3>Personal Ranks</h3></div></div>
+              <div id="rankings-my-summary" class="rankings-my-summary"></div>
+            </div>
+            <div class="panel rankings-detail-panel">
+              <div class="section-head compact"><div><span class="eyebrow">RANKING DETAIL</span><h3>Movement History</h3></div></div>
+              <div id="rankings-detail" class="rankings-detail"></div>
+            </div>
+            <div class="panel rankings-bitcoin-panel">
+              <div class="section-head compact"><div><span class="eyebrow">BITCOIN BATTLES</span><h3>Reward Metadata</h3></div></div>
+              <p>Bitcoin Battle rankings include only eligible competitive applied awards. Reward details are metadata and untransferred unless a verified payment record exists.</p>
+            </div>
+            <div class="panel rankings-ai-panel">
+              <div class="section-head compact"><div><span class="eyebrow">SEPARATE AI BOARD</span><h3>AI Skill High Scores</h3></div></div>
+              <div class="segmented" id="ai-score-filter">
+                <button class="active" data-ai-filter="Global">Global</button>
+                <button data-ai-filter="Transition">Transition</button>
+                <button data-ai-filter="Scratch">Scratch</button>
+                <button data-ai-filter="5-Song Mix">5-Song Mix</button>
+                <button data-ai-filter="30-Minute Mix">30-Minute Mix</button>
+                <button data-ai-filter="60-Minute Mix">60-Minute Mix</button>
+              </div>
+              <div class="table-wrap ai-score-wrap"><table><thead><tr><th>Rank</th><th>DJ</th><th>Best</th><th>Average</th><th>Attempts</th><th>Last</th><th>PB</th><th>Genre</th></tr></thead><tbody id="ai-ranking-table"></tbody></table></div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="operations" class="view operator-view">
+        <div class="section-head">
+          <div><span class="eyebrow accent">JUDGING OPERATIONS</span><h2>Submission Judge</h2></div>
+          <div class="ops-actions">
+            <button class="ghost" id="judge-refresh">Refresh</button>
+            <label class="ops-auto-label">Auto
+              <select id="judge-auto-refresh">
+                <option value="0">Off</option>
+                <option value="15000">15s</option>
+                <option value="30000">30s</option>
+                <option value="60000">60s</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div id="judge-ops-denied" class="notice ops-denied hidden"><strong>Operator access required</strong><span>Sign in with an operator or admin role.</span></div>
+        <div id="judge-ops-content">
+          <div class="ops-status-grid">
+            <div class="panel ops-status-card" id="judge-enabled-card"></div>
+            <div class="panel ops-status-card" id="judge-active-card"></div>
+            <div class="panel ops-status-card" id="judge-health-card"></div>
+          </div>
+          <div class="panel ops-readout-panel">
+            <div class="section-head compact"><div><span class="eyebrow">RUNNER READOUT</span><h3>Lifecycle Monitor</h3></div><span id="judge-last-refresh" class="ops-timestamp">Never refreshed</span></div>
+            <div class="ops-meter-grid" id="judge-metrics"></div>
+          </div>
+          <div class="two-col ops-two-col">
+            <div class="panel">
+              <div class="section-head compact"><div><span class="eyebrow">CONFIGURATION</span><h3>Deployment Contract</h3></div></div>
+              <div id="judge-config-checks" class="ops-checks"></div>
+            </div>
+            <div class="panel">
+              <div class="section-head compact"><div><span class="eyebrow">FAILURE CHANNEL</span><h3>Sanitized Error</h3></div></div>
+              <pre id="judge-error-readout" class="ops-error-readout">No failure reported.</pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="profile" class="view">
+        <div class="profile-hero"><div class="avatar huge">DK</div><div><span class="eyebrow accent">DJ PROFILE</span><h2>Digital King <span id="profile-belt-hero" class="belt-badge">White</span></h2><p>Tampa Bay • Bass House • Hip-Hop • Dubstep</p><div class="profile-actions"><button class="primary">Edit Profile</button><button class="ghost">Share</button></div><div style="margin-top:8px"><button class="primary" id="take-belt-test">Take Belt Test</button></div></div><div class="profile-score"><strong>87</strong><span>Battle Rating</span></div></div>
+        <div class="stats profile-stats"><div><strong>12</strong><span>Wins</span></div><div><strong>4</strong><span>Losses</span></div><div><strong>28</strong><span>Uploads</span></div><div><strong>620</strong><span>Judge XP</span></div><div><strong>184</strong><span>Followers</span></div></div>
+        <div class="panel" id="promotion-history-panel" style="margin-top:16px"><div class="section-head compact"><div><span class="eyebrow">ACHIEVEMENTS</span><h3>Promotion History</h3></div><button class="text-btn" id="refresh-promotions">Refresh</button></div><div id="promotion-history-list" style="display:grid;gap:8px;margin-top:8px"></div></div>
+        <div class="profile-tabs"><button class="active" data-profile-tab="music">Music</button><button data-profile-tab="history">Battle History</button><button data-profile-tab="progression">Progression History</button><button data-profile-tab="challenges">Challenges <span id="challenge-count-pill">0</span></button><button data-profile-tab="relationships">Relationships</button><button data-profile-tab="feed">Feed</button><button data-profile-tab="opponents">Opponents</button><button data-profile-tab="preferences">Preferences</button><button data-profile-tab="mixes">Mixes</button><button data-profile-tab="battles">Battles</button><button data-profile-tab="posts">Posts</button><button data-profile-tab="achievements">Achievements</button></div><div id="profile-media" class="card-grid"></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="modal"><form method="dialog" class="modal-card"><button class="modal-close" value="cancel">×</button><div id="modal-content"></div></form></dialog>
+  <div class="library-player" id="library-player" aria-live="polite">
+    <div class="library-player-art" id="library-player-art"></div>
+    <div class="library-player-main">
+      <span class="eyebrow">PERSISTENT PLAYER</span>
+      <strong id="library-player-title">No track loaded</strong>
+      <small id="library-player-artist">Select a track from My Music</small>
+    </div>
+    <div class="library-player-readouts">
+      <span id="library-player-bpm">-- BPM</span>
+      <span id="library-player-key" class="key-badge key-unknown">--</span>
+    </div>
+    <button class="primary" id="library-player-toggle" type="button">Play</button>
+    <input id="library-player-progress" type="range" min="0" max="100" value="0" aria-label="Track progress">
+    <audio id="library-player-audio"></audio>
+  </div>
+
+  <script src="judge/how_close.js"></script>
+  <script src="judge/analysis.js"></script>
+  <script src="supabase-browser-config.local.js"></script>
+  <script type="module">
+    // Local configuration supplies only browser-safe project values.
+    const config = window.DJ_BATTLE_SUPABASE_CONFIG || {};
+    window.SUPABASE_URL = config.url || '';
+    window.SUPABASE_ANON_KEY = config.anonKey || '';
+    if(window.SUPABASE_URL && window.SUPABASE_ANON_KEY){
+      try{
+        const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
+        window.supabase = createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+      }catch(e){console.warn('Supabase init failed',e)}
+    }
+  </script>
+  <script>
+    // Minimal belt UI helper for local profile state.
+    (function(){
+      const beltMap = { White: '#eee', Yellow: '#ffd54f', Orange: '#ffb74d', Green: '#81c784', Blue: '#64b5f6', Purple: '#9575cd', Brown: '#8d6e63', Black: '#212121' };
+      function setBelt(name){
+        const elems = document.querySelectorAll('#profile-belt, #profile-belt-hero');
+        elems.forEach(el=>{ el.textContent = name || 'None'; el.style.background = beltMap[name]||'#ccc'; el.style.color = name==='Black' ? '#fff' : '#111'; el.style.padding='2px 8px'; el.style.borderRadius='12px'; el.style.marginLeft='8px'; el.style.fontSize='0.85rem'; el.style.fontWeight='600'; });
+      }
+      const savedBelt = localStorage.getItem('dj_battle_belt') || 'White';
+      setBelt(savedBelt);
+      window.setCurrentBelt = (b) => { localStorage.setItem('dj_battle_belt', b); setBelt(b); };
+    })();
+  </script>
+  <script src="api_client.js"></script>
+  <script src="submission_upload.js"></script>
+  <script src="battle_modes.js"></script>
+  <script src="studio/studio_recording.js"></script>
+  <script src="studio/controller_mapping.js"></script>
+  <script src="studio/audio_setup.js"></script>
+  <script src="studio/streaming.js"></script>
+  <script src="studio/playlist_transfer.js"></script>
+  <script src="studio/studio_browser.js"></script>
+  <script src="studio/deck_runtime.js"></script>
+  <script src="app.js"></script>
+  <script>
+    // Wire timing analysis to create practice events from loaded audio.
+    const timingInspectorButton = document.getElementById('hc-run-timing');
+    if(timingInspectorButton) timingInspectorButton.onclick = ()=>{
+      const audio = document.getElementById('audio-a') || document.getElementById('audio-b');
+      if(!audio || (audio && (audio.src === '' || audio.src === null))){
+        const practiceEvents = [
+          { label:'Transition 1', idealSec: 32.000, actualSec:32.333, bpm:128, phraseOverlap:false },
+          { label:'Drop Swap', idealSec: 64.000, actualSec:63.880, bpm:128, phraseOverlap:true },
+          { label:'Loop Exit', idealSec: 120.000, actualSec:120.210, bpm:128, phraseOverlap:false }
+        ];
+        // Use a silent audio element for positioning if none loaded
+        let silent = document.getElementById('hc-silent');
+        if(!silent){ silent = document.createElement('audio'); silent.id='hc-silent'; silent.src=''; silent.preload='metadata'; document.body.appendChild(silent); }
+        DJHowClose.renderHowClosePanel({ audioEl: silent, events: practiceEvents });
+        return;
+      }
+      // If audio metadata not loaded, try to ensure it
+      const events = [ { label:'Transition 1', idealSec:32.000, actualSec:32.333, bpm:128, phraseOverlap:false } ];
+      DJHowClose.renderHowClosePanel({ audioEl: audio, events });
+    };
+    // Run judge analysis and show a detailed breakdown
+    const judgeAnalysisButton = document.getElementById('run-judge-analysis');
+    if(judgeAnalysisButton) judgeAnalysisButton.onclick = async ()=>{
+      const audio = document.getElementById('audio-a') || document.getElementById('audio-b');
+      const events = [
+        { label:'Transition 1', idealSec:32.000, actualSec:32.333, bpm:128, phraseOverlap:false, durationMs:400, clipping:false, freqOverlap:0.1, gainVariance:0.05 },
+        { label:'Drop Swap', idealSec:64.000, actualSec:64.333, bpm:128, phraseOverlap:true, durationMs:600, clipping:false, freqOverlap:0.3, gainVariance:0.12 },
+        { label:'Loop Exit', idealSec:120.000, actualSec:120.210, bpm:128, phraseOverlap:false, durationMs:300, clipping:true, freqOverlap:0.05, gainVariance:0.02 }
+      ];
+      const analysis = DJJudge.analyzePerformance(events, {});
+      // build modal HTML
+      let html = `<span class="eyebrow accent">JUDGE BREAKDOWN</span><h3>Overall: ${analysis.overallScore}/100</h3><div class="panel" style="margin:8px 0"><strong>Technical Score</strong><p style="color:var(--muted)">${analysis.technicalScore}/100</p><strong>Creativity</strong><p style="color:var(--muted)">${analysis.creativityScore}/100</p></div>`;
+      html += `<div class="score-breakdown">${Object.entries(analysis.components).map(([k,v])=>`<div class="score-chip">${k} <strong>${v}</strong></div>`).join('')}<div class="score-chip" style="grid-column:1/-1;color:var(--accent)"><strong>OVERALL ${analysis.overallScore}/100</strong></div></div>`;
+      html += '<div style="margin-top:12px"><strong>Timeline</strong><div style="margin-top:6px">';
+      analysis.timeline.forEach((t,idx)=>{ const s = Math.round(t.timeMs); html += `<div style="padding:8px 0;border-bottom:1px solid #121314;display:flex;justify-content:space-between"><div><strong>${t.label}</strong><div style="color:var(--muted)">${t.severity}</div></div><div><button class="ghost jb-jump" data-time="${(t.timeMs/1000).toFixed(3)}">Jump</button> <button class="ghost jb-details" data-idx="${idx}">Details</button></div></div>`; });
+      html += '</div></div><div class="modal-actions"><button class="ghost" value="cancel">Close</button><button class="primary" id="jb-save-server">Save to Server</button></div>';
+      openModal(html);
+      // hook jump and details
+      setTimeout(()=>{
+        document.querySelectorAll('.jb-jump').forEach(b=>b.onclick=(e)=>{ const t=Number(e.currentTarget.dataset.time); if(audio) { audio.currentTime = Math.max(0,t); audio.play(); } else { const silent = document.getElementById('hc-silent'); if(silent) { silent.currentTime = t; silent.play(); } } });
+        document.querySelectorAll('.jb-details').forEach(b=>b.onclick=(e)=>{ const idx = Number(e.currentTarget.dataset.idx); const det = analysis.perEvent[idx]; openModal(`<span class="eyebrow">JUDGE DETAIL</span><h3>${det.label}</h3><p style="color:var(--muted)">${det.critique}</p><div class="panel" style="margin-top:8px">${Object.entries({ timing:det.timingScore, beat:det.beatmatchingScore, phrase:det.phraseMatchScore, gain:det.gainPenalty, eq:det.eqPenalty, duration:det.transitionDurationScore }).map(([k,v])=>`<div style="display:flex;justify-content:space-between;padding:6px 0"><div>${k}</div><div><strong>${Math.round(v)}</strong></div></div>`).join('')}</div><div class="modal-actions"><button class="primary" value="cancel">Close</button></div>`); });
+        const saveBtn = document.getElementById('jb-save-server'); if(saveBtn) saveBtn.onclick = async ()=>{
+          try{
+            const resp = await DJBattleApi.apiRequest('/api/submitJudgeBreakdown', { method:'POST', body: { battleId: null, analysis } });
+            if(resp.data && resp.data.success) alert('Saved to server'); else alert(resp.error || 'Save failed');
+          }catch(err){ console.warn('save judge failed', err); alert('Save failed'); }
+        };
+      },50);
+    };
+    // Belt test flow: request a test, run local analysis, submit attempt
+    document.getElementById('take-belt-test').onclick = async ()=>{
+      try{
+        const resp = await DJBattleApi.apiRequest('/api/getBelts', { public:true });
+        const j = resp.data;
+        if(!j || !j.success) return alert('Unable to load belts');
+        const belts = j.belts || [];
+        const options = belts.map(b=>`<option value="${b.code}">${b.name} — pass ${b.minScore}</option>`).join('');
+        openModal(`<span class="eyebrow accent">BELT PROMOTION</span><h3>Request Promotion Test</h3><p style="color:var(--muted)">Choose a belt to attempt. Tests are randomized and measured.</p><div class="form-grid"><label>Choose belt<select id="choose-belt">${options}</select></label></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" id="start-belt-test">Start Test</button></div>`);
+        setTimeout(()=>{
+          const start = document.getElementById('start-belt-test'); if(!start) return;
+          start.onclick = async ()=>{
+            const chosen = document.getElementById('choose-belt').value;
+            const rq = await DJBattleApi.apiRequest('/api/requestBeltTest',{ method:'POST', body: { beltCode: chosen } });
+            const rj = rq.data; if(!rj || !rj.success) return alert(rq.error || 'Failed to request test');
+            document.getElementById('modal').close();
+            const practiceEvents = [ { label:'Transition A', idealSec:32, actualSec:32.05, bpm:128, phraseOverlap:false, durationMs:350, clipping:false, freqOverlap:0.05, gainVariance:0.03 }, { label:'Transition B', idealSec:64, actualSec:64.22, bpm:128, phraseOverlap:false, durationMs:420, clipping:false, freqOverlap:0.1, gainVariance:0.05 } ];
+            const analysis = DJJudge.analyzePerformance(practiceEvents, {});
+            const score = analysis.overallScore;
+            // submit attempt
+            const submit = await DJBattleApi.apiRequest('/api/submitBeltAttempt',{ method:'POST', body: { testId: rj.test.id, score, breakdown: analysis } });
+            const out = submit.data;
+            if(out && out.success){
+              const msg = out.passed ? `PASS — ${chosen.toUpperCase()} awarded` : `FAIL — Score ${score}`;
+              openModal(`<span class="eyebrow accent">TEST RESULT</span><h3>${msg}</h3><p style="color:var(--muted)">${out.passed ? 'Congratulations — belt awarded.' : 'Review the Judge critique and try again.'}</p><div class="modal-actions"><button class="primary" value="cancel">Close</button></div>`);
+              if(out.passed && window.setCurrentBelt){ window.setCurrentBelt(belts.find(b=>b.code===chosen).name); }
+            } else { alert(submit.error || 'Submission failed'); }
+          };
+        },0);
+      }catch(err){ console.error('belt test flow error', err); alert('Error requesting belt test'); }
+    };
+    // Promotion history loader
+    async function loadPromotionHistory(){
+      try{
+        const resp = await DJBattleApi.apiRequest('/api/getBeltAttempts');
+        const j = resp.data;
+        const list = document.getElementById('promotion-history-list'); list.innerHTML = '';
+        if(!j || !j.success){
+          if(resp.error){ console.warn('loadPromotionHistory failed', resp.error); list.innerHTML = `<div style="color:var(--muted)">${resp.error}</div>`; }
+          return;
+        }
+        if(!j.attempts || j.attempts.length===0){ list.innerHTML = '<div style="color:var(--muted)">No promotion attempts yet.</div>'; return; }
+        j.attempts.forEach(a=>{
+          const passed = a.score >= (a.passing_score || 0) || (a.passed===true);
+          const when = new Date(a.created_at || a.inserted_at || Date.now()).toLocaleString();
+          const card = document.createElement('div'); card.className = 'media-card'; card.style.padding='10px';
+          card.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center"><div><strong>${a.test_id ? (a.test_id) : (a.test && a.test.name ? a.test.name : (a.code||'Belt Test'))}</strong><div style="color:var(--muted);font-size:12px">${when}</div></div><div style="text-align:right"><div style="font-weight:700;color:${passed? 'var(--accent)':'#f66'}">${a.score}</div><div style="font-size:12px;color:var(--muted)">${passed? 'PASSED' : 'FAILED'}</div></div></div><div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end"><button class="ghost view-evidence" data-attempt-id="${a.id}">View Evidence</button></div>`;
+          list.appendChild(card);
+        });
+        // attach handlers for evidence buttons
+        list.querySelectorAll('.view-evidence').forEach(b=>b.onclick=async (e)=>{
+          const id = e.currentTarget.dataset.attemptId;
+          try{
+            const r = await DJBattleApi.apiRequest('/api/getBeltAttempt?id='+encodeURIComponent(id));
+            const j = r.data; if(!j || !j.success) return alert(r.error || 'Unable to load attempt');
+            const att = j.attempt;
+            const when = new Date(att.created_at || Date.now()).toLocaleString();
+            const bd = att.breakdown || att.evidence || {};
+            openModal(`<span class="eyebrow accent">PROMOTION EVIDENCE</span><h3>${att.test_id || att.test?.name || att.test_name || att.id}</h3><div style="color:var(--muted)">${when}</div><div class="panel" style="margin-top:12px"><pre style="white-space:pre-wrap;color:#cfd8e3">${JSON.stringify(bd, null, 2)}</pre></div><div class="modal-actions"><button class="primary" value="cancel">Close</button></div>`);
+          }catch(err){ console.warn('view evidence failed', err); alert('Failed to load evidence'); }
+        });
+      }catch(err){ console.warn('loadPromotionHistory failed', err); }
+    }
+    document.getElementById('refresh-promotions').onclick = ()=> loadPromotionHistory();
+    // load on initial profile view open
+    // Load immediately for the local profile panel.
+    setTimeout(()=>{ loadPromotionHistory(); }, 500);
+  </script>
+</body>
+</html>

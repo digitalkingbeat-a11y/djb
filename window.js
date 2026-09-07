@@ -1,0 +1,2 @@
+window.DJ_BATTLE_SUPABASE_CONFIG = {};
+

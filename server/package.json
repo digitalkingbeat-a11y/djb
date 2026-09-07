@@ -1,0 +1,25 @@
+{
+  "name": "dj-battle-leaderboard-server",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "judge:submissions": "node submission_judging_worker.js",
+    "judge:submissions:once": "node submission_judging_worker.js --once",
+    "test": "mocha --timeout 20000",
+    "test:ffmpeg": "mocha --timeout 20000 test/local_ffmpeg_probe.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.0.0",
+    "body-parser": "^1.20.0",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "fluent-ffmpeg": "^2.1.2",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "chai": "^4.3.7",
+    "mocha": "^10.2.0"
+  }
+}

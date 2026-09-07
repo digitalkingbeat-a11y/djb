@@ -1,0 +1,12 @@
+{
+  "name": "dj-battle-bridge",
+  "version": "0.1.0",
+  "description": "DJ Battle Bridge - connect local DJ gear to DJ Battle Platform",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^25.0.0"
+  }
+}

@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' ws: http: https:;">
+  <title>DJ Battle Bridge</title>
+  <style>body{font-family:system-ui,Segoe UI,Roboto;margin:16px;background:#0b0d0e;color:#e6eef6}h1{margin:0 0 12px}button{padding:8px 12px;margin-right:8px}</style>
+</head>
+<body>
+  <h1>DJ Battle Bridge</h1>
+  <div id="status">Status: <strong id="stat-text">Idle</strong></div>
+  <h3>Detected Software / Hardware</h3>
+  <div id="detected"><em>Scanning…</em></div>
+  <h3>Connection</h3>
+  <div><label>Server URL <input id="server-url" value="ws://localhost:4000/bridge" style="width:420px"></label></div>
+  <div style="margin-top:8px"><button id="btn-connect">Connect</button><button id="btn-test-audio">Run Signal Test</button></div>
+  <pre id="log" style="height:220px;overflow:auto;background:#071017;padding:8px;border-radius:6px;margin-top:12px"></pre>
+  <script src="renderer.js"></script>
+</body>
+</html>

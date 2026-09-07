@@ -1,0 +1,158 @@
+.battle-history-panel{
+  display:grid;
+  gap:12px;
+}
+
+.battle-history-filters{
+  display:grid;
+  grid-template-columns:repeat(5,minmax(0,1fr));
+  gap:8px;
+  border:1px solid #252c38;
+  background:#10151d;
+  border-radius:6px;
+  padding:12px;
+}
+
+.battle-history-filters label{
+  color:var(--muted);
+  font-size:9px;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  font-weight:800;
+}
+
+.battle-history-filters select{
+  width:100%;
+  margin-top:6px;
+  background:#0d1117;
+  color:#fff;
+  border:1px solid #2b3441;
+  border-radius:4px;
+  padding:8px;
+}
+
+.battle-history-list{
+  display:grid;
+  gap:8px;
+}
+
+.battle-history-row{
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:12px;
+  border:1px solid #252c38;
+  background:#0f141c;
+  border-radius:6px;
+  padding:12px;
+}
+
+.battle-history-main{
+  display:grid;
+  gap:8px;
+}
+
+.battle-history-title{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  align-items:center;
+}
+
+.battle-history-title strong{
+  font-size:16px;
+}
+
+.battle-history-meta{
+  display:grid;
+  grid-template-columns:repeat(6,minmax(0,1fr));
+  gap:8px;
+}
+
+.battle-history-chip{
+  border:1px solid #222936;
+  background:#151a22;
+  border-radius:4px;
+  padding:8px;
+}
+
+.battle-history-chip span{
+  display:block;
+  color:var(--muted);
+  font-size:8px;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  font-weight:800;
+}
+
+.battle-history-chip b{
+  display:block;
+  margin-top:5px;
+  color:#fff;
+  font-size:12px;
+}
+
+.battle-history-actions{
+  display:flex;
+  align-items:flex-start;
+  gap:8px;
+}
+
+.history-source-tag{
+  display:inline-flex;
+  align-items:center;
+  border:1px solid #35422b;
+  color:var(--accent);
+  background:#10190d;
+  border-radius:4px;
+  padding:4px 6px;
+  font-size:9px;
+  text-transform:uppercase;
+  letter-spacing:.1em;
+  font-weight:800;
+}
+
+.history-visibility{
+  color:#ffd166;
+}
+
+.battle-history-share{
+  display:grid;
+  gap:4px;
+  border:1px solid #223329;
+  background:#0f1713;
+  border-radius:4px;
+  padding:8px;
+}
+
+.battle-history-share span{
+  color:var(--muted);
+  font-size:8px;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  font-weight:800;
+}
+
+.battle-history-share code{
+  color:var(--accent);
+  white-space:normal;
+  overflow-wrap:anywhere;
+}
+
+@media(max-width:1050px){
+  .battle-history-filters,
+  .battle-history-meta{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+}
+
+@media(max-width:760px){
+  .battle-history-filters,
+  .battle-history-meta,
+  .battle-history-row{
+    grid-template-columns:1fr;
+  }
+
+  .battle-history-actions{
+    flex-wrap:wrap;
+  }
+}
