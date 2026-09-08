@@ -96,6 +96,10 @@ const {
 } = require('./community');
 const { getOwnedBattleResult, getPublicBattleResult, getPublicProfile, listOwnedBattleResults, listPublicBattleResults, recordPublicProfileView, recordVerifiedResultView, saveOwnedBattleResultSummary, setOwnedBattleResultVisibility } = require('./battle_result_history');
 const {
+  getPublicBattleShare,
+  recordCommunityBattleVote
+} = require('./battle_community_voting');
+const {
   LIBRARY_ARTWORK_BUCKET,
   checkMusicLibrarySchemaReadiness,
   checkMusicLibraryOrganizationSchemaReadiness,
@@ -1565,6 +1569,46 @@ app.post('/api/mixRights/certifications/:submissionId/revoke', requireAuth, requ
   }catch(err){
     console.error('mixRights certification revoke error', err);
     return res.status(500).json({ error:'Mix rights certification revoke failed' });
+  }
+});
+
+app.get('/api/publicBattles/:battleId', async (req, res) => {
+  const validation = validateRouteIdentifier(req.params.battleId, 'battleId');
+  if(validation.error) return rejectProtectedWriteError(res, validation);
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await getPublicBattleShare(supabaseService, validation.value.battleId, { viewer:req.query || {} });
+    if(result.notFound || result.private) return res.status(404).json({ error:'Public battle not found' });
+    if(result.error) throw result.error;
+    return res.json({ success:true, battle:result.battle, votesMissing:Boolean(result.votesMissing) });
+  }catch(err){
+    console.error('publicBattle share error', err);
+    return res.status(500).json({ error:'Public battle request failed' });
+  }
+});
+
+app.post('/api/publicBattles/:battleId/votes', requireAuth, async (req, res) => {
+  const validation = validateRouteIdentifier(req.params.battleId, 'battleId');
+  if(validation.error) return rejectProtectedWriteError(res, validation);
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await recordCommunityBattleVote(
+      supabaseService,
+      req.authUser.id,
+      validation.value.battleId,
+      req.body || {},
+      publicViewVisitor(req)
+    );
+    if(result.notFound || result.private) return res.status(404).json({ error:'Public battle not found' });
+    if(result.forbidden) return res.status(403).json({ error:result.reason || 'Community vote is not permitted' });
+    if(result.validationError) return res.status(422).json({ error:result.validationError });
+    if(result.votingUnavailable || result.votingClosed) return res.status(409).json({ error:result.reason || 'Community voting is unavailable', status:result.status });
+    if(result.rateLimited) return res.status(429).json({ error:'Community vote rate limit exceeded', retryAfterMs:result.retryAfterMs, limiter:result.limiter });
+    if(result.error) throw result.error;
+    return res.json({ success:true, duplicate:Boolean(result.duplicate), updated:Boolean(result.updated), vote:result.vote, battle:result.battle });
+  }catch(err){
+    console.error('publicBattle vote error', err);
+    return res.status(500).json({ error:'Public battle vote request failed' });
   }
 });
 

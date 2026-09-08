@@ -2,7 +2,7 @@ const assert = require('assert/strict');
 const test = require('node:test');
 const fs = require('fs');
 const path = require('path');
-const { apiRequest, getSessionToken } = require('../api_client');
+const { apiRequest, getPublicBattle, getSessionToken, submitCommunityBattleVote } = require('../api_client');
 
 const appSource = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
@@ -80,6 +80,29 @@ test('authenticated browser API client loads public belt definitions without a t
     const result = await apiRequest('/api/getBelts', { public:true, fetch: async (path, options) => { headers = options.headers; return response(200, '{"success":true,"belts":[]}'); } });
   assert.equal(headers.Authorization, undefined);
   assert.equal(result.data.success, true);
+});
+
+test('browser API client loads public battle shares without a token', async () => {
+  let call;
+  const result = await getPublicBattle('battle share/1', {
+    fetch: async (...args) => { call = args; return response(200, '{"success":true,"battle":{"id":"battle share/1"}}'); }
+  });
+  assert.equal(call[0], '/api/publicBattles/battle%20share%2F1');
+  assert.equal(call[1].headers.Authorization, undefined);
+  assert.equal(result.data.battle.id, 'battle share/1');
+});
+
+test('browser API client submits authenticated community battle votes', async () => {
+  let call;
+  const result = await submitCommunityBattleVote('battle-1', { publicEntryId:'entry_a', score:92, idempotencyKey:'idem-1' }, {
+    supabase: client({ access_token:'token-1' }),
+    fetch: async (...args) => { call = args; return response(200, '{"success":true,"vote":{"score":92}}'); }
+  });
+  assert.equal(call[0], '/api/publicBattles/battle-1/votes');
+  assert.equal(call[1].method, 'POST');
+  assert.equal(call[1].headers.Authorization, 'Bearer token-1');
+  assert.equal(call[1].body, '{"publicEntryId":"entry_a","score":92,"idempotencyKey":"idem-1"}');
+  assert.equal(result.data.vote.score, 92);
 });
 
 test('protected frontend calls do not use demo identities or direct score writes', () => {

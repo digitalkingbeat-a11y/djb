@@ -8,6 +8,14 @@ const {
 } = require('./music_library');
 const { getOrCreateBattleEntry, getOwnedBattleEntry, getStoredJudgeResult } = require('./battle_submission');
 const { applyResolvedBattleAwards, sanitizeFailure } = require('./battle_award_ledger');
+const {
+  buildLockedScoringFormula,
+  lockVotingConfig,
+  normalizeVotingConfig,
+  prepareCommunityVotingForResolution,
+  publicVotingSummaryForBattle,
+  sanitizeLockedScoringFormula
+} = require('./battle_community_voting');
 
 const BATTLE_RECORD_TABLE = 'battle_records';
 const BATTLE_PREP_SNAPSHOT_TABLE = 'battle_prep_entry_snapshots';
@@ -521,6 +529,8 @@ function sanitizeBattleRecord(row){
     capacity: safeNumber(row.capacity),
     status: row.status,
     scoringType: row.scoring_type || 'measured_rule_based',
+    voting: publicVotingSummaryForBattle(row, [], [], new Date(row.updated_at || row.created_at || Date.now())),
+    lockedScoringFormula: sanitizeLockedScoringFormula(row.locked_scoring_formula),
     startConditions: sanitizeStartConditions(row.start_conditions),
     expiresAt: row.expires_at,
     startedAt: row.started_at,
@@ -570,6 +580,7 @@ function sanitizeBattleForLobby(row, entryCount = 0, now = new Date(), options =
     updatedAt: row.updated_at,
     expiresAt: row.expires_at,
     scoringType: cleanString(row.scoring_type, 40) || 'measured_rule_based',
+    voting: publicVotingSummaryForBattle(row, [], [], now),
     creator,
     country: profile.country,
     belt: profile.belt,
@@ -611,6 +622,8 @@ function battleRecordPayload(userId, battle, input, now = new Date()){
     visibility: battle.visibility || 'public',
     status: battle.status || 'open',
     scoring_type: scoringTypeFor(input, battle),
+    voting_config: normalizeVotingConfig(input, battle, now),
+    locked_scoring_formula: null,
     start_conditions: startConditions,
     expires_at: expiresAt,
     public_creator_profile: sanitizePublicDjProfile(input.publicProfile || input.public_profile || input.creatorPublicProfile || input.creator_public_profile),
@@ -1137,12 +1150,19 @@ function determineResolutionOutcome(participants){
   });
 }
 
-function buildResolutionParticipant({ entry, submission, judgeResult, battleLike, outcome, resolutionId, version, now }){
-  const score = safeNumber(judgeResult.score);
+function buildResolutionParticipant({ entry, submission, judgeResult, battleLike, outcome, resolutionId, version, now, scoreDetails = {} }){
+  const detail = plainObject(scoreDetails);
+  const judgeScore = safeNumber(detail.judgeScore) == null ? safeNumber(judgeResult.score) : safeNumber(detail.judgeScore);
+  const finalScore = safeNumber(detail.score);
+  const score = finalScore == null ? judgeScore : finalScore;
+  const communityScore = safeNumber(detail.communityScore);
+  const communityVoting = plainObject(detail.communityVoting);
   const enrichedJudgeResult = {
     ...(judgeResult.raw || {}),
     score,
     overallScore: score,
+    judgeScore,
+    communityScore,
     breakdown: judgeResult.breakdown,
     components: judgeResult.components,
     timing: judgeResult.timing,
@@ -1155,6 +1175,7 @@ function buildResolutionParticipant({ entry, submission, judgeResult, battleLike
     battleMode: judgeResult.battleMode || battleLike.modeId,
     evidenceType: judgeResult.evidenceType,
     explanation: judgeResult.explanation,
+    humanVoting: Object.keys(communityVoting).length ? communityVoting : judgeResult.humanVoting,
     won: outcome.won,
     opponentScore: outcome.opponentScore,
     winnerUserId: outcome.outcome === 'winner' ? String(entry.user_id) : null
@@ -1192,6 +1213,9 @@ function buildResolutionParticipant({ entry, submission, judgeResult, battleLike
     battlePrepSnapshotVersion: cleanString(plainObject(submission.processing_info).battleContext && plainObject(submission.processing_info).battleContext.battlePrepSnapshotVersion, 80),
     profile: sanitizePublicDjProfile(entry.public_profile),
     score,
+    judgeScore,
+    communityScore,
+    communityVoting: Object.keys(communityVoting).length ? communityVoting : null,
     placement: outcome.placement,
     outcome: outcome.outcome,
     won: outcome.won,
@@ -1200,7 +1224,7 @@ function buildResolutionParticipant({ entry, submission, judgeResult, battleLike
     components: safeBreakdown(judgeResult.components),
     confidence: plainObject(judgeResult.confidence),
     evidenceType: cleanString(judgeResult.evidenceType, 120) || 'server_judge_result',
-    scoringSource: sourceLabelsForJudgeResult(judgeResult),
+    scoringSource: sourceLabelsForJudgeResult(enrichedJudgeResult),
     timingEvidenceCount: safeArray(judgeResult.timing).length || safeArray(judgeResult.rawMeasurements).length,
     recommendations: safeArray(judgeResult.recommendations).slice(0, 8).map(item => cleanString(item, 240)).filter(Boolean),
     measurableAnalysis: plainObject(judgeResult.measurableAnalysis),
@@ -1226,6 +1250,10 @@ function buildBattleResultSummaryForParticipant({ battleRow, participant, oppone
     type: mode && mode.label || cleanString(battleRow.title, 120) || 'Battle',
     genre: cleanString(battleRow.genre, 80) || 'Open Format',
     outcome: participant.outcome === 'winner' ? 'win' : participant.outcome === 'loser' ? 'loss' : participant.outcome,
+    score: safeNumber(participant.score),
+    judgeScore: safeNumber(participant.judgeScore),
+    communityScore: safeNumber(participant.communityScore),
+    communityVoting: participant.communityVoting || null,
     opponent:{
       status: opponent ? 'opponent' : 'unmatched',
       name: opponent && opponent.profile && opponent.profile.name || null,
@@ -1259,7 +1287,8 @@ function buildBattleResultSummaryForParticipant({ battleRow, participant, oppone
       genre: battleRow.genre,
       resolutionId: resolution.id,
       resolutionVersion: resolution.version,
-      scoringRule: resolution.scoringRule
+      scoringRule: resolution.scoringRule,
+      communityVoting: resolution.communityVoting || null
     },
     reward: current.reward || battleRow.reward || { type:battleRow.reward_type || 'standard', metadata:{} },
     battlePrep:{
@@ -1348,6 +1377,9 @@ function sanitizeBattleResolutionForUser(resolution, userId){
       placement: participant.placement,
       outcome: participant.outcome,
       score: resolved ? participant.score : null,
+      judgeScore: resolved ? participant.judgeScore : null,
+      communityScore: resolved ? participant.communityScore : null,
+      communityVoting: resolved ? participant.communityVoting : null,
       opponentScore: self && resolved ? participant.opponentScore : null,
       scoringSource: participant.scoringSource,
       evidenceType: participant.evidenceType,
@@ -1371,6 +1403,7 @@ function sanitizeBattleResolutionForUser(resolution, userId){
     version: source.version,
     resolvedAt: source.resolvedAt,
     scoringRule: source.scoringRule,
+    communityVoting: source.communityVoting || null,
     awardState: {
       status: cleanString(plainObject(source.awardState).status, 40) || (resolved ? 'pending' : 'unavailable'),
       appliedCount: safeNumber(plainObject(source.awardState).appliedCount),
@@ -1470,21 +1503,38 @@ async function resolveBattleIfReady(dataClient, battleId, options = {}, now = ne
   }
   const invalid = candidates.find(candidate => candidate.score == null);
   if(invalid) return { unresolved:true, battleRow, resolution:pendingResolutionState(battleRow, entries, submissions, now) };
+  const communityResolution = await prepareCommunityVotingForResolution(dataClient, battleRow, candidates, now);
+  if(communityResolution.error) return communityResolution;
+  if(communityResolution.waiting){
+    return {
+      unresolved:true,
+      battleRow,
+      resolution:{
+        ...pendingResolutionState(battleRow, entries, submissions, now),
+        status:'community_voting',
+        reason:communityResolution.reason,
+        voting:communityResolution.voting,
+        scoringRule:communityResolution.scoringFormula
+      }
+    };
+  }
+  const scoredCandidates = communityResolution.candidates || candidates;
   const version = nextBattleVersion(battleRow);
   const resolutionId = `res_${stableHash({
     battleId:battleRow.id,
-    submissions:candidates.map(item => [item.entry.id, item.submission.id, item.score]),
+    submissions:scoredCandidates.map(item => [item.entry.id, item.submission.id, item.judgeScore == null ? item.score : item.judgeScore, item.communityScore, item.score]),
+    scoringFormula:communityResolution.scoringFormula,
     versionBasis:battleRow.id
   }).slice(0, 24)}`;
-  const outcomes = determineResolutionOutcome(candidates.map(item => ({ entryId:String(item.entry.id), score:item.score })));
+  const outcomes = determineResolutionOutcome(scoredCandidates.map(item => ({ entryId:String(item.entry.id), score:item.score })));
   const battleLike = battleRecordForResolution(battleRow, entries);
   battleLike.participants = battleLike.participants.map(participant => {
-    const candidate = candidates.find(item => String(item.entry.user_id) === String(participant.userId));
+    const candidate = scoredCandidates.find(item => String(item.entry.user_id) === String(participant.userId));
     return candidate ? { ...participant, submissionId:candidate.submission.id } : participant;
   });
-  const participants = candidates.map(candidate => {
+  const participants = scoredCandidates.map(candidate => {
     const outcome = outcomes.find(item => item.entryId === String(candidate.entry.id));
-    return buildResolutionParticipant({ entry:candidate.entry, submission:candidate.submission, judgeResult:candidate.judgeResult, battleLike, outcome, resolutionId, version, now });
+    return buildResolutionParticipant({ entry:candidate.entry, submission:candidate.submission, judgeResult:candidate.judgeResult, battleLike, outcome, resolutionId, version, now, scoreDetails:candidate });
   });
   const scores = participants.map(item => Number(item.score));
   const sortedScores = [...scores].sort((a, b) => b - a);
@@ -1497,12 +1547,13 @@ async function resolveBattleIfReady(dataClient, battleId, options = {}, now = ne
     outcome:tied ? 'tie' : 'winner',
     version,
     resolvedAt:safeIsoFromNow(now),
-    scoringRule:{
+    scoringRule:communityResolution.scoringFormula || {
       type:'highest_normalized_score',
       modeId:battleRow.mode_id,
       tieThreshold:0,
       source:'existing_mode_score'
     },
+    communityVoting:communityResolution.voting || publicVotingSummaryForBattle(battleRow, entries, [], now),
     scoreDifference:tied ? 0 : Math.abs((sortedScores[0] || 0) - (sortedScores[1] || 0)),
     participants,
     awardIds:participants.map(item => item.award && item.award.id).filter(Boolean),
@@ -1730,10 +1781,14 @@ async function startBattleIfReady(dataClient, battleId, options = {}, now = new 
   const version = nextBattleVersion(battleRow);
   const startedAt = now.toISOString();
   const deadlineAt = battleDeadline({ ...battleRow, started_at:startedAt, deadline_at:null }, startedAt);
+  const lockedVotingConfig = lockVotingConfig(battleRow.voting_config, battleRow, now);
+  const lockedScoringFormula = buildLockedScoringFormula(lockedVotingConfig, battleRow, now);
   const updatedBattle = await dataClient.from(BATTLE_RECORD_TABLE).update({
     status:'started',
     started_at:startedAt,
     deadline_at:deadlineAt,
+    voting_config:lockedVotingConfig,
+    locked_scoring_formula:lockedScoringFormula,
     battle_version:version,
     updated_at:startedAt
   }).eq('id', battleRow.id).select('*').single();

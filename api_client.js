@@ -70,5 +70,17 @@
     return apiError(response.status, data);
   }
 
-  return { apiRequest, getSessionToken, apiError };
+  function publicBattlePath(battleId){
+    return `/api/publicBattles/${encodeURIComponent(String(battleId || ''))}`;
+  }
+
+  function getPublicBattle(battleId, options = {}){
+    return apiRequest(publicBattlePath(battleId), { ...options, public:true });
+  }
+
+  function submitCommunityBattleVote(battleId, vote, options = {}){
+    return apiRequest(`${publicBattlePath(battleId)}/votes`, { ...options, method:'POST', body:vote || {} });
+  }
+
+  return { apiRequest, getSessionToken, apiError, getPublicBattle, submitCommunityBattleVote };
 });
