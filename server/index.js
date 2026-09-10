@@ -83,9 +83,12 @@ const {
   createCommunityPost,
   deleteCommunityComment,
   deleteCommunityPost,
+  issueCommunityAttachmentPlaybackAccess,
   listCommunityCategories,
   listCommunityComments,
   listCommunityFeed,
+  listCommunityModerationHistory,
+  listCommunityReports,
   listPublicProfileCommunityPosts,
   moderateCommunityTarget,
   recordCommunityAttachmentUsage,
@@ -2041,6 +2044,19 @@ app.post('/api/community/reports', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/community/reports', requireAuth, requireOperatorUser, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await listCommunityReports(supabaseService, req.authUser.id, req.query || {});
+    if(result.forbidden) return res.status(403).json({ error:'Moderator access is required' });
+    if(result.error) throw result.error;
+    return res.json({ success:true, reports:result.reports, pagination:result.pagination });
+  }catch(err){
+    console.error('community report list error', err);
+    return res.status(500).json({ error:'Community reports request failed' });
+  }
+});
+
 app.post('/api/community/moderation/actions', requireAuth, requireOperatorUser, async (req, res) => {
   if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
   if(!guardProtectedWrite(req, res, 'communityModerationAction', {
@@ -2052,10 +2068,23 @@ app.post('/api/community/moderation/actions', requireAuth, requireOperatorUser, 
     if(result.notFound) return res.status(404).json({ error:'Community moderation target is unavailable' });
     if(result.validationError) return res.status(422).json({ error:result.validationError });
     if(result.error) throw result.error;
-    return res.json({ success:true, action:result.action });
+    return res.json({ success:true, action:result.action, report:result.report || null });
   }catch(err){
     console.error('community moderation error', err);
     return res.status(500).json({ error:'Community moderation action failed' });
+  }
+});
+
+app.get('/api/community/moderation/history', requireAuth, requireOperatorUser, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await listCommunityModerationHistory(supabaseService, req.authUser.id, req.query || {});
+    if(result.forbidden) return res.status(403).json({ error:'Moderator access is required' });
+    if(result.error) throw result.error;
+    return res.json({ success:true, actions:result.actions, pagination:result.pagination });
+  }catch(err){
+    console.error('community moderation history error', err);
+    return res.status(500).json({ error:'Community moderation history request failed' });
   }
 });
 
@@ -2066,11 +2095,12 @@ app.post('/api/community/posts/:postId/attachments/:attachmentId/usage', require
   if(attachmentValidation.error) return rejectProtectedWriteError(res, attachmentValidation);
   if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
   try{
-    const result = await recordCommunityAttachmentUsage(supabaseService, req.authUser.id, postValidation.value.postId, attachmentValidation.value.attachmentId);
+    const result = await issueCommunityAttachmentPlaybackAccess(supabaseService, supabaseService.storage.from(MIX_BUCKET), req.authUser.id, postValidation.value.postId, attachmentValidation.value.attachmentId);
     if(result.rateLimited) return res.status(429).json({ success:false, rateLimited:true, retryAfterMs:result.retryAfterMs });
+    if(result.forbidden) return res.status(403).json({ error:'Community media is private or unavailable' });
     if(result.notFound || result.unavailable) return res.status(404).json({ error:'Community media is unavailable' });
     if(result.error) throw result.error;
-    return res.json({ success:true, attachment:result.attachment, usage:result.usage });
+    return res.json({ success:true, attachment:result.attachment, usage:result.usage, playbackAccess:result.playbackAccess });
   }catch(err){
     console.error('community attachment usage error', err);
     return res.status(500).json({ error:'Community media usage failed' });

@@ -2463,6 +2463,29 @@ function communityServerMode(){
   return Boolean(communityApiAvailable() && communityAccountId());
 }
 
+function clearCommunityState(){
+  const nextSeq = Number(state.community && state.community.requestSeq || 0) + 1;
+  state.community = {
+    status:'idle',
+    source:'local',
+    stale:false,
+    error:'',
+    requestSeq:nextSeq,
+    feed:'recent',
+    category:'all',
+    page:1,
+    pageSize:20,
+    posts:[],
+    categories:[],
+    pagination:{ page:1, limit:20, total:0, hasMore:false, nextPage:null, nextCursor:null },
+    lastSuccessfulAt:null,
+    comments:{},
+    commentStatus:{},
+    commentPagination:{}
+  };
+  renderPosts();
+}
+
 function communityCategories(){
   return state.community.categories && state.community.categories.length ? state.community.categories : COMMUNITY_DEFAULT_CATEGORIES;
 }
@@ -2797,9 +2820,7 @@ async function toggleCommunityReaction(postId, type){
   if(post && response.data){
     post.reactionCounts = response.data.counts || post.reactionCounts;
     const active = response.data.reaction && response.data.reaction.active;
-    post.viewerReactionTypes = post.viewerReactionTypes || [];
-    if(active && !post.viewerReactionTypes.includes(type)) post.viewerReactionTypes.push(type);
-    if(!active) post.viewerReactionTypes = post.viewerReactionTypes.filter(value => value !== type);
+    post.viewerReactionTypes = active ? [type] : [];
   }
   renderPosts();
   return response;
@@ -2976,7 +2997,27 @@ function wireCommunityControls(){
 
 async function recordCommunityMediaUsage(postId, attachmentId){
   if(!communityServerMode() || !postId || !attachmentId) return { skipped:true };
-  return window.DJBattleApi.apiRequest(`/api/community/posts/${encodeURIComponent(postId)}/attachments/${encodeURIComponent(attachmentId)}/usage`, { method:'POST' });
+  const response = await window.DJBattleApi.apiRequest(`/api/community/posts/${encodeURIComponent(postId)}/attachments/${encodeURIComponent(attachmentId)}/usage`, { method:'POST' });
+  const access = response && response.data && response.data.playbackAccess;
+  if(access && access.url){
+    const post = state.community.posts.find(row => String(row.id) === String(postId));
+    const attachment = (post && post.attachments || []).find(item => String(item.id) === String(attachmentId));
+    const audio = document.getElementById('library-player-audio');
+    if(audio){
+      audio.src = access.url;
+      audio.play().catch(err => console.warn('Community playback failed', err));
+    }
+    state.libraryPlayer = {
+      trackId:`community:${postId}:${attachmentId}`,
+      playing:true,
+      progress:0
+    };
+    const title = document.getElementById('library-player-title');
+    const artist = document.getElementById('library-player-artist');
+    if(title) title.textContent = attachment && attachment.title || 'Community media';
+    if(artist) artist.textContent = attachment && attachment.artist || 'Signed community playback';
+  }
+  return response;
 }
 
 function renderProfileCommunityPosts(){
@@ -3171,6 +3212,7 @@ async function handleMusicLibraryAuthChange(user){
     clearDjChallengeState();
     clearDjNotificationState();
     clearDjRelationshipState();
+    clearCommunityState();
     clearAuthenticatedLibraryData();
     return { status:'offline' };
   }
@@ -3178,6 +3220,7 @@ async function handleMusicLibraryAuthChange(user){
     clearDjChallengeState();
     clearDjNotificationState();
     clearDjRelationshipState();
+    clearCommunityState();
     clearAuthenticatedLibraryData();
   }
   state.musicLibrarySync.accountId = accountId;
@@ -10739,9 +10782,22 @@ window.__DJBattleTestHooks = {
   clearDjChallengeState,
   clearDjNotificationState,
   clearDjRelationshipState,
+  clearCommunityState,
+  loadCommunityFeed,
+  renderPosts,
+  openCommunityPostComposer,
+  publishCommunityPostFromModal,
+  toggleCommunityReaction,
+  loadCommunityComments,
+  publishCommunityComment,
+  deleteCommunityPost,
+  deleteCommunityComment,
+  reportCommunityPost,
+  recordCommunityMediaUsage,
   getChallengeState: () => state.djChallenges,
   getNotificationState: () => state.djNotifications,
   getRelationshipState: () => state.djRelationships,
+  getCommunityState: () => state.community,
   loadDjRelationshipSync,
   scheduleDjRelationshipPolling,
   applyRelationshipSyncPayload,

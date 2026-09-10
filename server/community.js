@@ -27,6 +27,7 @@ const DEFAULT_COMMUNITY_LIMIT = 20;
 const MAX_COMMUNITY_LIMIT = 50;
 const COMMUNITY_SCAN_LIMIT = 500;
 const BLOCKED_RIGHTS = new Set(['commercial_copyrighted', 'blocked', 'unlicensed', 'rights_blocked', 'copyright_blocked']);
+const COMMUNITY_PLAYBACK_PATH_PREFIXES = ['private/library-audio/', 'private/battle-entries/'];
 
 const DEFAULT_CATEGORIES = Object.freeze([
   { id:'general', slug:'general', label:'General DJ Discussion', description:'General DJ discussion and questions.', sort_order:10, server_default:true },
@@ -310,6 +311,14 @@ function safeTargetType(value){
 
 function targetKey(type, id){
   return `${type}:${id}`;
+}
+
+function safePrivateAudioStoragePath(value){
+  const objectPath = cleanString(value, 520);
+  if(!objectPath) return null;
+  if(/^(https?|data|file|blob):/i.test(objectPath)) return null;
+  if(objectPath.startsWith('/') || objectPath.includes('\\') || objectPath.includes('..')) return null;
+  return COMMUNITY_PLAYBACK_PATH_PREFIXES.some(prefix => objectPath.startsWith(prefix)) ? objectPath : null;
 }
 
 function countComments(rows){
@@ -988,24 +997,25 @@ async function toggleCommunityReaction(dataClient, userId, input = {}, now = new
     .eq('user_id', userId)
     .eq('target_type', targetType)
     .eq('target_id', targetId)
-    .eq('reaction_type', type)
     .limit(1);
   if(existing.error) return { error:existing.error };
   const timestamp = nowIso(now);
   let reaction;
   let active = true;
   if(existing.data && existing.data[0]){
-    active = existing.data[0].active === false || existing.data[0].removed_at ? true : false;
+    const current = existing.data[0];
+    const sameType = sanitizeReactionType(current.reaction_type) === type;
+    active = sameType ? (current.active === false || current.removed_at ? true : false) : true;
     const updated = await dataClient.from(COMMUNITY_REACTIONS_TABLE)
-      .update({ active, removed_at:active ? null : timestamp, updated_at:timestamp })
-      .eq('id', existing.data[0].id)
+      .update({ reaction_type:type, active, removed_at:active ? null : timestamp, updated_at:timestamp })
+      .eq('id', current.id)
       .select('*')
       .single();
     if(updated.error) return { error:updated.error };
     reaction = updated.data;
   }else{
     const payload = {
-      id: stableId('community-reaction', { userId, targetType, targetId, type }),
+      id: stableId('community-reaction', { userId, targetType, targetId }),
       user_id:String(userId),
       target_type:targetType,
       target_id:targetId,
@@ -1082,12 +1092,80 @@ function sanitizeReport(row){
   };
 }
 
+function sanitizeModeratorReport(row){
+  const report = sanitizeReport(row);
+  return {
+    ...report,
+    reporterUserId:cleanString(row.reporter_user_id, 128),
+    context:cleanString(row.context, 800),
+    updatedAt:row.updated_at || null,
+    reporterPrivate:true
+  };
+}
+
+function sanitizeModerationAction(row){
+  return {
+    id:String(row.id),
+    targetType:cleanString(row.target_type, 40),
+    targetId:cleanString(row.target_id, 128),
+    action:cleanString(row.action, 40),
+    reason:cleanString(row.reason, 400),
+    metadata:{
+      attachmentId:cleanString(plainObject(row.metadata).attachmentId, 128),
+      reportId:cleanString(plainObject(row.metadata).reportId, 128)
+    },
+    operatorPrivate:true,
+    createdAt:row.created_at || null,
+    auditTrail:'recorded'
+  };
+}
+
+async function listCommunityReports(dataClient, operatorUserId, options = {}){
+  if(!cleanString(operatorUserId, 128)) return { forbidden:true };
+  const result = await fetchRows(dataClient, COMMUNITY_REPORTS_TABLE, 1000);
+  if(result.error) return result;
+  const status = cleanString(options.status, 40);
+  const targetType = safeTargetType(options.targetType || options.target_type);
+  const targetId = cleanString(options.targetId || options.target_id, 128);
+  const limit = normalizeLimit(options.limit, 50);
+  const offset = options.cursor ? cursorOffset(options.cursor) : (normalizePage(options.page) - 1) * limit;
+  let rows = result.rows;
+  if(status) rows = rows.filter(row => String(row.status || 'open') === status);
+  if(targetType) rows = rows.filter(row => String(row.target_type) === targetType);
+  if(targetId) rows = rows.filter(row => String(row.target_id) === targetId);
+  rows.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')) || String(a.id).localeCompare(String(b.id)));
+  return {
+    reports:rows.slice(offset, offset + limit).map(sanitizeModeratorReport),
+    pagination:paginationFor(rows.length, offset, limit)
+  };
+}
+
+async function listCommunityModerationHistory(dataClient, operatorUserId, options = {}){
+  if(!cleanString(operatorUserId, 128)) return { forbidden:true };
+  const result = await fetchRows(dataClient, COMMUNITY_MODERATION_ACTIONS_TABLE, 1000);
+  if(result.error) return result;
+  const targetType = safeTargetType(options.targetType || options.target_type);
+  const targetId = cleanString(options.targetId || options.target_id, 128);
+  const limit = normalizeLimit(options.limit, 50);
+  const offset = options.cursor ? cursorOffset(options.cursor) : (normalizePage(options.page) - 1) * limit;
+  let rows = result.rows;
+  if(targetType) rows = rows.filter(row => String(row.target_type) === targetType);
+  if(targetId) rows = rows.filter(row => String(row.target_id) === targetId);
+  rows.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')) || String(a.id).localeCompare(String(b.id)));
+  return {
+    actions:rows.slice(offset, offset + limit).map(sanitizeModerationAction),
+    pagination:paginationFor(rows.length, offset, limit)
+  };
+}
+
 async function moderateCommunityTarget(dataClient, operatorUserId, input = {}, now = new Date()){
   const targetType = safeTargetType(input.targetType || input.target_type);
   const targetId = cleanString(input.targetId || input.target_id, 128);
   const action = cleanString(input.action, 40);
   if(!targetType || !targetId || !COMMUNITY_MODERATION_ACTIONS.has(action)) return { validationError:'Choose a valid moderation action.' };
   const timestamp = nowIso(now);
+  const existingTarget = targetType === 'post' ? await postById(dataClient, targetId) : await commentById(dataClient, targetId);
+  if(existingTarget.error || existingTarget.notFound) return existingTarget;
   let updateResult = null;
   if(targetType === 'post'){
     const patch = { updated_at:timestamp };
@@ -1123,19 +1201,19 @@ async function moderateCommunityTarget(dataClient, operatorUserId, input = {}, n
   };
   const inserted = await dataClient.from(COMMUNITY_MODERATION_ACTIONS_TABLE).insert([payload]).select('*').single();
   if(inserted.error) return { error:inserted.error };
-  return { action:sanitizeModerationAction(inserted.data), target:updateResult && updateResult.data || null };
-}
-
-function sanitizeModerationAction(row){
-  return {
-    id:String(row.id),
-    targetType:cleanString(row.target_type, 40),
-    targetId:cleanString(row.target_id, 128),
-    action:cleanString(row.action, 40),
-    reason:cleanString(row.reason, 400),
-    createdAt:row.created_at || null,
-    auditTrail:'recorded'
-  };
+  const reportId = cleanString(input.reportId || input.report_id, 128);
+  let report = null;
+  if(reportId){
+    const reportStatus = action === 'review' ? 'reviewing' : action === 'restore' ? 'dismissed' : 'resolved';
+    const updatedReport = await dataClient.from(COMMUNITY_REPORTS_TABLE)
+      .update({ status:reportStatus, updated_at:timestamp })
+      .eq('id', reportId)
+      .select('*')
+      .single();
+    if(updatedReport.error) return { error:updatedReport.error };
+    report = updatedReport.data ? sanitizeModeratorReport(updatedReport.data) : null;
+  }
+  return { action:sanitizeModerationAction(inserted.data), target:updateResult && updateResult.data || existingTarget.post || existingTarget.comment || null, report };
 }
 
 async function emitCommunityNotification(dataClient, input = {}){
@@ -1208,21 +1286,66 @@ async function emitCommunityNotification(dataClient, input = {}){
   return { notification:inserted.data || payload, created:true };
 }
 
-async function recordCommunityAttachmentUsage(dataClient, userId, postId, attachmentId, now = new Date()){
+async function resolveCommunityMediaAttachment(dataClient, userId, postId, attachmentId){
   const found = await postById(dataClient, postId);
   if(found.error || found.notFound) return found;
+  const status = postStatus(found.post);
+  if(status === 'deleted' || status === 'hidden') return { unavailable:true };
+  if(found.post.visibility !== 'public' && String(found.post.user_id) !== String(userId)) return { forbidden:true };
+  const blocks = await fetchRows(dataClient, DJ_BLOCKS_TABLE, 2000);
+  if(blocks.error) return blocks;
+  if(userId && blockedBetween(blocks.rows, userId, found.post.user_id)) return { forbidden:true };
   const attachment = safeArray(found.post.attachments).map(sanitizeAttachmentSnapshot).find(item => String(item.id) === String(attachmentId));
   if(!attachment) return { notFound:true };
   if(!['library_track', 'profile_media'].includes(attachment.type)) return { unavailable:true };
+  const trackResult = await tableQuery(dataClient, 'music_library_tracks').eq('id', attachment.mediaId).limit(1).single();
+  if(trackResult.error) return { error:trackResult.error };
+  const track = trackResult.data;
+  if(!track || track.archived_at) return { unavailable:true };
+  if(!trackCommunityApproved(track)) return { forbidden:true };
+  const rights = trackRightsState(track);
+  if(rights.blocked) return { forbidden:true };
+  const objectPath = safePrivateAudioStoragePath(track.audio_storage_object_path);
+  if(!objectPath) return { unavailable:true };
+  return { post:found.post, attachment:{ ...attachment, playbackPermitted:true, status:rights.status }, track, objectPath };
+}
+
+async function recordCommunityAttachmentUsage(dataClient, userId, postId, attachmentId, now = new Date()){
   const rate = checkCommunityRateLimit(`media:${userId || 'public'}`, now, { max:60 });
   if(rate.rateLimited) return rate;
-  if(userId){
-    const usage = await recordLibraryTrackUsage(dataClient, userId, attachment.mediaId, { relationship:'posts', relatedId:postId, source:'community_playback' }, now);
+  const resolved = await resolveCommunityMediaAttachment(dataClient, userId, postId, attachmentId);
+  if(resolved.error || resolved.notFound || resolved.unavailable || resolved.forbidden) return resolved;
+  if(resolved.track && resolved.track.user_id){
+    const usage = await recordLibraryTrackUsage(dataClient, resolved.track.user_id, resolved.attachment.mediaId, { type:'post', id:postId, source:'community_playback' }, now);
     if(usage.error && !usage.forbidden && !usage.unavailable) return usage;
   }
   return {
-    attachment:{ ...attachment, playbackContract:'protected_on_site_library_playback', playbackAccess:null },
+    attachment:{ ...resolved.attachment, playbackContract:'protected_on_site_library_playback', playbackAccess:null },
     usage:{ recorded:true, privacy:'bounded_no_public_download', createdAt:nowIso(now) }
+  };
+}
+
+async function issueCommunityAttachmentPlaybackAccess(dataClient, storage, userId, postId, attachmentId, now = new Date()){
+  if(!storage || typeof storage.createSignedUrl !== 'function') return { unavailable:true };
+  const usage = await recordCommunityAttachmentUsage(dataClient, userId, postId, attachmentId, now);
+  if(usage.error || usage.notFound || usage.unavailable || usage.forbidden || usage.rateLimited) return usage;
+  const resolved = await resolveCommunityMediaAttachment(dataClient, userId, postId, attachmentId);
+  if(resolved.error || resolved.notFound || resolved.unavailable || resolved.forbidden) return resolved;
+  const expiresIn = 5 * 60;
+  const signed = await storage.createSignedUrl(resolved.objectPath, expiresIn);
+  if(signed.error) return { error:signed.error };
+  const current = now instanceof Date ? now : new Date(now);
+  return {
+    ...usage,
+    playbackAccess:{
+      url:signed.data.signedUrl,
+      expiresAt:new Date(current.getTime() + expiresIn * 1000).toISOString(),
+      accessScope:'community_playback',
+      postId:String(postId),
+      attachmentId:String(attachmentId),
+      trackId:String(resolved.attachment.mediaId),
+      privacy:'signed_private_audio'
+    }
   };
 }
 
@@ -1279,8 +1402,11 @@ module.exports = {
   listCommunityCategories,
   listCommunityComments,
   listCommunityFeed,
+  listCommunityModerationHistory,
+  listCommunityReports,
   listPublicProfileCommunityPosts,
   moderateCommunityTarget,
+  issueCommunityAttachmentPlaybackAccess,
   recordCommunityAttachmentUsage,
   reportCommunityTarget,
   sanitizeAttachmentSnapshot,
