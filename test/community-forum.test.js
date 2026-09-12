@@ -26,6 +26,15 @@ function loadAppDom(){
   return window;
 }
 
+function tick(){
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+
+async function settle(){
+  await tick();
+  await tick();
+}
+
 function forumPost(overrides = {}){
   return {
     id:'post-1',
@@ -79,6 +88,54 @@ function setCommunityAccount(window, accountId = 'viewer-1'){
   return hooks;
 }
 
+function serverTrack(overrides = {}){
+  return {
+    id:'srv-alpha',
+    serverBacked:true,
+    userId:'viewer-1',
+    title:'Alpha Prep',
+    name:'Alpha Prep',
+    artist:'DJ One',
+    genre:'Open Format',
+    bpm:124,
+    key:'A minor',
+    camelotKey:'8A',
+    duration:180,
+    source:'MY_LIBRARY',
+    sourceType:'track',
+    rightsClassification:'original',
+    rightsCategory:'Original / I Own the Rights',
+    battleEligible:true,
+    analysisConfidence:0.92,
+    permissions:{ download:false },
+    ...overrides
+  };
+}
+
+function configureChallengeLibrary(window){
+  const hooks = setCommunityAccount(window, 'viewer-1');
+  hooks.setPremium(true);
+  hooks.setPlatformLibrary([]);
+  hooks.setLibraryTracks([
+    serverTrack(),
+    serverTrack({ id:'srv-bravo', title:'Bravo Prep', name:'Bravo Prep', bpm:128, key:'C minor', camelotKey:'5A' })
+  ]);
+  const state = hooks.getLibraryState();
+  state.sync.accountId = 'viewer-1';
+  state.sync.status = 'synced';
+  state.crates.push({
+    id:'crate-server',
+    serverBacked:true,
+    userId:'viewer-1',
+    name:'Server Battle Prep',
+    type:'battle_prep',
+    visibility:'private',
+    trackIds:['server:srv-alpha', 'server:srv-bravo'],
+    syncVersion:'crate-v1'
+  });
+  return hooks;
+}
+
 test('community panel loads authenticated server feed with public identity, attachment controls and challenge action', async () => {
   const window = loadAppDom();
   const hooks = setCommunityAccount(window);
@@ -97,6 +154,66 @@ test('community panel loads authenticated server feed with public identity, atta
   assert.ok(window.document.querySelector('[data-community-challenge="dj_rival"]'));
   assert.equal(window.document.body.innerHTML.includes('private/library-audio'), false);
   assert.equal(window.document.body.innerHTML.includes('storageObjectPath'), false);
+});
+
+test('community Request Battle opens the protected challenge form with forum origin context', async () => {
+  const window = loadAppDom();
+  const hooks = configureChallengeLibrary(window);
+  const calls = [];
+  window.DJBattleApi.apiRequest = async (url, options = {}) => {
+    calls.push({ url, body:options.body, method:options.method });
+    if(url.startsWith('/api/community/myFeed?')) return feedResponse([forumPost({ id:'post-origin-1', categoryId:'battle-talk' })]);
+    if(url === '/api/challenges/eligibility/dj_rival') return { status:200, data:{ eligibility:{ available:true, profile:{ publicProfileId:'dj_rival', displayName:'Rival DJ' } } } };
+    if(url === '/api/challenges') return { status:201, data:{ challenge:{ id:'challenge-community', status:'pending', origin:{ source:'community_post', communityPostId:'post-origin-1' } } } };
+    if(url === '/api/challenges/count') return { status:200, data:{ counts:{ pendingReceived:0, pendingSent:1, pendingTotal:1 } } };
+    if(url === '/api/notifications/count') return { status:200, data:{ counts:{ unreadTotal:0 } } };
+    return { status:200, data:{} };
+  };
+
+  await hooks.loadCommunityFeed({ feed:'recent', page:1 });
+  const request = window.document.querySelector('[data-community-challenge="dj_rival"]');
+  assert.ok(request);
+  assert.ok(request.closest('.post-head'));
+  request.click();
+  await settle();
+
+  assert.match(window.document.getElementById('modal-content').textContent, /Community Post/);
+  assert.match(window.document.getElementById('modal-content').textContent, /post-origin-1/);
+  window.document.getElementById('challenge-prep-crate').value = 'crate:crate-server';
+  window.document.getElementById('challenge-prep-crate').dispatchEvent(new window.Event('change', { bubbles:true }));
+  window.document.getElementById('send-dj-challenge').click();
+  await settle();
+
+  const send = calls.find(call => call.url === '/api/challenges');
+  assert.ok(send);
+  assert.equal(send.method, 'POST');
+  assert.equal(send.body.recipientPublicProfileId, 'dj_rival');
+  assert.equal(send.body.challengerCrateId, 'crate-server');
+  assert.equal(send.body.origin.source, 'community_post');
+  assert.equal(send.body.origin.publicProfileId, 'dj_rival');
+  assert.equal(send.body.origin.communityPostId, 'post-origin-1');
+  assert.equal(send.body.origin.categoryId, 'battle-talk');
+  assert.equal(send.body.origin.referrer, 'community_feed');
+  assert.equal(send.body.rules.modeId, 'own_selection_battle');
+  assert.match(window.document.getElementById('send-dj-challenge').textContent, /Challenge Sent/);
+  assert.doesNotMatch(JSON.stringify(send.body), /private\/|storageObjectPath|email|token=/i);
+});
+
+test('community Request Battle is hidden for owner deleted private or invalid authors', () => {
+  const window = loadAppDom();
+  const hooks = setCommunityAccount(window);
+  hooks.getCommunityState().source = 'server';
+  hooks.getCommunityState().posts = [
+    forumPost({ id:'self-post', viewer:{ isOwner:true, canEdit:true, canDelete:true }, author:{ publicProfileId:'dj_self', displayName:'Self DJ' } }),
+    forumPost({ id:'deleted-post', status:'deleted', author:{ publicProfileId:'dj_deleted', displayName:'Deleted DJ' } }),
+    forumPost({ id:'private-post', author:{ publicProfileId:'dj_private', displayName:'Private DJ', visibility:'private' } }),
+    forumPost({ id:'bad-post', author:{ publicProfileId:'rival', displayName:'Invalid DJ' } })
+  ];
+
+  hooks.renderPosts();
+
+  assert.equal(window.document.querySelectorAll('[data-community-challenge]').length, 0);
+  assert.equal(window.document.body.innerHTML.includes('Request Battle'), false);
 });
 
 test('community feed ignores stale responses and keeps the latest account-safe page', async () => {

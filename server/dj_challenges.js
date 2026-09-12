@@ -945,11 +945,18 @@ async function findActiveDuplicateChallenge(dataClient, challengerId, recipientI
 
 function sanitizeOrigin(origin = {}){
   const source = plainObject(origin);
-  return {
+  const originSource = cleanString(source.source || 'public_profile', 80);
+  const communityPostId = cleanString(source.communityPostId || source.postId || source.forumPostId, 128);
+  const categoryId = cleanString(source.categoryId || source.communityCategoryId, 80);
+  const sanitized = {
     publicProfileId:cleanString(source.publicProfileId || source.profileId, 96),
-    rankingCategory:cleanString(source.rankingCategory || source.category, 80),
-    source:cleanString(source.source || 'public_profile', 80)
+    rankingCategory:cleanString(source.rankingCategory || (originSource === 'community_post' ? '' : source.category), 80),
+    source:originSource
   };
+  if(communityPostId) sanitized.communityPostId = communityPostId;
+  if(categoryId) sanitized.categoryId = categoryId;
+  if(source.referrer) sanitized.referrer = cleanString(source.referrer, 120);
+  return sanitized;
 }
 
 function sanitizeChallengeRules(rules){

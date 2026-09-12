@@ -87,6 +87,52 @@ describe('server-backed DJ challenges', () => {
     expect(JSON.stringify(accepted.room.participants)).to.not.match(/crate-a|crate-b|track-1|track-3|private\/|dj-1|dj-2/i);
   });
 
+  it('reuses the challenge flow for community-post requests with sanitized origin context', async () => {
+    const client = dataClient(seedData({
+      orders:[],
+      payment_events:[],
+      provider_transactions:[],
+      marketplace_entitlements:[],
+      seller_payouts:[]
+    }));
+    const origin = {
+      source:'community_post',
+      publicProfileId:'dj_recipient',
+      communityPostId:'post-community-1',
+      categoryId:'battle-talk',
+      referrer:'community_feed',
+      email:'leak@example.com',
+      token:'secret-token',
+      storageObjectPath:'private/forum/dj-2/post.wav'
+    };
+
+    const created = await sendDjChallenge(client, 'dj-1', challengeBody({ challengeId:'challenge-community', idempotencyKey:'community-key-1', origin }), new Date('2026-08-27T12:00:00.000Z'));
+    const listed = await listOwnedDjChallenges(client, 'dj-2', { direction:'received', status:'pending' }, new Date('2026-08-27T12:01:00.000Z'));
+    const accepted = await acceptDjChallenge(client, 'dj-2', created.challenge.id, { recipientCrateId:'crate-b' }, new Date('2026-08-27T12:05:00.000Z'));
+    const retry = await acceptDjChallenge(client, 'dj-2', created.challenge.id, { recipientCrateId:'crate-b' }, new Date('2026-08-27T12:06:00.000Z'));
+
+    expect(created.created).to.equal(true);
+    expect(created.challenge.origin).to.deep.include({
+      source:'community_post',
+      publicProfileId:'dj_recipient',
+      communityPostId:'post-community-1',
+      categoryId:'battle-talk',
+      referrer:'community_feed'
+    });
+    expect(listed.challenges[0].origin.source).to.equal('community_post');
+    expect(accepted.accepted).to.equal(true);
+    expect(retry.duplicate).to.equal(true);
+    expect(accepted.challenge.origin.communityPostId).to.equal('post-community-1');
+    expect(accepted.room.battle.id).to.equal(accepted.battle.id);
+    expect(client.db.battle_records).to.have.length(1);
+    expect(client.db.orders).to.have.length(0);
+    expect(client.db.payment_events).to.have.length(0);
+    expect(client.db.provider_transactions).to.have.length(0);
+    expect(client.db.marketplace_entitlements).to.have.length(0);
+    expect(client.db.seller_payouts).to.have.length(0);
+    expect(JSON.stringify({ created, listed, accepted })).to.not.match(/leak@example\.com|secret-token|private\/forum|storageObjectPath|provider_transaction|seller_payout/i);
+  });
+
   it('requires the recipient own crate during acceptance and keeps challenger prep private', async () => {
     const client = dataClient(seedData());
     const created = await sendDjChallenge(client, 'dj-1', challengeBody({ challengeId:'challenge-deny' }), new Date('2026-08-27T12:00:00.000Z'));

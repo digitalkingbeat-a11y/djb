@@ -2592,6 +2592,43 @@ function communityAttachmentHtml(attachment){
   </div>`;
 }
 
+function shortContextValue(value, max = 128){
+  return String(value == null ? '' : value).trim().slice(0, max);
+}
+
+function communityChallengeOriginForPost(post){
+  const source = plainObject(post);
+  const author = plainObject(source.author);
+  const postId = shortContextValue(source.id || source.postId, 128);
+  return {
+    source:'community_post',
+    publicProfileId:shortContextValue(author.publicProfileId || author.id, 96),
+    communityPostId:postId,
+    categoryId:shortContextValue(source.categoryId || source.category || source.slug, 80),
+    referrer:'community_feed'
+  };
+}
+
+function communityChallengeProfileForPost(post){
+  const source = plainObject(post);
+  if(source.tombstone || ['deleted','removed','hidden'].includes(String(source.status || '').toLowerCase())) return null;
+  const author = plainObject(source.author);
+  if(!author.publicProfileId) return null;
+  const originContext = communityChallengeOriginForPost(source);
+  return {
+    publicProfileId:author.publicProfileId,
+    displayName:author.displayName || author.name || 'DJ',
+    name:author.name || author.displayName || 'DJ',
+    country:author.country,
+    belt:author.belt,
+    rating:author.rating,
+    profileVisibility:author.profileVisibility || author.visibility || 'public',
+    isSelf:Boolean(source.viewer && source.viewer.isOwner),
+    challengeOrigin:'community_post',
+    challengeOriginContext:originContext
+  };
+}
+
 function communityPostHtml(post){
   const counts = communityReactionCounts(post.reactionCounts);
   const viewerTypes = post.viewerReactionTypes || [];
@@ -2600,11 +2637,13 @@ function communityPostHtml(post){
   const locked = post.locked ? ' / comments locked' : '';
   const body = post.tombstone ? '<p class="community-tombstone">This discussion item is unavailable.</p>' : `<p>${esc(post.bodyText || '')}</p>`;
   const authorProfileId = post.author && post.author.publicProfileId || '';
-  const canChallenge = authorProfileId && !owner;
+  const challengeProfile = communityChallengeProfileForPost(post);
+  const canChallenge = challengeProfile && publicProfileCanChallenge(challengeProfile);
   return `<article class="forum-post community-post ${post.localOnly ? 'local' : ''}" data-community-post="${esc(post.id)}">
     <div class="post-head">
       <div class="avatar">${esc((post.author && (post.author.displayName || post.author.name) || 'DJ').split(/\s+/).map(part=>part[0]).join('').slice(0,2).toUpperCase())}</div>
-      <div><strong>${esc(post.author && (post.author.displayName || post.author.name) || 'DJ')}</strong><span>${esc(communityCategoryLabel(post.categoryId))} / ${esc(communityDate(post.createdAt))}${esc(edited)}${esc(locked)}</span></div>
+      <div class="post-author-copy"><strong>${esc(post.author && (post.author.displayName || post.author.name) || 'DJ')}</strong><span>${esc(communityCategoryLabel(post.categoryId))} / ${esc(communityDate(post.createdAt))}${esc(edited)}${esc(locked)}</span></div>
+      ${canChallenge ? `<button class="ghost small request-battle" type="button" data-community-challenge="${esc(authorProfileId)}" data-community-post="${esc(post.id)}">Request Battle</button>` : ''}
     </div>
     <h4>${esc(post.title || 'Community post')}</h4>
     ${body}
@@ -2614,7 +2653,6 @@ function communityPostHtml(post){
       ${COMMUNITY_REACTIONS.map(reaction => `<button class="ghost small community-reaction ${viewerTypes.includes(reaction.type) ? 'active' : ''}" type="button" data-community-reaction="${reaction.type}" data-post-id="${esc(post.id)}"><span>${esc(reaction.label)}</span><b>${esc(counts[reaction.type] || 0)}</b></button>`).join('')}
       <button class="ghost small" type="button" data-community-comments="${esc(post.id)}">Comments ${esc(post.commentCount || 0)}</button>
       ${authorProfileId ? `<button class="ghost small" type="button" data-community-profile="${esc(authorProfileId)}">Profile</button>` : ''}
-      ${canChallenge ? `<button class="primary small request-battle" type="button" data-community-challenge="${esc(authorProfileId)}">Request Battle</button>` : ''}
       <button class="ghost small" type="button" data-community-report="${esc(post.id)}">Report</button>
       ${owner ? `<button class="ghost small" type="button" data-community-edit="${esc(post.id)}">Edit</button><button class="ghost small" type="button" data-community-delete="${esc(post.id)}">Delete</button>` : ''}
     </div>
@@ -2973,7 +3011,13 @@ function wireCommunityControls(){
     button.onclick = event => loadPublicDjProfile(event.currentTarget.dataset.communityProfile);
   });
   document.querySelectorAll('[data-community-challenge]').forEach(button => {
-    button.onclick = event => openProtectedChallengeSetupFromPublicId(event.currentTarget.dataset.communityChallenge, 'community_post').catch(err=>console.warn('Community challenge failed', err));
+    button.onclick = event => {
+      const target = event.currentTarget;
+      const postId = target.dataset.communityPost || target.closest('[data-community-post]')?.dataset.communityPost || '';
+      const post = (state.community.posts || []).concat(localCommunityPosts()).find(row => String(row.id) === String(postId));
+      const context = post ? communityChallengeOriginForPost(post) : { source:'community_post', publicProfileId:target.dataset.communityChallenge, communityPostId:postId, referrer:'community_feed' };
+      openProtectedChallengeSetupFromPublicId(target.dataset.communityChallenge, 'community_post', context).catch(err=>console.warn('Community challenge failed', err));
+    };
   });
   document.querySelectorAll('[data-community-result]').forEach(button => {
     button.onclick = event => loadPublicVerifiedResult(event.currentTarget.dataset.communityResult);
@@ -7311,18 +7355,10 @@ function publicProfileFromRelationshipSources(publicProfileIdValue){
 }
 
 function publicProfileFromCommunitySources(publicProfileIdValue){
-  const fromRows = (state.community.posts || []).concat(localCommunityPosts())
-    .map(row => row && row.author)
-    .find(author => author && author.publicProfileId === publicProfileIdValue);
-  return fromRows ? {
-    publicProfileId:fromRows.publicProfileId,
-    displayName:fromRows.displayName || fromRows.name || 'DJ',
-    name:fromRows.name || fromRows.displayName || 'DJ',
-    country:fromRows.country,
-    belt:fromRows.belt,
-    rating:fromRows.rating,
-    profileVisibility:fromRows.profileVisibility || fromRows.visibility || 'public'
-  } : null;
+  const fromPost = (state.community.posts || []).concat(localCommunityPosts())
+    .find(row => row && row.author && row.author.publicProfileId === publicProfileIdValue);
+  if(!fromPost) return null;
+  return communityChallengeProfileForPost(fromPost);
 }
 
 async function toggleRankingFollow(publicProfileIdValue){
@@ -7333,7 +7369,42 @@ async function toggleRankingFollow(publicProfileIdValue){
   return response;
 }
 
-async function openProtectedChallengeSetupFromPublicId(publicProfileIdValue, origin = 'public_action'){
+function challengeOriginContextForProfile(profile, fallbackSource = 'public_profile', extra = {}){
+  const profileOrigin = plainObject(profile && profile.challengeOriginContext);
+  const extraOrigin = plainObject(extra);
+  const source = shortContextValue(extraOrigin.source || profileOrigin.source || profile && profile.challengeOrigin || fallbackSource, 80);
+  const publicProfileIdValue = shortContextValue(extraOrigin.publicProfileId || profileOrigin.publicProfileId || challengeProfileId(profile), 96);
+  const context = {
+    ...profileOrigin,
+    ...extraOrigin,
+    source,
+    publicProfileId:publicProfileIdValue
+  };
+  if(!context.rankingCategory) context.rankingCategory = state.profileRanking.public.category || 'competitive_battles';
+  return context;
+}
+
+function challengeOriginTitle(profile){
+  const context = challengeOriginContextForProfile(profile, profile && profile.challengeOrigin || 'public_profile');
+  if(context.source === 'community_post') return 'Community Post';
+  if(context.source === 'ranking_row') return 'Ranking Row';
+  if(context.source === 'relationship_list') return 'Relationship List';
+  if(context.source === 'activity_feed') return 'Activity Feed';
+  if(context.source === 'opponent_history') return 'Opponent History';
+  return 'Public Profile';
+}
+
+function challengeOriginDetail(profile){
+  const context = challengeOriginContextForProfile(profile, profile && profile.challengeOrigin || 'public_profile');
+  if(context.source === 'community_post'){
+    return context.communityPostId
+      ? `Request started beside a forum author from post ${context.communityPostId}.`
+      : 'Request started beside a forum author.';
+  }
+  return 'Challenge started from this approved public profile.';
+}
+
+async function openProtectedChallengeSetupFromPublicId(publicProfileIdValue, origin = 'public_action', originContext = {}){
   const profile = publicProfileFromRankingRow(publicProfileIdValue)
     || (state.profileRanking.public.profileId === publicProfileIdValue ? state.profileRanking.public.profile : null)
     || publicProfileFromRelationshipSources(publicProfileIdValue)
@@ -7349,7 +7420,8 @@ async function openProtectedChallengeSetupFromPublicId(publicProfileIdValue, ori
     openModal(`<span class="eyebrow accent">CHALLENGE UNAVAILABLE</span><h3>DJ unavailable</h3><p style="color:var(--muted)">This DJ cannot receive that protected challenge right now.</p><div class="modal-actions"><button class="ghost" value="cancel">Close</button></div>`);
     return response.error ? response : { unavailable:true, eligibility };
   }
-  const enriched = { ...profile, challengeEligibility:eligibility, challengeOrigin:origin };
+  const resolvedOriginContext = challengeOriginContextForProfile(profile, origin, originContext);
+  const enriched = { ...profile, challengeEligibility:eligibility, challengeOrigin:resolvedOriginContext.source, challengeOriginContext:resolvedOriginContext };
   openChallengeSetup(enriched);
   return { profile:enriched, response };
 }
@@ -8455,19 +8527,24 @@ function openChallengeSetup(profile){
   const profileIdValue = challengeProfileId(profile);
   if(!publicProfileCanChallenge(profile)) return null;
   const mode = BattleModes.getBattleMode('own_selection_battle') || BattleModes.listBattleModes()[0];
+  const setupProfile = { ...profile, challengeOriginContext:challengeOriginContextForProfile(profile, profile && profile.challengeOrigin || 'public_profile') };
+  setupProfile.challengeOrigin = setupProfile.challengeOriginContext.source;
   state.djChallenges.setup = {
-    profile,
+    profile:setupProfile,
+    originContext:setupProfile.challengeOriginContext,
     idempotencyKey:stableClientIdempotencyKey('profile-challenge', {
       accountId:state.musicLibrarySync.accountId || '',
       profileId:profileIdValue,
+      origin:setupProfile.challengeOriginContext.source,
+      originRef:setupProfile.challengeOriginContext.communityPostId || setupProfile.challengeOriginContext.rankingCategory || '',
       openedAt:Date.now()
     })
   };
-  openModal(`<span class="eyebrow accent">DJ CHALLENGE</span><h3>Challenge ${esc(profile.displayName || profile.name || 'DJ')}</h3>
+  openModal(`<span class="eyebrow accent">DJ CHALLENGE</span><h3>Challenge ${esc(setupProfile.displayName || setupProfile.name || 'DJ')}</h3>
     <div class="challenge-setup-panel">
       <div class="challenge-context-grid">
-        <div class="battle-result-module"><span>Recipient</span><strong>${esc(challengeProfileSummary(profile))}</strong><p>${esc(profile.belt || 'Unranked')} / ${esc(profile.rating == null ? 'rating pending' : `${profile.rating} rating`)}</p></div>
-        <div class="battle-result-module"><span>Origin</span><strong>${esc(readableComponentName(state.profileRanking.public.category || 'competitive_battles'))}</strong><p>Challenge started from this approved public profile.</p></div>
+        <div class="battle-result-module"><span>Recipient</span><strong>${esc(challengeProfileSummary(setupProfile))}</strong><p>${esc(setupProfile.belt || 'Unranked')} / ${esc(setupProfile.rating == null ? 'rating pending' : `${setupProfile.rating} rating`)}</p></div>
+        <div class="battle-result-module"><span>Origin</span><strong>${esc(challengeOriginTitle(setupProfile))}</strong><p>${esc(challengeOriginDetail(setupProfile))}</p></div>
       </div>
       <div class="form-grid" style="margin-top:12px">
         <label>Battle mode<select id="challenge-mode">${challengeModeOptionsHtml(mode.id)}</select></label>
@@ -8489,17 +8566,17 @@ function openChallengeSetup(profile){
       const duration = document.getElementById('challenge-duration');
       if(duration) duration.innerHTML = challengeDurationOptionsHtml(modeId, cfg.defaultDurationMinutes);
       syncBattleGenreControl('challenge', modeId);
-      renderChallengeSetupValidation(profile);
+      renderChallengeSetupValidation(setupProfile);
     };
     ['challenge-mode','challenge-genre','challenge-duration','challenge-scoring','challenge-prep-crate','challenge-own-selection','challenge-bitcoin-sats'].forEach(id => {
       const el = document.getElementById(id);
-      if(el) el.onchange = id === 'challenge-mode' ? rerenderDurations : () => renderChallengeSetupValidation(profile);
+      if(el) el.onchange = id === 'challenge-mode' ? rerenderDurations : () => renderChallengeSetupValidation(setupProfile);
     });
-    renderChallengeSetupValidation(profile);
+    renderChallengeSetupValidation(setupProfile);
     const send = document.getElementById('send-dj-challenge');
-    if(send) send.onclick = () => sendDjChallengeFromModal(profile);
+    if(send) send.onclick = () => sendDjChallengeFromModal(setupProfile);
   },0);
-  return profile;
+  return setupProfile;
 }
 
 async function sendDjChallengeFromModal(profile = state.djChallenges.setup.profile){
@@ -8523,16 +8600,22 @@ async function sendDjChallengeFromModal(profile = state.djChallenges.setup.profi
     if(err) err.textContent = 'A synced Battle Prep crate is required for own-selection challenges.';
     return { error:err && err.textContent };
   }
+  const setup = state.djChallenges.setup || {};
+  if(setup.sending) return { skipped:true, reason:'sending' };
+  setup.sending = true;
+  state.djChallenges.setup = setup;
+  const sendButton = document.getElementById('send-dj-challenge');
+  if(sendButton){ sendButton.disabled = true; sendButton.textContent = 'Sending...'; }
   if(err) err.textContent = 'Sending protected server challenge...';
+  const originPayload = challengeOriginContextForProfile(profile, profile && profile.challengeOrigin || 'public_profile', setup.originContext);
+  originPayload.publicProfileId = challengeProfileId(profile);
+  originPayload.rankingCategory = originPayload.rankingCategory || state.profileRanking.public.category || 'competitive_battles';
+  originPayload.source = originPayload.source || 'public_profile';
   const body = {
     recipientPublicProfileId:challengeProfileId(profile),
     challengerCrateId:selectedCrate ? rawServerId(selectedCrate) : null,
-    idempotencyKey:state.djChallenges.setup.idempotencyKey,
-    origin:{
-      publicProfileId:challengeProfileId(profile),
-      rankingCategory:state.profileRanking.public.category || 'competitive_battles',
-      source:'public_profile'
-    },
+    idempotencyKey:setup.idempotencyKey,
+    origin:originPayload,
     rules:{
       modeId:draft.modeId,
       title:draft.title,
@@ -8545,18 +8628,29 @@ async function sendDjChallengeFromModal(profile = state.djChallenges.setup.profi
       isPremium:Boolean(state.premium)
     }
   };
-  const response = await window.DJBattleApi.apiRequest('/api/challenges', { method:'POST', body });
-  if(response.error){
-    if(err) err.textContent = response.error;
-    return response;
+  try{
+    const response = await window.DJBattleApi.apiRequest('/api/challenges', { method:'POST', body });
+    if(response.error){
+      if(err) err.textContent = response.error;
+      if(sendButton){ sendButton.disabled = false; sendButton.textContent = 'Send Challenge'; }
+      return response;
+    }
+    const challenge = response.data && response.data.challenge;
+    if(err) err.textContent = 'Challenge sent. It will appear in your sent list until accepted, declined, cancelled or expired.';
+    if(sendButton){ sendButton.disabled = true; sendButton.textContent = 'Challenge Sent'; }
+    loadDjChallengeCount().catch(()=>{});
+    loadDjNotificationCount().catch(()=>{});
+    if(activeProfileTab === 'challenges') loadDjChallengeInbox({ preserve:true }).catch(()=>{});
+    if(document.getElementById('notifications')?.classList.contains('active')) loadDjNotifications({ joinInFlight:false }).catch(()=>{});
+    return { challenge, response };
+  }catch(error){
+    const message = error && error.message || 'DJ challenge request failed.';
+    if(err) err.textContent = message;
+    if(sendButton){ sendButton.disabled = false; sendButton.textContent = 'Send Challenge'; }
+    return { error:message };
+  }finally{
+    setup.sending = false;
   }
-  const challenge = response.data && response.data.challenge;
-  if(err) err.textContent = 'Challenge sent. It will appear in your sent list until accepted, declined, cancelled or expired.';
-  loadDjChallengeCount().catch(()=>{});
-  loadDjNotificationCount().catch(()=>{});
-  if(activeProfileTab === 'challenges') loadDjChallengeInbox({ preserve:true }).catch(()=>{});
-  if(document.getElementById('notifications')?.classList.contains('active')) loadDjNotifications({ joinInFlight:false }).catch(()=>{});
-  return { challenge, response };
 }
 
 function relationshipDate(value){
