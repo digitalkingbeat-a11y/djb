@@ -2557,7 +2557,7 @@ function renderCommunityStatus(){
     : ['loading','syncing','reconnecting'].includes(status)
       ? ['Loading feed', 'Finding fresh DJ posts']
       : status === 'failed' || status === 'configuration_required'
-        ? ['Feed paused', 'Showing available community posts']
+        ? ['Offline demo data', 'Community server unavailable — showing built-in sample posts saved in this browser']
         : ['Community ready', 'Recent DJ posts are ready'];
   target.innerHTML = `<div><span class="challenge-lamp ${communityLamp(status)}"></span><strong>${esc(copy[0])}</strong><span>${esc(copy[1])}</span></div>`;
 }
@@ -3351,11 +3351,36 @@ function openSignInUnavailableModal(reason){
   openModal(`<span class="eyebrow accent">SIGN IN</span><h3 id="auth-unavailable-title">${esc(title)}</h3><p style="color:var(--muted)" id="auth-unavailable-message">${esc(body)}</p><div class="modal-actions"><button class="primary" value="cancel">Close</button></div>`);
 }
 
+// Tracks whether the UI is running on built-in sample data so the banner can say so plainly.
+const dataSourceState = { serverReachable:null, serverBase:'', liveConfigured:null };
+function renderOfflineDemoBanner(){
+  const banner = document.getElementById('offline-demo-banner');
+  const text = document.getElementById('offline-demo-banner-text');
+  if(!banner || !text) return;
+  const unreachable = dataSourceState.serverReachable === false;
+  const notConfigured = dataSourceState.liveConfigured === false;
+  banner.classList.toggle('hidden', !(unreachable || notConfigured));
+  if(unreachable){
+    const where = dataSourceState.serverBase ? ` at ${dataSourceState.serverBase}` : '';
+    text.textContent = `Can't reach the DJ Battle server${where}. Showing built-in sample battles, posts, and rankings; changes stay in this browser.`;
+  } else if(notConfigured){
+    text.textContent = 'Sign-in and the live server are not configured. Showing built-in sample battles, posts, and rankings; changes stay in this browser.';
+  }
+}
+window.addEventListener('djb:api-status', event => {
+  const detail = event && event.detail || {};
+  dataSourceState.serverReachable = Boolean(detail.online);
+  if(!detail.online) dataSourceState.serverBase = detail.base || '';
+  renderOfflineDemoBanner();
+});
+
 const authInitState = { initialized:false, reason:'loading' };
 function initAuth(detail = {}){
   if(authInitState.initialized) return authInitState;
   authInitState.initialized = true;
   LIVE_MODE = computeLiveMode();
+  dataSourceState.liveConfigured = LIVE_MODE;
+  renderOfflineDemoBanner();
   const ab = document.getElementById('auth-button');
   const client = window.supabase;
   if(client && client.auth && typeof client.auth.getSession === 'function'){
@@ -10830,6 +10855,7 @@ setTimeout(()=>{
 window.__DJBattleTestHooks = {
   initAuth,
   getAuthInitState: () => ({ ...authInitState, liveMode:LIVE_MODE }),
+  getDataSourceState: () => ({ ...dataSourceState }),
   completeBattleWithJudgeResult,
   normalizeJudgeResultFromResponse,
   buildBattleSubmissionContext,

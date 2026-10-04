@@ -143,6 +143,27 @@ textarea{
   align-items:center;
 }
 
+.offline-demo-banner{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:6px 12px;
+  margin:-8px 0 16px;
+  padding:10px 14px;
+  border:1px solid #5a4a1c;
+  border-radius:8px;
+  background:#1d1809;
+  color:#e9dcb4;
+  font-size:13px;
+}
+
+.offline-demo-banner strong{
+  color:#ffd54f;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  font-size:11px;
+}
+
 .primary,
 .ghost,
 .text-btn,
