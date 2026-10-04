@@ -407,12 +407,81 @@ function initialsForName(name){
 // otherwise a Guest / Local DJ profile stored in this browser.
 function currentUser(){
   const sessionUser = currentAuthState.user;
+  let base;
   if(sessionUser){
     const meta = sessionUser.user_metadata || {};
     const displayName = String(meta.full_name || meta.name || sessionUser.email || 'DJ').trim() || 'DJ';
-    return { id:String(sessionUser.id || LOCAL_PROFILE_USER_ID), displayName, initials:initialsForName(displayName), email:sessionUser.email || '', signedIn:true, isGuest:false, label:'Signed in' };
+    base = { id:String(sessionUser.id || LOCAL_PROFILE_USER_ID), displayName, initials:initialsForName(displayName), email:sessionUser.email || '', signedIn:true, isGuest:false, label:'Signed in' };
+  } else {
+    base = { id:LOCAL_PROFILE_USER_ID, displayName:'Guest', initials:'G', email:'', signedIn:false, isGuest:true, label:'Local DJ' };
   }
-  return { id:LOCAL_PROFILE_USER_ID, displayName:'Guest', initials:'G', email:'', signedIn:false, isGuest:true, label:'Local DJ' };
+  // Edit Profile saves a browser-local display name/initials per user id (there is no profile update API yet).
+  const local = readLocalProfile(base.id);
+  if(local.displayName) base = { ...base, displayName:local.displayName, initials:local.initials || initialsForName(local.displayName), customized:true };
+  else if(local.initials) base = { ...base, initials:local.initials, customized:true };
+  return base;
+}
+
+const LOCAL_PROFILE_STORAGE_PREFIX = 'djBattleLocalProfile:';
+const LOCAL_PROFILE_NAME_MAX = 40;
+const LOCAL_PROFILE_INITIALS_MAX = 3;
+
+function readLocalProfile(userId){
+  const saved = plainObject(safeParse(`${LOCAL_PROFILE_STORAGE_PREFIX}${userId}`, {}));
+  const cleaned = normalizeLocalProfileInput(saved);
+  return cleaned.error ? {} : cleaned.value;
+}
+
+function normalizeLocalProfileInput(input = {}){
+  const displayName = String(input.displayName || '').replace(/\s+/g, ' ').trim();
+  const initials = String(input.initials || '').replace(/[^\p{L}\p{N}]/gu, '').toUpperCase();
+  if(displayName.length > LOCAL_PROFILE_NAME_MAX) return { error:`Display name must be ${LOCAL_PROFILE_NAME_MAX} characters or fewer.` };
+  if(initials.length > LOCAL_PROFILE_INITIALS_MAX) return { error:`Initials must be ${LOCAL_PROFILE_INITIALS_MAX} letters or numbers or fewer.` };
+  return { value:{ displayName, initials } };
+}
+
+function saveLocalProfile(input){
+  const normalized = normalizeLocalProfileInput(input);
+  if(normalized.error) return normalized;
+  if(!normalized.value.displayName) return { error:'Enter a display name.' };
+  const before = currentUser();
+  const value = { displayName:normalized.value.displayName, initials:normalized.value.initials || initialsForName(normalized.value.displayName) };
+  localStorage.setItem(`${LOCAL_PROFILE_STORAGE_PREFIX}${before.id}`, JSON.stringify(value));
+  const after = currentUser();
+  // Keep this browser's own local posts in step with the new name.
+  let changedPosts = false;
+  (state.posts || []).forEach(post => {
+    if(isOwnLocalPost(post)){ post.user = after.displayName; post.initials = after.initials; changedPosts = true; }
+  });
+  if(changedPosts) localStorage.setItem('djBattlePosts', JSON.stringify(state.posts));
+  return { value:after };
+}
+
+function openEditProfileModal(){
+  const user = currentUser();
+  const scopeNote = user.signedIn
+    ? 'Saved in this browser only. Your account profile on the server is not changed.'
+    : 'Saved in this browser only. Sign in later to sync battles and results.';
+  openModal(`<span class="eyebrow accent">PROFILE</span><h3>Edit Profile</h3><p style="color:var(--muted)" id="edit-profile-scope">${esc(scopeNote)}</p><div class="form-grid"><label>Display name<input id="edit-profile-name" maxlength="${LOCAL_PROFILE_NAME_MAX}" autocomplete="nickname" value="${esc(user.displayName)}"></label><label>Initials (avatar)<input id="edit-profile-initials" maxlength="${LOCAL_PROFILE_INITIALS_MAX}" value="${esc(user.initials)}"></label></div><p id="edit-profile-error" class="hidden" role="alert" style="color:var(--danger)"></p><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="save-profile">Save Profile</button></div>`);
+  const nameInput = document.getElementById('edit-profile-name');
+  const initialsInput = document.getElementById('edit-profile-initials');
+  let initialsTouched = false;
+  if(initialsInput) initialsInput.addEventListener('input', () => { initialsTouched = true; initialsInput.value = initialsInput.value.toUpperCase(); });
+  if(nameInput && initialsInput) nameInput.addEventListener('input', () => { if(!initialsTouched) initialsInput.value = initialsForName(nameInput.value); });
+  const save = document.getElementById('save-profile');
+  if(save) save.onclick = () => {
+    const result = saveLocalProfile({ displayName:nameInput ? nameInput.value : '', initials:initialsInput ? initialsInput.value : '' });
+    const errorNode = document.getElementById('edit-profile-error');
+    if(result.error){
+      if(errorNode){ errorNode.textContent = result.error; errorNode.classList.remove('hidden'); }
+      return result;
+    }
+    document.getElementById('modal').close();
+    renderCurrentUserUI();
+    renderPosts();
+    renderProfile();
+    return result;
+  };
 }
 
 function currentProfileUserId(){ return currentUser().id; }
@@ -436,7 +505,7 @@ function renderCurrentUserUI(){
   setText('.profile-chip .avatar', user.initials);
   setText('#profile-hero-name', user.displayName);
   setText('#profile-hero-avatar', user.initials);
-  setText('#profile-hero-tagline', user.signedIn ? `Signed in${user.email ? ` as ${user.email}` : ''}` : 'Guest • Local DJ profile saved in this browser');
+  setText('#profile-hero-tagline', user.signedIn ? `Signed in${user.email ? ` as ${user.email}` : ''}` : `${user.customized ? 'Local DJ' : 'Guest • Local DJ'} profile saved in this browser`);
   setText('#br-dj1-name', user.displayName);
   setText('#br-dj1 .avatar', user.initials);
   setText('#mini-dj1', user.displayName);
@@ -3456,6 +3525,9 @@ function initAuth(detail = {}){
 }
 
 // Until Supabase setup reports back, the button explains that sign-in is loading instead of doing nothing.
+const editProfileButton = document.getElementById('edit-profile-button');
+if(editProfileButton) editProfileButton.onclick = openEditProfileModal;
+
 (function wireAuthButtonUntilReady(){
   renderCurrentUserUI();
   const ab = document.getElementById('auth-button');
@@ -10913,6 +10985,8 @@ window.__DJBattleTestHooks = {
   initAuth,
   currentUser,
   renderCurrentUserUI,
+  saveLocalProfile,
+  openEditProfileModal,
   localCommunityPosts,
   getAuthInitState: () => ({ ...authInitState, liveMode:LIVE_MODE }),
   getDataSourceState: () => ({ ...dataSourceState }),
