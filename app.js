@@ -2573,7 +2573,7 @@ function renderCommunityControls(){
   if(rail){
     const current = state.community.category || 'all';
     rail.innerHTML = `<button class="${current === 'all' ? 'active' : ''}" type="button" data-community-category="all"><span>All Categories</span><b>${esc(state.community.pagination.total || 0)}</b></button>`
-      + communityCategories().map(category => `<button class="${current === (category.id || category.slug) ? 'active' : ''}" type="button" data-community-category="${esc(category.id || category.slug)}"><span>${esc(category.label)}</span><b>${esc(category.status || 'on')}</b></button>`).join('');
+      + communityCategories().map(category => `<button class="${current === (category.id || category.slug) ? 'active' : ''}" type="button" data-community-category="${esc(category.id || category.slug)}"><span>${esc(category.label)}</span></button>`).join('');
   }
   const more = document.getElementById('community-load-more');
   if(more) more.disabled = !state.community.pagination?.hasMore || ['loading','reconnecting'].includes(state.community.status);
