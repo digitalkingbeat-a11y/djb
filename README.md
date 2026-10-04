@@ -16,6 +16,12 @@ npx serve .
 
 or use the VS Code Live Server extension.
 
+### VS Code
+
+Open the repository folder in VS Code. Run **Terminal → Run Task → DJ Battle: verify** to check the build and both test suites. **Ctrl+Shift+B** runs the build alone.
+
+Use **Run and Debug → DJ Battle: debug API server** to start the API with environment variables inherited from VS Code. If credentials are stored in `server/.env.local`, choose **DJ Battle: debug API with .env.local** instead. Keep that file private. Serve the frontend with the local server command above.
+
 ## Current Product Surface
 
 - Compact battle discovery with filters, battle formats, matchmaking, and battle-room recovery

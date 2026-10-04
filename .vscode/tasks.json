@@ -1,0 +1,34 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "DJ Battle: build",
+      "type": "shell",
+      "command": "npm run build",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "DJ Battle: frontend tests",
+      "type": "shell",
+      "command": "npm test",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "DJ Battle: server tests",
+      "type": "shell",
+      "command": "npm test",
+      "options": { "cwd": "${workspaceFolder}/server" },
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "DJ Battle: verify",
+      "dependsOn": ["DJ Battle: build", "DJ Battle: frontend tests", "DJ Battle: server tests"],
+      "dependsOrder": "sequence",
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": []
+    }
+  ]
+}
