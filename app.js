@@ -455,7 +455,9 @@ const BELT_THRESHOLDS = [
 ];
 
 // Live leaderboard configuration — when the Supabase client is present in the page
-const LIVE_MODE = Boolean(window && window.supabase && window.SUPABASE_URL && window.SUPABASE_ANON_KEY);
+// Supabase is created by a module script that runs after this file, so LIVE_MODE is refreshed from initAuth().
+function computeLiveMode(){ return Boolean(window && window.supabase && window.SUPABASE_URL && window.SUPABASE_ANON_KEY); }
+let LIVE_MODE = computeLiveMode();
 
 // Submit a score through the authenticated server endpoint.
 async function submitScoreLive(payload){
@@ -3313,7 +3315,7 @@ function updateAuthUI(user){
   if(user){
     const display = (user.user_metadata && user.user_metadata.full_name) || user.email || 'DJ';
     if(profileName) profileName.textContent = display;
-    if(authBtn){ authBtn.textContent = 'Sign Out'; authBtn.onclick = async ()=>{ await supabase.auth.signOut(); updateAuthUI(null); } }
+    if(authBtn){ authBtn.textContent = 'Sign Out'; authBtn.onclick = async ()=>{ await window.supabase.auth.signOut(); updateAuthUI(null); } }
     handleMusicLibraryAuthChange(user).catch(()=>setMusicLibrarySyncStatus('failed', { error:'Library sync failed after sign-in.' }));
   } else {
     if(profileName) profileName.textContent = 'Digital King';
@@ -3329,7 +3331,7 @@ function openSignInModal(){
       const email = document.getElementById('auth-email').value;
       if(!email) return alert('Enter an email');
       try{
-        const { error } = await supabase.auth.signInWithOtp({ email });
+        const { error } = await window.supabase.auth.signInWithOtp({ email });
         if(error) return openModal(`<span class="eyebrow accent">ERROR</span><h3>Sign in failed</h3><p style="color:var(--muted)">${esc(String(error.message||error))}</p><div class="modal-actions"><button class="primary" value="cancel">Close</button></div>`);
         openModal(`<span class="eyebrow accent">CHECK EMAIL</span><h3>Magic link sent</h3><p style="color:var(--muted)">Follow the link in your email to complete sign-in.</p><div class="modal-actions"><button class="primary" value="cancel">Close</button></div>`);
       }catch(err){ console.error(err); alert('Sign-in error'); }
@@ -3337,13 +3339,49 @@ function openSignInModal(){
   },0);
 }
 
-if(window && window.supabase){
-  // Initialize auth state UI
-  supabase.auth.getSession().then(({ data })=>{ updateAuthUI(data.session ? data.session.user : null); }).catch(()=>{});
-  supabase.auth.onAuthStateChange((event, session)=>{ updateAuthUI(session ? session.user : null); });
-  // hook auth button (in case DOM loaded earlier)
-  const ab = document.getElementById('auth-button'); if(ab) ab.onclick = openSignInModal;
+function openSignInUnavailableModal(reason){
+  const loading = reason === 'loading';
+  const failed = reason === 'failed';
+  const title = loading ? 'Sign-in is still loading' : failed ? 'Sign-in unavailable' : 'Sign-in not configured';
+  const body = loading
+    ? 'The sign-in service is still starting up. Try again in a moment.'
+    : failed
+      ? 'The Supabase sign-in library could not be loaded, so sign-in is unavailable right now. Check your connection and reload the page.'
+      : 'Sign-in is not configured for this copy of DJ Battle. Copy supabase-browser-config.example.js to supabase-browser-config.local.js, add your Supabase project URL and anon key, then reload. You can keep using the offline demo data in the meantime.';
+  openModal(`<span class="eyebrow accent">SIGN IN</span><h3 id="auth-unavailable-title">${esc(title)}</h3><p style="color:var(--muted)" id="auth-unavailable-message">${esc(body)}</p><div class="modal-actions"><button class="primary" value="cancel">Close</button></div>`);
 }
+
+const authInitState = { initialized:false, reason:'loading' };
+function initAuth(detail = {}){
+  if(authInitState.initialized) return authInitState;
+  authInitState.initialized = true;
+  LIVE_MODE = computeLiveMode();
+  const ab = document.getElementById('auth-button');
+  const client = window.supabase;
+  if(client && client.auth && typeof client.auth.getSession === 'function'){
+    authInitState.reason = 'ready';
+    if(ab) ab.onclick = openSignInModal;
+    client.auth.getSession().then(({ data })=>{ updateAuthUI(data && data.session ? data.session.user : null); }).catch(()=>{});
+    if(typeof client.auth.onAuthStateChange === 'function') client.auth.onAuthStateChange((event, session)=>{ updateAuthUI(session ? session.user : null); });
+  } else {
+    authInitState.reason = detail && detail.configured && !detail.client ? 'failed' : 'not_configured';
+    if(ab){
+      ab.textContent = 'Sign In';
+      ab.title = authInitState.reason === 'failed' ? 'Sign-in unavailable' : 'Sign-in not configured';
+      ab.onclick = () => openSignInUnavailableModal(authInitState.reason);
+    }
+  }
+  return authInitState;
+}
+
+// Until Supabase setup reports back, the button explains that sign-in is loading instead of doing nothing.
+(function wireAuthButtonUntilReady(){
+  const ab = document.getElementById('auth-button');
+  if(ab) ab.onclick = () => openSignInUnavailableModal(authInitState.reason);
+  if(window.DJB_SUPABASE_STATE && window.DJB_SUPABASE_STATE.ready) initAuth(window.DJB_SUPABASE_STATE);
+  else if(window.supabase) initAuth({ configured:true, client:true });
+  else window.addEventListener('djb:supabase-ready', event => initAuth(event.detail || window.DJB_SUPABASE_STATE || {}), { once:true });
+})();
 
 const judgeRefreshButton = document.getElementById('judge-refresh');
 if(judgeRefreshButton) judgeRefreshButton.onclick = () => loadJudgingOperationsStatus();
@@ -10790,6 +10828,8 @@ setTimeout(()=>{
 },0);
 
 window.__DJBattleTestHooks = {
+  initAuth,
+  getAuthInitState: () => ({ ...authInitState, liveMode:LIVE_MODE }),
   completeBattleWithJudgeResult,
   normalizeJudgeResultFromResponse,
   buildBattleSubmissionContext,

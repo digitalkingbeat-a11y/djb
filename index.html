@@ -493,12 +493,17 @@
     const config = window.DJ_BATTLE_SUPABASE_CONFIG || {};
     window.SUPABASE_URL = config.url || '';
     window.SUPABASE_ANON_KEY = config.anonKey || '';
-    if(window.SUPABASE_URL && window.SUPABASE_ANON_KEY){
+    const supabaseState = { ready:true, configured:Boolean(window.SUPABASE_URL && window.SUPABASE_ANON_KEY), client:false, error:'' };
+    if(supabaseState.configured){
       try{
         const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
         window.supabase = createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
-      }catch(e){console.warn('Supabase init failed',e)}
+        supabaseState.client = true;
+      }catch(e){ console.warn('Supabase init failed', e); supabaseState.error = String(e && e.message || e); }
     }
+    // Module scripts run after app.js, so publish the result and let app.js initialize auth from this event.
+    window.DJB_SUPABASE_STATE = supabaseState;
+    window.dispatchEvent(new CustomEvent('djb:supabase-ready', { detail:supabaseState }));
   </script>
   <script>
     // Minimal belt UI helper for local profile state.

@@ -1054,8 +1054,15 @@ td{
   }
 
   .profile-chip span:last-child,
-  .top-actions>.ghost{
+  .top-actions>.ghost:not(#auth-button){
     display:none;
+  }
+
+  /* Keep Sign In reachable on phones. */
+  .top-actions>#auth-button{
+    padding:8px 11px;
+    font-size:12px;
+    white-space:nowrap;
   }
 
   .product-page-head h2,
