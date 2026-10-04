@@ -389,7 +389,61 @@ function battleModeAllowsGenreSelection(modeId){
   return !battleModeFixedGenre(modeId);
 }
 
-function currentProfileUserId(){ return 'local-profile-digital-king'; }
+// Stable id for profile data saved in this browser before sign-in. Kept unchanged so existing local
+// battles, entries, and posts keep their owner; it is never shown in the UI.
+const LOCAL_PROFILE_USER_ID = 'local-profile-digital-king';
+// Name the local profile used before currentUser() existed; only used to migrate old local posts.
+const LEGACY_LOCAL_PROFILE_NAME = 'Digital King';
+const currentAuthState = { user:null };
+
+function initialsForName(name){
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if(!parts.length) return 'DJ';
+  const letters = parts.length === 1 ? parts[0].slice(0, 2) : `${parts[0][0]}${parts[parts.length - 1][0]}`;
+  return letters.toUpperCase();
+}
+
+// Single source of truth for who is using the app: the Supabase session user when signed in,
+// otherwise a Guest / Local DJ profile stored in this browser.
+function currentUser(){
+  const sessionUser = currentAuthState.user;
+  if(sessionUser){
+    const meta = sessionUser.user_metadata || {};
+    const displayName = String(meta.full_name || meta.name || sessionUser.email || 'DJ').trim() || 'DJ';
+    return { id:String(sessionUser.id || LOCAL_PROFILE_USER_ID), displayName, initials:initialsForName(displayName), email:sessionUser.email || '', signedIn:true, isGuest:false, label:'Signed in' };
+  }
+  return { id:LOCAL_PROFILE_USER_ID, displayName:'Guest', initials:'G', email:'', signedIn:false, isGuest:true, label:'Local DJ' };
+}
+
+function currentProfileUserId(){ return currentUser().id; }
+
+// Posts saved before currentUser() existed were authored by the local profile under its old fixed name.
+(state.posts || []).forEach(post => { if(post && !post.userId && post.user === LEGACY_LOCAL_PROFILE_NAME) post.userId = LOCAL_PROFILE_USER_ID; });
+
+function isCurrentUserName(name){ return String(name || '') === currentUser().displayName; }
+
+// Local posts created in this browser are owned by the local profile (or the signed-in user who wrote them).
+function isOwnLocalPost(post){
+  if(!post) return false;
+  if(post.userId) return post.userId === currentUser().id || post.userId === LOCAL_PROFILE_USER_ID;
+  return false;
+}
+
+function renderCurrentUserUI(){
+  const user = currentUser();
+  const setText = (selector, value) => document.querySelectorAll(selector).forEach(node => { node.textContent = value; });
+  setText('#profile-name', user.displayName);
+  setText('.profile-chip .avatar', user.initials);
+  setText('#profile-hero-name', user.displayName);
+  setText('#profile-hero-avatar', user.initials);
+  setText('#profile-hero-tagline', user.signedIn ? `Signed in${user.email ? ` as ${user.email}` : ''}` : 'Guest • Local DJ profile saved in this browser');
+  setText('#br-dj1-name', user.displayName);
+  setText('#br-dj1 .avatar', user.initials);
+  setText('#mini-dj1', user.displayName);
+  const chip = document.querySelector('.profile-chip');
+  if(chip) chip.dataset.userState = user.signedIn ? 'signed-in' : 'guest';
+  return user;
+}
 function publicVisitorId(){
   const key = 'djBattlePublicVisitor';
   let value = localStorage.getItem(key);
@@ -741,7 +795,7 @@ function installProfessionalShell(){
           <p id="audio-setup-message">Browser output routing is not exposed here.</p>
         </section>
         <section class="panel compact-system-panel" id="mini-battle-panel">
-          <div class="mini-battle-line"><strong id="mini-dj1">Digital King</strong><span>VS</span><strong id="mini-dj2">Solo Mode</strong></div>
+          <div class="mini-battle-line"><strong id="mini-dj1">${esc(currentUser().displayName)}</strong><span>VS</span><strong id="mini-dj2">Solo Mode</strong></div>
           <div class="status-grid dense"><div><span>Mode</span><strong id="mini-mode">Practice</strong></div><div><span>Genre</span><strong id="mini-genre">Global</strong></div><div><span>Clock</span><strong id="mini-battle-clock">10:00</strong></div></div>
           <small id="mini-meta2">AI high-score mode</small><small id="mini-meta1">White / Tampa</small>
         </section>
@@ -1206,7 +1260,7 @@ function generatePracticeScore(){
 
 function getAiHighScoreRows(){
   const userRows = state.practiceHistory.reduce((acc, entry) => {
-    const key = 'Digital King';
+    const key = currentUser().displayName;
     const existing = acc.get(key) || {dj:key, best:0, average:0, attempts:0, last:0, type:entry.type || 'Practice', genre:entry.genre || 'Global'};
     existing.attempts += 1;
     existing.best = Math.max(existing.best, Number(entry.score || 0));
@@ -1320,7 +1374,7 @@ function cloneBattleProgressSnapshot(progress = state.battleProgress){
 
 function localRankForRating(rating){
   const rows = rankings
-    .filter(row => row[1] !== 'Digital King')
+    .filter(row => !isCurrentUserName(row[1]))
     .map(row => Number(row[6] || 0))
     .concat(Number(rating || 0))
     .sort((a,b)=>b-a);
@@ -1428,7 +1482,7 @@ function buildBattleResultProfileRecord(result, battle, progressionState){
     verifiedResultId,
     verifiedResultUrl: null,
     country: opponent.country || null,
-    profile: { displayName: document.getElementById('profile-name')?.textContent || 'Digital King', country: null },
+    profile: { displayName: currentUser().displayName, country: null },
     details: {
       breakdown: result.breakdown || {},
       timing: result.timing || [],
@@ -1790,7 +1844,7 @@ function synchronizedResolutionBattleLike(session, resolution, opponent){
     opponentRequirement:'required',
     reward:rewardFromSynchronizedResolution(session, resolution, resolution && resolution.self),
     participants:[
-      { userId:currentProfileUserId(), name:document.getElementById('profile-name')?.textContent || 'Digital King' },
+      { userId:currentProfileUserId(), name:currentUser().displayName },
       { userId:'server-opponent', name:opponent && opponent.profile && opponent.profile.name || 'Opponent', country:opponent && opponent.profile && opponent.profile.country }
     ]
   };
@@ -2032,7 +2086,7 @@ async function savePracticeResult(entry){
   // If running in live mode, send the score to the backend and show any server notifications.
   if(LIVE_MODE){
     try{
-      let djName = document.getElementById('profile-name')?.textContent || 'Digital King';
+      let djName = currentUser().displayName;
       try{
         const u = await supabase.auth.getUser(); if(u && u.data && u.data.user){ djName = (u.data.user.user_metadata && u.data.user.user_metadata.full_name) || u.data.user.email || djName; }
       }catch(e){}
@@ -2067,7 +2121,7 @@ function openPracticeMode(battleName='Practice Session', battleType='Practice', 
         const saveBtn=document.getElementById('save-practice-rating'); if(!saveBtn) return; saveBtn.onclick=()=>{
           const prevBest = (() => {
             const rows = getAiHighScoreRows();
-            const me = rows.find(row => row.dj === 'Digital King');
+            const me = rows.find(row => isCurrentUserName(row.dj));
             return me ? me.best : 0;
           })();
 
@@ -2082,7 +2136,7 @@ function openPracticeMode(battleName='Practice Session', battleType='Practice', 
 
           savePracticeResult(saved);
           const rows = getAiHighScoreRows();
-          const me = rows.find(row => row.dj === 'Digital King') || {best:0, rank:999};
+          const me = rows.find(row => isCurrentUserName(row.dj)) || {best:0, rank:999};
           const rankText = me.rank ? `#${me.rank} GLOBAL` : 'GLOBAL';
           const personalText = prevBest ? `PERSONAL BEST — ${prevBest} → ${me.best}` : `NEW PERSONAL BEST — ${me.best}`;
           const message = me.best > prevBest ? `NEW HIGH SCORE — ${rankText}<br>${personalText}` : `NEW PERSONAL BEST — ${me.best}`;
@@ -2216,7 +2270,7 @@ async function joinBattleFromModal(b){
     }
     const serverBattle = serverResult.battle || {};
     const localBase = BattleModes.normalizeBattleRecord({ ...updated, status:'open' });
-    const joined = BattleModes.joinBattle(localBase, { userId: currentProfileUserId(), name: document.getElementById('profile-name')?.textContent || 'Digital King' }, { now: new Date().toISOString() });
+    const joined = BattleModes.joinBattle(localBase, { userId: currentProfileUserId(), name: currentUser().displayName }, { now: new Date().toISOString() });
     let joinedBattle = joined.battle || localBase;
     joinedBattle = { ...joinedBattle, status:serverBattle.status || joinedBattle.status, lobbyStatus:serverBattle.status || updated.lobbyStatus || joinedBattle.status, serverBacked:true };
     if(serverResult.snapshot) joinedBattle = attachBattlePrepSnapshotToBattle(joinedBattle, serverResult.snapshot, currentProfileUserId(), serverResult.entry);
@@ -2237,7 +2291,7 @@ async function joinBattleFromModal(b){
     },0);
     return;
   }
-  let joined = BattleModes.joinBattle(updated, { userId: currentProfileUserId(), name: document.getElementById('profile-name')?.textContent || 'Digital King' }, { now: new Date().toISOString() });
+  let joined = BattleModes.joinBattle(updated, { userId: currentProfileUserId(), name: currentUser().displayName }, { now: new Date().toISOString() });
   if(joined.error && joined.code !== 'duplicate_entry') return alert(joined.error);
   let joinedBattle = joined.battle || updated;
   let opponent = null;
@@ -2283,7 +2337,7 @@ function startAiPracticeFromModal(b){
   const chosenLength = Number(document.getElementById('enter-length')?.value||10);
   const practice = BattleModes.createBattleRecord({ modeId:'ai_only_practice', genre: chosenGenre, durationMinutes: chosenLength, title:`${chosenGenre} AI Practice`, createdBy:currentProfileUserId(), status:'ready', visibility:'private' });
   if(practice.error) return alert(practice.error.map(item=>item.message).join(' '));
-  const joined = BattleModes.joinBattle(practice.battle, { userId: currentProfileUserId(), name: document.getElementById('profile-name')?.textContent || 'Digital King' }, { now: new Date().toISOString() });
+  const joined = BattleModes.joinBattle(practice.battle, { userId: currentProfileUserId(), name: currentUser().displayName }, { now: new Date().toISOString() });
   const selectedCrate = document.getElementById('enter-prep-crate')?.value || '';
   let battle = joined.battle || practice.battle;
   if(selectedCrate){
@@ -2433,7 +2487,7 @@ aiFilterButtons.forEach(btn=>btn.addEventListener('click',()=>{
 
 function renderPosts(){const html=state.posts.map(p=>`<article class="forum-post"><div class="post-head"><div class="avatar">${esc(p.initials)}</div><div><strong>${esc(p.user)}</strong><span>${esc(p.room)} • ${esc(p.time)}</span></div></div><h4>${esc(p.title)}</h4><p>${esc(p.body)}</p>${p.media?`<div class="audio-embed"><button>▶</button><div><strong>${esc(p.media)}</strong><small style="display:block;color:#7f8997">Attached from profile library</small></div><div class="bars"></div></div>`:''}<div class="post-foot"><span>♡ ${p.likes}</span><span>💬 ${p.comments}</span><span>↗ Share</span></div></article>`).join('');document.getElementById('forum-feed').innerHTML=html;document.getElementById('latest-posts').innerHTML=state.posts.slice(0,3).map(p=>`<div class="feed-item"><div class="mini-art">♫</div><div><strong>${esc(p.title)}</strong><p>${esc(p.user)} • ${esc(p.room)}</p></div></div>`).join('');}
 
-document.getElementById('new-post').onclick=()=>{const options=state.library.map((t,i)=>`<option value="${i}">${esc(t.name)}</option>`).join('');openModal(`<span class="eyebrow accent">COMMUNITY</span><h3>Create Post</h3><div class="form-grid"><label>Room<select id="post-room"><option>General DJ Talk</option><option>Transitions</option><option>Scratching</option><option>Track Feedback</option><option>Production</option><option>Promo Feed</option></select></label><label>Title<input id="post-title" placeholder="What are you sharing?"></label><label>Post<textarea id="post-body" placeholder="Tell the community about it..."></textarea></label><label>Attach from My Music<select id="post-media"><option value="">No attachment</option>${options}</select></label></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="publish-post">Publish</button></div>`);setTimeout(()=>document.getElementById('publish-post').onclick=()=>{const mediaIdx=document.getElementById('post-media').value;state.posts.unshift({user:'Digital King',initials:'DK',room:document.getElementById('post-room').value,time:'now',title:document.getElementById('post-title').value||'New post',body:document.getElementById('post-body').value||'',media:mediaIdx!==''?state.library[Number(mediaIdx)]?.name:null,likes:0,comments:0});persist();renderPosts();document.getElementById('modal').close();},0)};
+document.getElementById('new-post').onclick=()=>{const options=state.library.map((t,i)=>`<option value="${i}">${esc(t.name)}</option>`).join('');openModal(`<span class="eyebrow accent">COMMUNITY</span><h3>Create Post</h3><div class="form-grid"><label>Room<select id="post-room"><option>General DJ Talk</option><option>Transitions</option><option>Scratching</option><option>Track Feedback</option><option>Production</option><option>Promo Feed</option></select></label><label>Title<input id="post-title" placeholder="What are you sharing?"></label><label>Post<textarea id="post-body" placeholder="Tell the community about it..."></textarea></label><label>Attach from My Music<select id="post-media"><option value="">No attachment</option>${options}</select></label></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="publish-post">Publish</button></div>`);setTimeout(()=>document.getElementById('publish-post').onclick=()=>{const mediaIdx=document.getElementById('post-media').value;state.posts.unshift({user:currentUser().displayName,initials:currentUser().initials,userId:currentUser().id,room:document.getElementById('post-room').value,time:'now',title:document.getElementById('post-title').value||'New post',body:document.getElementById('post-body').value||'',media:mediaIdx!==''?state.library[Number(mediaIdx)]?.name:null,likes:0,comments:0});persist();renderPosts();document.getElementById('modal').close();},0)};
 
 const COMMUNITY_DEFAULT_CATEGORIES = [
   { id:'general', label:'General DJ Discussion' },
@@ -2529,11 +2583,11 @@ function localCommunityPosts(){
     visibility:'local_saved',
     status:'active',
     createdAt:post.createdAt || post.time || '',
-    author:{ displayName:post.user || 'Local DJ', name:post.user || 'Local DJ', publicProfileId:post.user === 'Digital King' ? null : `dj_${String(post.user || 'localdj').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 24) || 'localdj'}`, profileVisibility:'public' },
+    author:{ displayName:post.user || 'Local DJ', name:post.user || 'Local DJ', publicProfileId:isOwnLocalPost(post) ? null : `dj_${String(post.user || 'localdj').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 24) || 'localdj'}`, profileVisibility:'public' },
     reactionCounts:{ like:Number(post.likes || 0), fire:0, respect:0, technique:0, total:Number(post.likes || 0) },
     commentCount:Number(post.comments || 0),
     attachments:post.media ? [{ id:`local-media-${index}`, type:'library_track', title:post.media, artist:'Local library', status:'local_saved', playbackPermitted:false, playbackContract:'local_saved_only' }] : [],
-    viewer:{ canEdit:post.user === 'Digital King', canDelete:post.user === 'Digital King', isOwner:post.user === 'Digital King' },
+    viewer:{ canEdit:isOwnLocalPost(post), canDelete:isOwnLocalPost(post), isOwner:isOwnLocalPost(post) },
     localOnly:true
   }));
 }
@@ -2831,8 +2885,9 @@ async function publishCommunityPostFromModal(postId){
     const mediaValue = document.getElementById('post-media')?.value || '';
     const mediaTrack = mediaValue.startsWith('track:') ? getLibraryTrackById(mediaValue.slice(6)) : null;
     state.posts.unshift({
-      user:'Digital King',
-      initials:'DK',
+      user:currentUser().displayName,
+      initials:currentUser().initials,
+      userId:currentUser().id,
       room:communityCategoryLabel(payload.categoryId),
       time:'local',
       title:payload.title,
@@ -3309,17 +3364,18 @@ async function handleMusicLibraryAuthChange(user){
 
 function updateAuthUI(user){
   const authBtn = document.getElementById('auth-button');
-  const profileName = document.getElementById('profile-name');
+  currentAuthState.user = user || null;
   state.operatorUser = isOperatorUser(user);
   renderJudgingOperationsAccess();
+  renderCurrentUserUI();
   if(user){
-    const display = (user.user_metadata && user.user_metadata.full_name) || user.email || 'DJ';
-    if(profileName) profileName.textContent = display;
     if(authBtn){ authBtn.textContent = 'Sign Out'; authBtn.onclick = async ()=>{ await window.supabase.auth.signOut(); updateAuthUI(null); } }
     handleMusicLibraryAuthChange(user).catch(()=>setMusicLibrarySyncStatus('failed', { error:'Library sync failed after sign-in.' }));
   } else {
-    if(profileName) profileName.textContent = 'Digital King';
-    if(authBtn){ authBtn.textContent = 'Sign In'; authBtn.onclick = openSignInModal }
+    if(authBtn){
+      authBtn.textContent = 'Sign In';
+      authBtn.onclick = window.supabase && window.supabase.auth ? openSignInModal : () => openSignInUnavailableModal(authInitState.reason);
+    }
     handleMusicLibraryAuthChange(null).catch(()=>{});
   }
 }
@@ -3401,6 +3457,7 @@ function initAuth(detail = {}){
 
 // Until Supabase setup reports back, the button explains that sign-in is loading instead of doing nothing.
 (function wireAuthButtonUntilReady(){
+  renderCurrentUserUI();
   const ab = document.getElementById('auth-button');
   if(ab) ab.onclick = () => openSignInUnavailableModal(authInitState.reason);
   if(window.DJB_SUPABASE_STATE && window.DJB_SUPABASE_STATE.ready) initAuth(window.DJB_SUPABASE_STATE);
@@ -4349,7 +4406,7 @@ async function createAuthenticatedBattleWithPrepSnapshot(draft, selectedCrateId,
     idempotencyKey:stableClientIdempotencyKey('battle-create', { userId:state.musicLibrarySync.accountId, battleId:localBattle.id, crateId:crate && crate.id }),
     isPremium:Boolean(state.premium),
     publicProfile:{
-      name:document.getElementById('profile-name')?.textContent || 'Digital King',
+      name:currentUser().displayName,
       country:document.getElementById('profile-country')?.textContent || '',
       belt:document.getElementById('profile-belt')?.textContent || '',
       rating:state.battleProgress && state.battleProgress.rankingRating || null
@@ -4887,7 +4944,7 @@ function attachBattlePrepSnapshotToBattle(battle, snapshot, userId = currentProf
   if(!participants.some(participant => String(participant.userId) === String(userId))){
     participants = [...participants, {
       userId:String(userId),
-      name:document.getElementById('profile-name')?.textContent || 'Digital King',
+      name:currentUser().displayName,
       status:'joined',
       battlePrepSnapshotId:snapshot.id,
       battlePrepSnapshotVersion:snapshot.snapshotVersion || null
@@ -5309,7 +5366,7 @@ async function createPracticeRecordingFromSubmissionLocal(input = {}){
   const body = {
     sourceSubmissionId: input.sourceSubmissionId || input.linkedSubmissionId,
     title: input.title || 'Practice Recording',
-    artist: input.artist || 'Digital King',
+    artist: input.artist || currentUser().displayName,
     genre: input.genre || 'Practice',
     bpm: input.bpm,
     key: input.key,
@@ -10203,7 +10260,7 @@ function renderProfile(){
   } else if(activeProfileTab==='battles'){
     cards=battles.slice(0,6).map(b=>profileCard(b.title,`${b.type} • ${b.genre} • ${b.time}`,'⚔'));
   } else if(activeProfileTab==='posts'){
-    const posts=state.posts.filter(post=>post.user==='Digital King');
+    const posts=state.posts.filter(isOwnLocalPost);
     cards=posts.length?posts.map(post=>profileCard(post.title,`${post.room} • ${post.time}`,'☷')):[profileCard('No local posts yet','Posts created in this browser appear here.','☷')];
   } else {
     const belt=document.getElementById('profile-belt')?.textContent||'White';
@@ -10706,7 +10763,7 @@ function renderBattleStudioContext(session){
   const clockText=document.getElementById('br-clock')?.textContent || `${String(session.duration||10).padStart(2,'0')}:00`;
   const miniClock=document.getElementById('mini-battle-clock'); if(miniClock) miniClock.textContent=clockText;
   const mainClock=document.getElementById('battle-clock'); if(mainClock) mainClock.textContent=clockText;
-  const miniDj1=document.getElementById('mini-dj1'); if(miniDj1) miniDj1.textContent=document.getElementById('profile-name')?.textContent || 'Digital King';
+  const miniDj1=document.getElementById('mini-dj1'); if(miniDj1) miniDj1.textContent=currentUser().displayName;
   const miniDj2=document.getElementById('mini-dj2'); if(miniDj2) miniDj2.textContent=session.opponent ? (session.opponent.name || 'Opponent') : 'Solo Mode';
   const miniMeta2=document.getElementById('mini-meta2'); if(miniMeta2) miniMeta2.textContent=session.opponent ? `${session.opponent.belt || ''} ${session.opponent.record || ''}`.trim() : 'AI high-score mode';
 }
@@ -10854,6 +10911,9 @@ setTimeout(()=>{
 
 window.__DJBattleTestHooks = {
   initAuth,
+  currentUser,
+  renderCurrentUserUI,
+  localCommunityPosts,
   getAuthInitState: () => ({ ...authInitState, liveMode:LIVE_MODE }),
   getDataSourceState: () => ({ ...dataSourceState }),
   completeBattleWithJudgeResult,
