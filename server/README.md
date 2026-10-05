@@ -22,6 +22,8 @@ node index.js
 
 3. Apply the SQL migrations in `server/sql` for the contracts you enable.
 
+4. Open http://localhost:4000. The server also serves the browser front end (an allowlist of `index.html`, root CSS/JS, `studio/`, and `judge/` files). Set `SERVE_FRONTEND=false` for API-only mode.
+
 ## Tests
 
 ```bash
