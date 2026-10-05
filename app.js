@@ -2217,49 +2217,90 @@ function openPracticeMode(battleName='Practice Session', battleType='Practice', 
   },0);
 }
 
+function isFabricatedLocalOpponent(participant){
+  if(!participant) return false;
+  const id = String(participant.userId || participant.id || '');
+  return id.startsWith('local-opponent-') || (participant.name === 'Rival DJ' && id.startsWith('local-'));
+}
+
+function realOpponentFromBattle(battle){
+  const selfId = currentProfileUserId();
+  const participant = (battle && battle.participants || []).find(p => p && p.userId !== selfId && !isFabricatedLocalOpponent(p));
+  if(!participant) return null;
+  return {
+    userId: participant.userId,
+    name: participant.name || 'Opponent',
+    country: participant.country || '',
+    belt: participant.belt || '',
+    record: participant.record || ''
+  };
+}
+
+function showLocalWaitingRoom(battle, assigned, options = {}){
+  const tracksHtml = assigned.length
+    ? assigned.map(a=>`<div style="padding:8px 0;border-bottom:1px solid #1f2730">♫ <strong>${esc(a)}</strong></div>`).join('')
+    : '<div style="color:var(--muted)">Tracks will be assigned when a real opponent joins, or choose Solo AI Rating.</div>';
+  document.getElementById('modal-content').innerHTML = `<span class="eyebrow accent">WAITING ROOM</span><h3>${esc(battle.title || 'Battle')}</h3><p style="color:var(--muted)">No real opponent has joined yet. Stay listed as waiting, run Solo AI Rating, or search for a live match.</p><div class="panel" style="margin-top:12px">${tracksHtml}</div><div class="notice" style="margin-top:12px"><strong>Waiting for opponent</strong><span>We no longer invent a Rival DJ for local joins.</span></div><div class="modal-actions" style="margin-top:12px"><button class="ghost" value="cancel">Close</button><button class="ghost" type="button" id="waiting-solo-ai">Solo AI Rating</button><button class="primary" type="button" id="waiting-find-match">Find Match</button></div>`;
+  setTimeout(()=>{
+    const solo = document.getElementById('waiting-solo-ai');
+    if(solo) solo.onclick = () => {
+      document.getElementById('modal').close();
+      if(typeof options.onSolo === 'function') options.onSolo();
+      else startAiPracticeFromModal(battle);
+    };
+    const find = document.getElementById('waiting-find-match');
+    if(find) find.onclick = async () => {
+      find.disabled = true;
+      find.textContent = 'Searching…';
+      const result = await findCompatibleServerBattle({
+        mode: battle.modeId || 'all',
+        genre: battle.genre || 'all',
+        duration: battle.durationMinutes ? String(battle.durationMinutes) : 'all'
+      });
+      if(result.battle){
+        document.getElementById('modal').close();
+        openBattleLifecycle(result.battle.id);
+        return;
+      }
+      find.disabled = false;
+      find.textContent = 'Find Match';
+      const note = result.skipped
+        ? 'Sign in with a live server to find a real opponent, or use Solo AI Rating.'
+        : (result.error || 'No compatible live battle was available right now.');
+      const notice = document.querySelector('#modal-content .notice span');
+      if(notice) notice.textContent = note;
+    };
+  },0);
+}
+
 function openBattle(id){
   const b=battles.find(x=>x.id===id); if(!b) return;
-  // If battle requires stems and user is not premium, show premium modal
+  // Legacy entry path: route through the lifecycle modal so we never invent a Rival DJ.
+  if(typeof openBattleLifecycle === 'function') return openBattleLifecycle(id);
   if(b.stems && !state.premium){ openPremium(`“${b.title}” is stem-enabled. Premium unlocks stem battles and AI stem separation.`); return; }
-  const stemsAllowed = Boolean(b.stems || state.premium);
   const selectedLength = parseMinutes(b.time);
   const lengthOptions = [10, 20, 30, 60];
-  openModal(`<span class="eyebrow accent">READY TO ENTER</span><h3>${b.title}</h3><p>${b.desc}</p><div class="form-grid"><label>Mode<select id="enter-mode"><option value="Standard Battle">Standard Battle</option><option value="Scratch Battle">Scratch Battle</option><option value="Own Selection (Premium)">Own Selection (Premium)</option></select></label><label>Genre<select id="enter-genre">${GENRES.map(g=>`<option value="${g}" ${g===b.genre?'selected':''}>${g}</option>`).join('')}</select></label><label>Battle length<select id="enter-length">${lengthOptions.map(minutes=>`<option value="${minutes}" ${minutes===selectedLength?'selected':''}>${minutes} minutes</option>`).join('')}</select></label><label class="toggle-row">Allow stems <input type="checkbox" id="enter-stems" ${stemsAllowed?'':'disabled'} ${b.stems||state.premium?'checked':''}></label></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="find-opponent">Find Opponent</button><button class="ghost" type="button" id="practice-only">Solo AI Rating</button></div>`);
-
+  openModal(`<span class="eyebrow accent">READY TO ENTER</span><h3>${esc(b.title)}</h3><p>${esc(b.desc || '')}</p><div class="form-grid"><label>Genre<select id="enter-genre">${GENRES.map(g=>`<option value="${g}" ${g===b.genre?'selected':''}>${g}</option>`).join('')}</select></label><label>Battle length<select id="enter-length">${lengthOptions.map(minutes=>`<option value="${minutes}" ${minutes===selectedLength?'selected':''}>${minutes} minutes</option>`).join('')}</select></label></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="find-opponent">Join Waiting Room</button><button class="ghost" type="button" id="practice-only">Solo AI Rating</button></div>`);
   setTimeout(()=>{
-    const findBtn=document.getElementById('find-opponent'); if(findBtn) findBtn.onclick=()=>{
+    const findBtn=document.getElementById('find-opponent');
+    if(findBtn) findBtn.onclick=()=>{
       const chosenGenre=document.getElementById('enter-genre').value;
-      const wantStems=document.getElementById('enter-stems').checked;
-      const chosenMode=document.getElementById('enter-mode').value;
       const chosenLength=Number(document.getElementById('enter-length').value||10);
-      openModal(`<span class="eyebrow accent">MATCHING</span><h3>Finding compatible DJs...</h3><p style="color:var(--muted)">Genre: ${chosenGenre} • Mode: ${chosenMode} • Length: ${chosenLength}m</p><div class="panel" style="margin-top:12px;text-align:center;color:var(--muted)">Searching…</div>`);
-      setTimeout(()=>{
-        const noOpponent = Math.random() < 0.35;
-        const numMatch=(String(b.tracks).match(/(\d+)/)||[])[0];
-        const num = numMatch? Number(numMatch) : (b.type&&b.type.includes('5')?5:2);
-        let assigned=[];
-        if((b.selection && b.selection.toLowerCase().includes('assigned')) || (b.tracks && b.tracks.toLowerCase().includes('assigned'))){
-          assigned = assignTracksForBattle(b,num);
-        } else if((b.selection && b.selection.toLowerCase().includes('dj')) || (b.tracks && b.tracks.toLowerCase().includes('own'))){
-          if(state.library.length>0) assigned = [state.library[Math.floor(Math.random()*state.library.length)].name+' (use your selection)'];
-          else assigned = ['Your selection — choose from My Music'];
-        } else {
-          assigned = assignTracksForBattle(b,num);
-        }
-        if(noOpponent){
-          // Solo AI Rating fallback
-          document.getElementById('modal').close();
-          startBattleSession({ id: Date.now(), title: b.title, type: b.type }, { mode: chosenMode, genre: chosenGenre, duration: chosenLength, opponent: null, assigned });
-          return;
-        }
-        // mock opponent
-        const opponent = { name: 'Rival DJ', country: 'US', belt: 'Blue', record: '21-4' };
-        document.getElementById('modal-content').innerHTML = `<span class="eyebrow accent">ASSIGNED</span><h3>Your Assigned Tracks</h3><p style="color:var(--muted)">${esc(b.desc)}</p><div class="panel" style="margin-top:12px">${assigned.map(a=>`<div style="padding:8px 0;border-bottom:1px solid #1f2730">♫ <strong>${esc(a)}</strong></div>`).join('')}</div><div class="notice" style="margin-top:12px"><strong>Match found</strong><span>Opponent: ${opponent.name} • ${opponent.country} • ${opponent.belt}</span></div><div class="modal-actions" style="margin-top:12px"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="enter-battle-now">Enter Battle Room</button></div>`;
-        setTimeout(()=>{const eb=document.getElementById('enter-battle-now'); if(eb) eb.onclick=()=>{document.getElementById('modal').close(); startBattleSession({ id: Date.now(), title: b.title, type: b.type }, { mode: chosenMode, genre: chosenGenre, duration: chosenLength, opponent, assigned }); };},200);
-      },900);
+      const numMatch=(String(b.tracks).match(/(\d+)/)||[])[0];
+      const num = numMatch? Number(numMatch) : (b.type&&b.type.includes('5')?5:2);
+      const assigned = assignTracksForBattle(b,num);
+      const waitingBattle = { ...b, genre: chosenGenre, durationMinutes: chosenLength, status:'waiting', lobbyStatus:'waiting' };
+      showLocalWaitingRoom(waitingBattle, assigned, {
+        onSolo: () => startBattleSession({ id: Date.now(), title: b.title, type: b.type }, { mode: 'Solo AI Rating', genre: chosenGenre, duration: chosenLength, opponent: null, assigned: [] })
+      });
     };
-
-    const practiceBtn=document.getElementById('practice-only'); if(practiceBtn) practiceBtn.onclick=()=>{ const chosenMode = document.getElementById('enter-mode')?.value || 'Solo'; const chosenGenre = document.getElementById('enter-genre')?.value || b.genre; const chosenLength = Number(document.getElementById('enter-length')?.value||10); document.getElementById('modal').close(); startBattleSession({ id: Date.now(), title: b.title, type: b.type }, { mode: 'Solo AI Rating', genre: chosenGenre, duration: chosenLength, opponent: null, assigned: [] }); };
+    const practiceBtn=document.getElementById('practice-only');
+    if(practiceBtn) practiceBtn.onclick=()=>{
+      const chosenGenre = document.getElementById('enter-genre')?.value || b.genre;
+      const chosenLength = Number(document.getElementById('enter-length')?.value||10);
+      document.getElementById('modal').close();
+      startBattleSession({ id: Date.now(), title: b.title, type: b.type }, { mode: 'Solo AI Rating', genre: chosenGenre, duration: chosenLength, opponent: null, assigned: [] });
+    };
   },0);
 }
 
@@ -2363,41 +2404,45 @@ async function joinBattleFromModal(b){
   let joined = BattleModes.joinBattle(updated, { userId: currentProfileUserId(), name: currentUser().displayName }, { now: new Date().toISOString() });
   if(joined.error && joined.code !== 'duplicate_entry') return alert(joined.error);
   let joinedBattle = joined.battle || updated;
-  let opponent = null;
-  if(joinedBattle.opponentRequirement === 'required' && !(joined.error && joined.code === 'duplicate_entry')){
-    const rivalId = `local-opponent-${joinedBattle.id}`;
-    const rivalJoin = BattleModes.joinBattle(joinedBattle, { userId: rivalId, name:'Rival DJ' }, { now: new Date().toISOString() });
-    joinedBattle = rivalJoin.battle || joinedBattle;
-    opponent = { userId: rivalId, name:'Rival DJ', country:'US', belt:'Blue', record:'21-4' };
-  } else {
-    const existingOpponent = (joinedBattle.participants || []).find(p=>p.userId !== currentProfileUserId());
-    if(existingOpponent) opponent = { userId: existingOpponent.userId, name: existingOpponent.name || 'Rival DJ', country:'US', belt:'Blue', record:'21-4' };
+  let opponent = realOpponentFromBattle(joinedBattle);
+  const needsOpponent = joinedBattle.opponentRequirement === 'required';
+  if(needsOpponent && !opponent){
+    joinedBattle = { ...joinedBattle, status:'waiting', lobbyStatus:'waiting' };
   }
   const assigned = resolveBattleTracks(joinedBattle);
-  const prepared = BattleModes.prepareBattle(joinedBattle, { userId: currentProfileUserId(), assignedTracks: assigned, now: new Date().toISOString() });
-  if(prepared.error) return alert(prepared.error);
+  let preparedBattle = joinedBattle;
+  if(!needsOpponent || opponent){
+    const prepared = BattleModes.prepareBattle(joinedBattle, { userId: currentProfileUserId(), assignedTracks: assigned, now: new Date().toISOString() });
+    if(prepared.error) return alert(prepared.error);
+    preparedBattle = prepared.battle;
+  }
   if(selectedCrate && validation.ready){
     if(battlePrepServerApiAvailable() && serverBackedBattlePrepCrate(selectedCrate)){
       if(err) err.textContent = 'Syncing Battle Prep snapshot...';
-      const serverResult = await joinAuthenticatedBattleWithPrepSnapshot(prepared.battle, selectedCrate, validation);
+      const serverResult = await joinAuthenticatedBattleWithPrepSnapshot(preparedBattle, selectedCrate, validation);
       if(serverResult.error){ if(err) err.textContent = serverResult.error; return; }
       if(serverResult.snapshot){
-        prepared.battle = attachBattlePrepSnapshotToBattle(prepared.battle, serverResult.snapshot, currentProfileUserId(), serverResult.entry);
+        preparedBattle = attachBattlePrepSnapshotToBattle(preparedBattle, serverResult.snapshot, currentProfileUserId(), serverResult.entry);
       }
     } else {
-      const snapshot = buildBattlePrepEntrySnapshot(selectedCrate, prepared.battle, validation, currentProfileUserId());
-      prepared.battle = attachBattlePrepSnapshotToBattle(prepared.battle, snapshot, currentProfileUserId());
+      const snapshot = buildBattlePrepEntrySnapshot(selectedCrate, preparedBattle, validation, currentProfileUserId());
+      preparedBattle = attachBattlePrepSnapshotToBattle(preparedBattle, snapshot, currentProfileUserId());
     }
   }
   const idx = battles.findIndex(x=>String(x.id)===String(b.id));
-  if(idx >= 0) battles[idx] = prepared.battle;
+  if(idx >= 0) battles[idx] = preparedBattle;
+  else battles.unshift(preparedBattle);
   persistBattles();
   renderBattles();
+  if(needsOpponent && !opponent){
+    showLocalWaitingRoom(preparedBattle, assigned, { onSolo: () => startAiPracticeFromModal(preparedBattle) });
+    return;
+  }
   const tracksHtml = assigned.length ? assigned.map(a=>`<div style="padding:8px 0;border-bottom:1px solid #1f2730">♫ <strong>${esc(a)}</strong></div>`).join('') : '<div style="color:var(--muted)">Own-selection battle: choose eligible tracks from My Music.</div>';
-  document.getElementById('modal-content').innerHTML = `<span class="eyebrow accent">READY</span><h3>${esc(prepared.battle.title)}</h3><p style="color:var(--muted)">${esc(prepared.battle.desc)}</p><div class="panel" style="margin-top:12px">${tracksHtml}</div><div class="notice" style="margin-top:12px"><strong>${opponent ? 'Match ready' : 'Solo practice ready'}</strong><span>${opponent ? `Opponent: ${esc(opponent.name)} | ${esc(opponent.country)} | ${esc(opponent.belt)}` : 'No opponent required for this mode.'}</span></div><div class="modal-actions" style="margin-top:12px"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="enter-battle-now">Enter Battle Room</button><button class="ghost" type="button" id="open-studio-now">Open Studio</button></div>`;
+  document.getElementById('modal-content').innerHTML = `<span class="eyebrow accent">READY</span><h3>${esc(preparedBattle.title)}</h3><p style="color:var(--muted)">${esc(preparedBattle.desc || '')}</p><div class="panel" style="margin-top:12px">${tracksHtml}</div><div class="notice" style="margin-top:12px"><strong>${opponent ? 'Match ready' : 'Solo practice ready'}</strong><span>${opponent ? `Opponent: ${esc(opponent.name)}${opponent.country ? ' | ' + esc(opponent.country) : ''}${opponent.belt ? ' | ' + esc(opponent.belt) : ''}` : 'No opponent required for this mode.'}</span></div><div class="modal-actions" style="margin-top:12px"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="enter-battle-now">Enter Battle Room</button><button class="ghost" type="button" id="open-studio-now">Open Studio</button></div>`;
   setTimeout(()=>{
-    const eb=document.getElementById('enter-battle-now'); if(eb) eb.onclick=()=>{document.getElementById('modal').close(); startBattleSession(prepared.battle, { opponent, assigned }); };
-    const os=document.getElementById('open-studio-now'); if(os) os.onclick=()=>{document.getElementById('modal').close(); startBattleSession(prepared.battle, { opponent, assigned, view:'studio' }); };
+    const eb=document.getElementById('enter-battle-now'); if(eb) eb.onclick=()=>{document.getElementById('modal').close(); startBattleSession(preparedBattle, { opponent, assigned }); };
+    const os=document.getElementById('open-studio-now'); if(os) os.onclick=()=>{document.getElementById('modal').close(); startBattleSession(preparedBattle, { opponent, assigned, view:'studio' }); };
   },0);
 }
 
@@ -11020,6 +11065,9 @@ window.__DJBattleTestHooks = {
   openCreateBattleModal,
   openBattleLifecycle,
   joinBattleFromModal,
+  showLocalWaitingRoom,
+  realOpponentFromBattle,
+  isFabricatedLocalOpponent,
   createAuthenticatedBattleWithPrepSnapshot,
   joinAuthenticatedBattleWithPrepSnapshot,
   hydrateServerBattlePrepSnapshot,
