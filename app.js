@@ -17,7 +17,7 @@ const state = {
   ],
   practiceHistory: JSON.parse(localStorage.getItem('djBattlePracticeHistory') || '[]'),
   battleResults: safeParse('djBattleBattleResults', []),
-  battleProgress: safeParse('djBattleBattleProgress', null) || { xp: 620, rating: 87, rankingRating: 1744, wins: 12, losses: 4, belt: 'White' },
+  battleProgress: safeParse('djBattleBattleProgress', null) || { xp: 0, rating: 0, rankingRating: 0, wins: 0, losses: 0, belt: 'White' },
   operatorUser: false,
   battleHistoryFilters: { mode:'all', genre:'all', result:'all', opponent:'all', date:'all' },
   verifiedResultsDiscovery: {
@@ -85,7 +85,7 @@ const state = {
     }
   }
 };
-state.battleProgress = { xp: 620, rating: 87, rankingRating: 1744, wins: 12, losses: 4, belt: 'White', ...state.battleProgress };
+state.battleProgress = { xp: 0, rating: 0, rankingRating: 0, wins: 0, losses: 0, belt: 'White', ...state.battleProgress };
 state.publicRankings.filters = { country:'all', belt:'all', relationship:'all', ...(state.publicRankings.filters || {}) };
 state.librarySort = safeParse('djBattleLibrarySort', null) || { field:'title', direction:'asc' };
 state.libraryFilters = { crate:'all', search:'', compatibleOnly:false };
@@ -1640,20 +1640,30 @@ function updateBattleProgressUi(){
   const progress = state.battleProgress;
   const belt = progress.belt || beltForXp(progress.xp).name;
   if(window.setCurrentBelt) window.setCurrentBelt(belt);
-  document.querySelectorAll('.profile-score strong').forEach(el=>{ el.textContent = String(progress.rating || 87); });
+  const rating = Number(progress.rating || 0);
+  const wins = Number(progress.wins || 0);
+  const losses = Number(progress.losses || 0);
+  const xp = Number(progress.xp || 0);
+  const rankingRating = Number(progress.rankingRating || 0);
+  document.querySelectorAll('.profile-score strong').forEach(el=>{ el.textContent = String(rating); });
   const profileStats = document.querySelectorAll('.profile-stats > div');
-  if(profileStats[0]) profileStats[0].querySelector('strong').textContent = String(progress.wins || 0);
-  if(profileStats[1]) profileStats[1].querySelector('strong').textContent = String(progress.losses || 0);
-  if(profileStats[3]) profileStats[3].querySelector('strong').textContent = String(progress.xp || 0);
+  if(profileStats[0]) profileStats[0].querySelector('strong').textContent = String(wins);
+  if(profileStats[1]) profileStats[1].querySelector('strong').textContent = String(losses);
+  if(profileStats[3]) profileStats[3].querySelector('strong').textContent = String(xp);
+  const setIdText = (id, value) => { const node = document.getElementById(id); if(node) node.textContent = String(value); };
+  setIdText('dashboard-wins', wins);
+  setIdText('dashboard-losses', losses);
+  setIdText('dashboard-ai-avg', rating);
+  setIdText('dashboard-rank', rankingRating > 0 ? String(rankingRating) : 'Unranked');
   const pathPanel = document.querySelector('#dashboard .progress-wrap');
   if(pathPanel){
-    const next = BELT_THRESHOLDS.find(item => item.xp > Number(progress.xp || 0)) || BELT_THRESHOLDS[BELT_THRESHOLDS.length - 1];
-    const prev = beltForXp(progress.xp);
+    const next = BELT_THRESHOLDS.find(item => item.xp > xp) || BELT_THRESHOLDS[BELT_THRESHOLDS.length - 1];
+    const prev = beltForXp(xp);
     const range = Math.max(1, next.xp - prev.xp);
-    const pct = next.xp === prev.xp ? 100 : Math.max(0, Math.min(100, Math.round(((progress.xp - prev.xp) / range) * 100)));
-    const label = pathPanel.querySelector('.progress-label strong');
-    const bar = pathPanel.querySelector('.progress i');
-    if(label) label.textContent = `${progress.xp} / ${next.xp}`;
+    const pct = next.xp === prev.xp ? 100 : Math.max(0, Math.min(100, Math.round(((xp - prev.xp) / range) * 100)));
+    const label = document.getElementById('dashboard-xp-label') || pathPanel.querySelector('.progress-label strong');
+    const bar = document.getElementById('dashboard-xp-bar') || pathPanel.querySelector('.progress i');
+    if(label) label.textContent = `${xp} / ${next.xp}`;
     if(bar) bar.style.width = `${pct}%`;
   }
 }
@@ -1702,7 +1712,7 @@ function applyBattleProgression(result, battle){
   const progress = state.battleProgress;
   progress.xp = Number(progress.xp || 0) + Number(progression.xp || 0);
   progress.rating = Math.max(0, Math.min(100, Number(progress.rating || 0) + Number(progression.ratingDelta || 0)));
-  progress.rankingRating = Math.max(0, Number(progress.rankingRating || 1744) + Number(progression.ratingDelta || 0));
+  progress.rankingRating = Math.max(0, Number(progress.rankingRating || 0) + Number(progression.ratingDelta || 0));
   if(result.won === true) progress.wins = Number(progress.wins || 0) + 1;
   if(result.won === false) progress.losses = Number(progress.losses || 0) + 1;
   progress.belt = beltForXp(progress.xp).name;
