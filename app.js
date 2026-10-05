@@ -513,6 +513,75 @@ function renderCurrentUserUI(){
   if(chip) chip.dataset.userState = user.signedIn ? 'signed-in' : 'guest';
   return user;
 }
+function currentPublicProfileShareId(){
+  const user = currentUser();
+  if(!user || !user.signedIn) return '';
+  const personal = state.publicRankings && state.publicRankings.personal && state.publicRankings.personal.rankings || {};
+  const fromPersonal = Object.values(personal).flatMap(category => Array.isArray(category && category.rows) ? category.rows : []).find(row => row && row.publicProfileId);
+  if(fromPersonal && fromPersonal.publicProfileId) return String(fromPersonal.publicProfileId);
+  const my = state.verifiedResultsDiscovery && state.verifiedResultsDiscovery.myRankings || {};
+  const fromMy = Object.values(my).flatMap(category => Array.isArray(category && category.rows) ? category.rows : []).find(row => row && row.publicProfileId);
+  if(fromMy && fromMy.publicProfileId) return String(fromMy.publicProfileId);
+  const raw = String(user.id || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return raw ? `dj_${raw.slice(0, 48)}` : '';
+}
+
+function currentProfileShareUrl(){
+  const profileId = currentPublicProfileShareId();
+  if(!profileId) return '';
+  const origin = typeof window !== 'undefined' && window.location ? `${window.location.origin}${window.location.pathname || '/'}` : '';
+  return `${origin}#dj=${encodeURIComponent(profileId)}`;
+}
+
+function showAppToast(title, summary){
+  let rack = document.getElementById('notification-toast-rack');
+  if(!rack){
+    rack = document.createElement('div');
+    rack.id = 'notification-toast-rack';
+    rack.className = 'notification-toast-rack';
+    document.body.appendChild(rack);
+  }
+  const toast = document.createElement('div');
+  toast.className = 'notification-toast';
+  toast.setAttribute('role', 'status');
+  toast.innerHTML = `<strong>${esc(title || 'Done')}</strong><small>${esc(summary || '')}</small>`;
+  rack.appendChild(toast);
+  const timer = setTimeout(() => toast.remove(), 4200);
+  if(timer && typeof timer.unref === 'function') timer.unref();
+  return toast;
+}
+
+async function shareCurrentProfile(){
+  const profileId = currentPublicProfileShareId();
+  if(!profileId){
+    openModal(`<span class="eyebrow accent">SHARE PROFILE</span><h3>Local profile only</h3><p style="color:var(--muted)" id="share-profile-local-note">This browser profile is local only. Sign in to get a public DJ link you can share.</p><div class="modal-actions"><button class="primary" value="cancel">Close</button></div>`);
+    return { shared:false, reason:'local_only' };
+  }
+  const url = currentProfileShareUrl();
+  try{
+    if(navigator.clipboard && typeof navigator.clipboard.writeText === 'function'){
+      await navigator.clipboard.writeText(url);
+    } else {
+      const input = document.createElement('textarea');
+      input.value = url;
+      input.setAttribute('readonly', '');
+      input.style.position = 'fixed';
+      input.style.left = '-9999px';
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      input.remove();
+    }
+    showAppToast('Profile link copied', url);
+    return { shared:true, url, profileId };
+  }catch(err){
+    openModal(`<span class="eyebrow accent">SHARE PROFILE</span><h3>Copy this link</h3><p style="color:var(--muted)">Clipboard access was blocked. Copy the public profile link below.</p><input id="share-profile-fallback" readonly value="${esc(url)}"><div class="modal-actions"><button class="primary" value="cancel">Close</button></div>`);
+    const field = document.getElementById('share-profile-fallback');
+    if(field){ field.focus(); field.select(); }
+    return { shared:false, reason:'clipboard_blocked', url, profileId };
+  }
+}
+
 function publicVisitorId(){
   const key = 'djBattlePublicVisitor';
   let value = localStorage.getItem(key);
@@ -3572,6 +3641,8 @@ function initAuth(detail = {}){
 // Until Supabase setup reports back, the button explains that sign-in is loading instead of doing nothing.
 const editProfileButton = document.getElementById('edit-profile-button');
 if(editProfileButton) editProfileButton.onclick = openEditProfileModal;
+const shareProfileButton = document.getElementById('share-profile-button');
+if(shareProfileButton) shareProfileButton.onclick = () => { shareCurrentProfile().catch(err => console.warn('Profile share failed', err)); };
 
 (function wireAuthButtonUntilReady(){
   renderCurrentUserUI();
@@ -11032,6 +11103,10 @@ window.__DJBattleTestHooks = {
   renderCurrentUserUI,
   saveLocalProfile,
   openEditProfileModal,
+  shareCurrentProfile,
+  currentPublicProfileShareId,
+  currentProfileShareUrl,
+  showAppToast,
   localCommunityPosts,
   getAuthInitState: () => ({ ...authInitState, liveMode:LIVE_MODE }),
   getDataSourceState: () => ({ ...dataSourceState }),
