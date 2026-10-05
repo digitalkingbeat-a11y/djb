@@ -106,3 +106,35 @@ test('guided tour navigates to live controls and persists progress', async () =>
   document.getElementById('guided-tour-exit').click();
   assert.equal(document.getElementById('guided-tour-overlay'), null);
 });
+
+test('Battles and Community controls are styled and label/value pairs stay separated', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'professional-redesign.css'), 'utf8');
+  [
+    /\.compact-tabs button\.active\s*\{[^}]*var\(--accent\)/,
+    /\.battle-filter-row select,/,
+    /\.community-filters select\s*\{/,
+    /\.battle-format-tour button,\s*\.community-reaction,\s*#community-category-rail button\s*\{[^}]*gap:/,
+    /\.battle-lobby-counts\s*\{[^}]*gap:/,
+    /\.battle-row-main small\s*\{[^}]*display:block/,
+    /#community-category-rail button\.active\s*\{/,
+    /\.community-attachment small\s*\{[^}]*margin-top/
+  ].forEach(pattern => assert.match(css, pattern));
+
+  const window = loadAppDom();
+  const document = window.document;
+  assert.ok(document.querySelector('#battle-tabs.compact-tabs'));
+  assert.ok(document.querySelector('.battle-filter-row #battle-lobby-mode-filter'));
+  const counts = [...document.querySelectorAll('.battle-lobby-counts .tag')].map(node => node.textContent.trim());
+  assert.deepEqual(counts.map(text => text.split(':')[0]), ['OPEN', 'WAITING', 'FULL', 'STARTED', 'EXPIRED']);
+  const firstRowMain = document.querySelector('.battle-row-main > div');
+  assert.ok(firstRowMain.querySelector('strong') && firstRowMain.querySelector('small'));
+
+  window.__DJBattleTestHooks.switchView('community');
+  const chips = [...document.querySelectorAll('#community-category-rail button[data-community-category]')];
+  assert.ok(chips.length > 1);
+  chips.filter(chip => chip.dataset.communityCategory !== 'all').forEach(chip => {
+    assert.equal(chip.querySelector('b'), null);
+    assert.equal(chip.textContent.trim(), chip.querySelector('span').textContent.trim());
+  });
+  assert.ok(chips.find(chip => chip.dataset.communityCategory === 'all').querySelector('b'));
+});
