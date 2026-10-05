@@ -1150,11 +1150,93 @@ function filteredBattleRows(filter='All'){
   });
   return list;
 }
+function pendingInviteChallenges(){
+  return (state.djChallenges.rows || []).filter(row => {
+    const status = String(row.status || 'pending').toLowerCase().replace(/_/g, '-');
+    return status === 'pending' || status === 'challenge-pending' || status === 'invited';
+  });
+}
+
+function openChallengeInboxFromBattles(){
+  activeProfileTab = 'challenges';
+  switchView('profile');
+  renderProfile();
+  loadDjChallengeInbox({ preserve:true }).catch(err => console.warn('Challenge inbox open failed', err));
+}
+
+function battleInvitesPanelHtml(){
+  const signedIn = Boolean(currentUser().signedIn);
+  const apiReady = typeof djChallengeApiAvailable === 'function' && djChallengeApiAvailable();
+  if(!signedIn || !apiReady){
+    return `<div class="panel battle-empty" id="battle-invites-empty"><strong>Sign in to see invites</strong><p>Pending DJ challenges and battle invites appear here after you sign in with a live server.</p><div class="challenge-actions" style="margin-top:12px"><button class="primary small" type="button" id="battle-invites-signin">Sign In</button></div></div>`;
+  }
+  const challenges = pendingInviteChallenges();
+  const inviteBattles = battles.filter(b => battleTabMatches(b, 'invites'));
+  if(!challenges.length && !inviteBattles.length){
+    const loading = ['loading','reconnecting'].includes(state.djChallenges.status);
+    return `<div class="panel battle-empty" id="battle-invites-empty"><strong>${loading ? 'Loading invites…' : 'No pending invites'}</strong><p>${loading ? 'Checking your Challenge Inbox for pending battle invites.' : 'When someone challenges you to a battle, it shows up here. You can also open the full Challenge Inbox on your profile.'}</p><div class="challenge-actions" style="margin-top:12px"><button class="ghost small" type="button" id="battle-invites-open-inbox">Open Challenge Inbox</button></div></div>`;
+  }
+  const challengeBlock = challenges.length
+    ? `<div class="battle-invites-challenges">${challenges.map(challengeRowHtml).join('')}</div>`
+    : '';
+  const battleBlock = inviteBattles.length ? inviteBattles.map(battleCard).join('') : '';
+  return `<div class="battle-invites-panel"><div class="section-head compact"><div><span class="eyebrow accent">PENDING INVITES</span><h3>Challenges &amp; battle invites</h3></div><button class="ghost small" type="button" id="battle-invites-open-inbox">Open Challenge Inbox</button></div>${challengeBlock}${battleBlock}</div>`;
+}
+
+function wireBattleInvitesPanel(){
+  const signIn = document.getElementById('battle-invites-signin');
+  if(signIn) signIn.onclick = () => {
+    const authBtn = document.getElementById('auth-button');
+    if(authBtn) authBtn.click();
+  };
+  const openInbox = document.getElementById('battle-invites-open-inbox');
+  if(openInbox) openInbox.onclick = () => openChallengeInboxFromBattles();
+  document.querySelectorAll('#battle-grid [data-challenge-accept]').forEach(button => {
+    button.onclick = event => acceptDjChallengeFromInbox(event.currentTarget.dataset.challengeAccept);
+  });
+  document.querySelectorAll('#battle-grid [data-challenge-decline]').forEach(button => {
+    button.onclick = event => updateDjChallengeTerminal(event.currentTarget.dataset.challengeDecline, 'decline');
+  });
+  document.querySelectorAll('#battle-grid [data-challenge-cancel]').forEach(button => {
+    button.onclick = event => updateDjChallengeTerminal(event.currentTarget.dataset.challengeCancel, 'cancel');
+  });
+  document.querySelectorAll('#battle-grid [data-challenge-open-battle]').forEach(button => {
+    button.onclick = event => recoverAcceptedChallengeBattle(event.currentTarget.dataset.challengeOpenBattle);
+  });
+  document.querySelectorAll('#battle-grid [data-enter]').forEach(b => {
+    b.onclick = () => openBattleLifecycle(b.dataset.enter);
+  });
+}
+
 function renderBattles(filter='All'){
   syncBattleFilterControls();
+  const grid = document.getElementById('battle-grid');
+  if((state.battleViewTab || 'open') === 'invites'){
+    if(grid){
+      grid.classList.toggle('battle-grid-view', state.battleLayout === 'grid');
+      grid.innerHTML = battleLobbyStatusStripHtml() + battleInvitesPanelHtml();
+      wireBattleInvitesPanel();
+    }
+    const featured = document.getElementById('featured-battles');
+    if(featured){
+      const previousTab = state.battleViewTab;
+      state.battleViewTab = 'open';
+      featured.innerHTML = filteredBattleRows(filter).slice(0,3).map(battleCard).join('');
+      state.battleViewTab = previousTab;
+      featured.querySelectorAll('[data-enter]').forEach(b=>b.onclick=()=>openBattleLifecycle(b.dataset.enter));
+    }
+    wireBattleLobbyControls(filter);
+    if(currentUser().signedIn && typeof djChallengeApiAvailable === 'function' && djChallengeApiAvailable()){
+      if(['idle','offline','failed'].includes(state.djChallenges.status)){
+        loadDjChallengeInbox({ render:false, preserve:true }).then(() => {
+          if((state.battleViewTab || 'open') === 'invites') renderBattles(filter);
+        }).catch(err => console.warn('Invites challenge refresh failed', err));
+      }
+    }
+    return;
+  }
   const list = filteredBattleRows(filter);
   const empty = `<div class="panel battle-empty"><strong>No battles match these filters.</strong><p>Adjust the filters or create a battle for this lane.</p></div>`;
-  const grid = document.getElementById('battle-grid');
   if(grid){ grid.classList.toggle('battle-grid-view', state.battleLayout === 'grid'); grid.innerHTML=battleLobbyStatusStripHtml()+(list.length ? list.map(battleCard).join('') : empty); }
   const featured = document.getElementById('featured-battles');
   if(featured) featured.innerHTML=filteredBattleRows('All').slice(0,3).map(battleCard).join('');
@@ -1285,6 +1367,9 @@ function wireBattleLobbyControls(currentGenre = 'All'){
     button.onclick = () => {
       state.battleViewTab = button.dataset.battleTab || 'open';
       localStorage.setItem('djBattleBattleViewTab', state.battleViewTab);
+      if(state.battleViewTab === 'invites' && currentUser().signedIn && typeof djChallengeApiAvailable === 'function' && djChallengeApiAvailable() && !['synced','loading','reconnecting'].includes(state.djChallenges.status)){
+        state.djChallenges.status = 'idle';
+      }
       renderBattles(currentGenre);
     };
   });
@@ -9981,7 +10066,8 @@ async function loadDjChallengeInbox(options = {}){
   if(!djChallengeApiAvailable()){
     state.djChallenges.status = 'offline';
     state.djChallenges.error = 'Sign in and server access are required for the Challenge Inbox.';
-    renderChallengeInbox();
+    if(options.render !== false) renderChallengeInbox();
+    if((state.battleViewTab || 'open') === 'invites') renderBattles();
     return { skipped:true, reason:'api_unavailable' };
   }
   const seq = ++state.djChallenges.requestSeq;
@@ -10006,7 +10092,8 @@ async function loadDjChallengeInbox(options = {}){
   state.djChallenges.page = state.djChallenges.pagination.page || nextPage;
   state.djChallenges.status = 'synced';
   state.djChallenges.lastSuccessfulAt = new Date().toISOString();
-  renderChallengeInbox();
+  if(options.render !== false) renderChallengeInbox();
+  if((state.battleViewTab || 'open') === 'invites') renderBattles();
   loadDjChallengeCount().catch(()=>{});
   return { challenges:state.djChallenges.rows, response };
 }
@@ -11192,6 +11279,11 @@ window.__DJBattleTestHooks = {
   loadDjChallengeInbox,
   loadDjChallengeCount,
   renderChallengeInbox,
+  pendingInviteChallenges,
+  battleInvitesPanelHtml,
+  openChallengeInboxFromBattles,
+  getDjChallenges: () => state.djChallenges,
+  renderBattles,
   acceptDjChallengeFromInbox,
   updateDjChallengeTerminal,
   routeAcceptedChallengeToBattleRoom,
