@@ -17,7 +17,7 @@ const state = {
   ],
   practiceHistory: JSON.parse(localStorage.getItem('djBattlePracticeHistory') || '[]'),
   battleResults: safeParse('djBattleBattleResults', []),
-  battleProgress: safeParse('djBattleBattleProgress', null) || { xp: 620, rating: 87, rankingRating: 1744, wins: 12, losses: 4, belt: 'White' },
+  battleProgress: safeParse('djBattleBattleProgress', null) || { xp: 0, rating: 0, rankingRating: 0, wins: 0, losses: 0, belt: 'White' },
   operatorUser: false,
   battleHistoryFilters: { mode:'all', genre:'all', result:'all', opponent:'all', date:'all' },
   verifiedResultsDiscovery: {
@@ -85,7 +85,7 @@ const state = {
     }
   }
 };
-state.battleProgress = { xp: 620, rating: 87, rankingRating: 1744, wins: 12, losses: 4, belt: 'White', ...state.battleProgress };
+state.battleProgress = { xp: 0, rating: 0, rankingRating: 0, wins: 0, losses: 0, belt: 'White', ...state.battleProgress };
 state.publicRankings.filters = { country:'all', belt:'all', relationship:'all', ...(state.publicRankings.filters || {}) };
 state.librarySort = safeParse('djBattleLibrarySort', null) || { field:'title', direction:'asc' };
 state.libraryFilters = { crate:'all', search:'', compatibleOnly:false };
@@ -513,6 +513,75 @@ function renderCurrentUserUI(){
   if(chip) chip.dataset.userState = user.signedIn ? 'signed-in' : 'guest';
   return user;
 }
+function currentPublicProfileShareId(){
+  const user = currentUser();
+  if(!user || !user.signedIn) return '';
+  const personal = state.publicRankings && state.publicRankings.personal && state.publicRankings.personal.rankings || {};
+  const fromPersonal = Object.values(personal).flatMap(category => Array.isArray(category && category.rows) ? category.rows : []).find(row => row && row.publicProfileId);
+  if(fromPersonal && fromPersonal.publicProfileId) return String(fromPersonal.publicProfileId);
+  const my = state.verifiedResultsDiscovery && state.verifiedResultsDiscovery.myRankings || {};
+  const fromMy = Object.values(my).flatMap(category => Array.isArray(category && category.rows) ? category.rows : []).find(row => row && row.publicProfileId);
+  if(fromMy && fromMy.publicProfileId) return String(fromMy.publicProfileId);
+  const raw = String(user.id || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return raw ? `dj_${raw.slice(0, 48)}` : '';
+}
+
+function currentProfileShareUrl(){
+  const profileId = currentPublicProfileShareId();
+  if(!profileId) return '';
+  const origin = typeof window !== 'undefined' && window.location ? `${window.location.origin}${window.location.pathname || '/'}` : '';
+  return `${origin}#dj=${encodeURIComponent(profileId)}`;
+}
+
+function showAppToast(title, summary){
+  let rack = document.getElementById('notification-toast-rack');
+  if(!rack){
+    rack = document.createElement('div');
+    rack.id = 'notification-toast-rack';
+    rack.className = 'notification-toast-rack';
+    document.body.appendChild(rack);
+  }
+  const toast = document.createElement('div');
+  toast.className = 'notification-toast';
+  toast.setAttribute('role', 'status');
+  toast.innerHTML = `<strong>${esc(title || 'Done')}</strong><small>${esc(summary || '')}</small>`;
+  rack.appendChild(toast);
+  const timer = setTimeout(() => toast.remove(), 4200);
+  if(timer && typeof timer.unref === 'function') timer.unref();
+  return toast;
+}
+
+async function shareCurrentProfile(){
+  const profileId = currentPublicProfileShareId();
+  if(!profileId){
+    openModal(`<span class="eyebrow accent">SHARE PROFILE</span><h3>Local profile only</h3><p style="color:var(--muted)" id="share-profile-local-note">This browser profile is local only. Sign in to get a public DJ link you can share.</p><div class="modal-actions"><button class="primary" value="cancel">Close</button></div>`);
+    return { shared:false, reason:'local_only' };
+  }
+  const url = currentProfileShareUrl();
+  try{
+    if(navigator.clipboard && typeof navigator.clipboard.writeText === 'function'){
+      await navigator.clipboard.writeText(url);
+    } else {
+      const input = document.createElement('textarea');
+      input.value = url;
+      input.setAttribute('readonly', '');
+      input.style.position = 'fixed';
+      input.style.left = '-9999px';
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      input.remove();
+    }
+    showAppToast('Profile link copied', url);
+    return { shared:true, url, profileId };
+  }catch(err){
+    openModal(`<span class="eyebrow accent">SHARE PROFILE</span><h3>Copy this link</h3><p style="color:var(--muted)">Clipboard access was blocked. Copy the public profile link below.</p><input id="share-profile-fallback" readonly value="${esc(url)}"><div class="modal-actions"><button class="primary" value="cancel">Close</button></div>`);
+    const field = document.getElementById('share-profile-fallback');
+    if(field){ field.focus(); field.select(); }
+    return { shared:false, reason:'clipboard_blocked', url, profileId };
+  }
+}
+
 function publicVisitorId(){
   const key = 'djBattlePublicVisitor';
   let value = localStorage.getItem(key);
@@ -645,6 +714,7 @@ function sanitizedTrackForStorage(track){
     'artworkStorageObjectPath'
   ].forEach(key => { delete clone[key]; });
   if(clone.playbackAccess) delete clone.playbackAccess;
+  delete clone.audioMissing;
   if(clone.audio && typeof clone.audio === 'string' && /^data:audio\//i.test(clone.audio)) delete clone.audio;
   Object.keys(clone).forEach(key => {
     if(/path|token|service/i.test(key) && typeof clone[key] === 'string' && /(private\/|service[_-]?key|token=)/i.test(clone[key])) delete clone[key];
@@ -1081,11 +1151,93 @@ function filteredBattleRows(filter='All'){
   });
   return list;
 }
+function pendingInviteChallenges(){
+  return (state.djChallenges.rows || []).filter(row => {
+    const status = String(row.status || 'pending').toLowerCase().replace(/_/g, '-');
+    return status === 'pending' || status === 'challenge-pending' || status === 'invited';
+  });
+}
+
+function openChallengeInboxFromBattles(){
+  activeProfileTab = 'challenges';
+  switchView('profile');
+  renderProfile();
+  loadDjChallengeInbox({ preserve:true }).catch(err => console.warn('Challenge inbox open failed', err));
+}
+
+function battleInvitesPanelHtml(){
+  const signedIn = Boolean(currentUser().signedIn);
+  const apiReady = typeof djChallengeApiAvailable === 'function' && djChallengeApiAvailable();
+  if(!signedIn || !apiReady){
+    return `<div class="panel battle-empty" id="battle-invites-empty"><strong>Sign in to see invites</strong><p>Pending DJ challenges and battle invites appear here after you sign in with a live server.</p><div class="challenge-actions" style="margin-top:12px"><button class="primary small" type="button" id="battle-invites-signin">Sign In</button></div></div>`;
+  }
+  const challenges = pendingInviteChallenges();
+  const inviteBattles = battles.filter(b => battleTabMatches(b, 'invites'));
+  if(!challenges.length && !inviteBattles.length){
+    const loading = ['loading','reconnecting'].includes(state.djChallenges.status);
+    return `<div class="panel battle-empty" id="battle-invites-empty"><strong>${loading ? 'Loading invites…' : 'No pending invites'}</strong><p>${loading ? 'Checking your Challenge Inbox for pending battle invites.' : 'When someone challenges you to a battle, it shows up here. You can also open the full Challenge Inbox on your profile.'}</p><div class="challenge-actions" style="margin-top:12px"><button class="ghost small" type="button" id="battle-invites-open-inbox">Open Challenge Inbox</button></div></div>`;
+  }
+  const challengeBlock = challenges.length
+    ? `<div class="battle-invites-challenges">${challenges.map(challengeRowHtml).join('')}</div>`
+    : '';
+  const battleBlock = inviteBattles.length ? inviteBattles.map(battleCard).join('') : '';
+  return `<div class="battle-invites-panel"><div class="section-head compact"><div><span class="eyebrow accent">PENDING INVITES</span><h3>Challenges &amp; battle invites</h3></div><button class="ghost small" type="button" id="battle-invites-open-inbox">Open Challenge Inbox</button></div>${challengeBlock}${battleBlock}</div>`;
+}
+
+function wireBattleInvitesPanel(){
+  const signIn = document.getElementById('battle-invites-signin');
+  if(signIn) signIn.onclick = () => {
+    const authBtn = document.getElementById('auth-button');
+    if(authBtn) authBtn.click();
+  };
+  const openInbox = document.getElementById('battle-invites-open-inbox');
+  if(openInbox) openInbox.onclick = () => openChallengeInboxFromBattles();
+  document.querySelectorAll('#battle-grid [data-challenge-accept]').forEach(button => {
+    button.onclick = event => acceptDjChallengeFromInbox(event.currentTarget.dataset.challengeAccept);
+  });
+  document.querySelectorAll('#battle-grid [data-challenge-decline]').forEach(button => {
+    button.onclick = event => updateDjChallengeTerminal(event.currentTarget.dataset.challengeDecline, 'decline');
+  });
+  document.querySelectorAll('#battle-grid [data-challenge-cancel]').forEach(button => {
+    button.onclick = event => updateDjChallengeTerminal(event.currentTarget.dataset.challengeCancel, 'cancel');
+  });
+  document.querySelectorAll('#battle-grid [data-challenge-open-battle]').forEach(button => {
+    button.onclick = event => recoverAcceptedChallengeBattle(event.currentTarget.dataset.challengeOpenBattle);
+  });
+  document.querySelectorAll('#battle-grid [data-enter]').forEach(b => {
+    b.onclick = () => openBattleLifecycle(b.dataset.enter);
+  });
+}
+
 function renderBattles(filter='All'){
   syncBattleFilterControls();
+  const grid = document.getElementById('battle-grid');
+  if((state.battleViewTab || 'open') === 'invites'){
+    if(grid){
+      grid.classList.toggle('battle-grid-view', state.battleLayout === 'grid');
+      grid.innerHTML = battleLobbyStatusStripHtml() + battleInvitesPanelHtml();
+      wireBattleInvitesPanel();
+    }
+    const featured = document.getElementById('featured-battles');
+    if(featured){
+      const previousTab = state.battleViewTab;
+      state.battleViewTab = 'open';
+      featured.innerHTML = filteredBattleRows(filter).slice(0,3).map(battleCard).join('');
+      state.battleViewTab = previousTab;
+      featured.querySelectorAll('[data-enter]').forEach(b=>b.onclick=()=>openBattleLifecycle(b.dataset.enter));
+    }
+    wireBattleLobbyControls(filter);
+    if(currentUser().signedIn && typeof djChallengeApiAvailable === 'function' && djChallengeApiAvailable()){
+      if(['idle','offline','failed'].includes(state.djChallenges.status)){
+        loadDjChallengeInbox({ render:false, preserve:true }).then(() => {
+          if((state.battleViewTab || 'open') === 'invites') renderBattles(filter);
+        }).catch(err => console.warn('Invites challenge refresh failed', err));
+      }
+    }
+    return;
+  }
   const list = filteredBattleRows(filter);
   const empty = `<div class="panel battle-empty"><strong>No battles match these filters.</strong><p>Adjust the filters or create a battle for this lane.</p></div>`;
-  const grid = document.getElementById('battle-grid');
   if(grid){ grid.classList.toggle('battle-grid-view', state.battleLayout === 'grid'); grid.innerHTML=battleLobbyStatusStripHtml()+(list.length ? list.map(battleCard).join('') : empty); }
   const featured = document.getElementById('featured-battles');
   if(featured) featured.innerHTML=filteredBattleRows('All').slice(0,3).map(battleCard).join('');
@@ -1216,6 +1368,9 @@ function wireBattleLobbyControls(currentGenre = 'All'){
     button.onclick = () => {
       state.battleViewTab = button.dataset.battleTab || 'open';
       localStorage.setItem('djBattleBattleViewTab', state.battleViewTab);
+      if(state.battleViewTab === 'invites' && currentUser().signedIn && typeof djChallengeApiAvailable === 'function' && djChallengeApiAvailable() && !['synced','loading','reconnecting'].includes(state.djChallenges.status)){
+        state.djChallenges.status = 'idle';
+      }
       renderBattles(currentGenre);
     };
   });
@@ -1571,20 +1726,30 @@ function updateBattleProgressUi(){
   const progress = state.battleProgress;
   const belt = progress.belt || beltForXp(progress.xp).name;
   if(window.setCurrentBelt) window.setCurrentBelt(belt);
-  document.querySelectorAll('.profile-score strong').forEach(el=>{ el.textContent = String(progress.rating || 87); });
+  const rating = Number(progress.rating || 0);
+  const wins = Number(progress.wins || 0);
+  const losses = Number(progress.losses || 0);
+  const xp = Number(progress.xp || 0);
+  const rankingRating = Number(progress.rankingRating || 0);
+  document.querySelectorAll('.profile-score strong').forEach(el=>{ el.textContent = String(rating); });
   const profileStats = document.querySelectorAll('.profile-stats > div');
-  if(profileStats[0]) profileStats[0].querySelector('strong').textContent = String(progress.wins || 0);
-  if(profileStats[1]) profileStats[1].querySelector('strong').textContent = String(progress.losses || 0);
-  if(profileStats[3]) profileStats[3].querySelector('strong').textContent = String(progress.xp || 0);
+  if(profileStats[0]) profileStats[0].querySelector('strong').textContent = String(wins);
+  if(profileStats[1]) profileStats[1].querySelector('strong').textContent = String(losses);
+  if(profileStats[3]) profileStats[3].querySelector('strong').textContent = String(xp);
+  const setIdText = (id, value) => { const node = document.getElementById(id); if(node) node.textContent = String(value); };
+  setIdText('dashboard-wins', wins);
+  setIdText('dashboard-losses', losses);
+  setIdText('dashboard-ai-avg', rating);
+  setIdText('dashboard-rank', rankingRating > 0 ? String(rankingRating) : 'Unranked');
   const pathPanel = document.querySelector('#dashboard .progress-wrap');
   if(pathPanel){
-    const next = BELT_THRESHOLDS.find(item => item.xp > Number(progress.xp || 0)) || BELT_THRESHOLDS[BELT_THRESHOLDS.length - 1];
-    const prev = beltForXp(progress.xp);
+    const next = BELT_THRESHOLDS.find(item => item.xp > xp) || BELT_THRESHOLDS[BELT_THRESHOLDS.length - 1];
+    const prev = beltForXp(xp);
     const range = Math.max(1, next.xp - prev.xp);
-    const pct = next.xp === prev.xp ? 100 : Math.max(0, Math.min(100, Math.round(((progress.xp - prev.xp) / range) * 100)));
-    const label = pathPanel.querySelector('.progress-label strong');
-    const bar = pathPanel.querySelector('.progress i');
-    if(label) label.textContent = `${progress.xp} / ${next.xp}`;
+    const pct = next.xp === prev.xp ? 100 : Math.max(0, Math.min(100, Math.round(((xp - prev.xp) / range) * 100)));
+    const label = document.getElementById('dashboard-xp-label') || pathPanel.querySelector('.progress-label strong');
+    const bar = document.getElementById('dashboard-xp-bar') || pathPanel.querySelector('.progress i');
+    if(label) label.textContent = `${xp} / ${next.xp}`;
     if(bar) bar.style.width = `${pct}%`;
   }
 }
@@ -1633,7 +1798,7 @@ function applyBattleProgression(result, battle){
   const progress = state.battleProgress;
   progress.xp = Number(progress.xp || 0) + Number(progression.xp || 0);
   progress.rating = Math.max(0, Math.min(100, Number(progress.rating || 0) + Number(progression.ratingDelta || 0)));
-  progress.rankingRating = Math.max(0, Number(progress.rankingRating || 1744) + Number(progression.ratingDelta || 0));
+  progress.rankingRating = Math.max(0, Number(progress.rankingRating || 0) + Number(progression.ratingDelta || 0));
   if(result.won === true) progress.wins = Number(progress.wins || 0) + 1;
   if(result.won === false) progress.losses = Number(progress.losses || 0) + 1;
   progress.belt = beltForXp(progress.xp).name;
@@ -2217,49 +2382,90 @@ function openPracticeMode(battleName='Practice Session', battleType='Practice', 
   },0);
 }
 
+function isFabricatedLocalOpponent(participant){
+  if(!participant) return false;
+  const id = String(participant.userId || participant.id || '');
+  return id.startsWith('local-opponent-') || (participant.name === 'Rival DJ' && id.startsWith('local-'));
+}
+
+function realOpponentFromBattle(battle){
+  const selfId = currentProfileUserId();
+  const participant = (battle && battle.participants || []).find(p => p && p.userId !== selfId && !isFabricatedLocalOpponent(p));
+  if(!participant) return null;
+  return {
+    userId: participant.userId,
+    name: participant.name || 'Opponent',
+    country: participant.country || '',
+    belt: participant.belt || '',
+    record: participant.record || ''
+  };
+}
+
+function showLocalWaitingRoom(battle, assigned, options = {}){
+  const tracksHtml = assigned.length
+    ? assigned.map(a=>`<div style="padding:8px 0;border-bottom:1px solid #1f2730">♫ <strong>${esc(a)}</strong></div>`).join('')
+    : '<div style="color:var(--muted)">Tracks will be assigned when a real opponent joins, or choose Solo AI Rating.</div>';
+  document.getElementById('modal-content').innerHTML = `<span class="eyebrow accent">WAITING ROOM</span><h3>${esc(battle.title || 'Battle')}</h3><p style="color:var(--muted)">No real opponent has joined yet. Stay listed as waiting, run Solo AI Rating, or search for a live match.</p><div class="panel" style="margin-top:12px">${tracksHtml}</div><div class="notice" style="margin-top:12px"><strong>Waiting for opponent</strong><span>We no longer invent a Rival DJ for local joins.</span></div><div class="modal-actions" style="margin-top:12px"><button class="ghost" value="cancel">Close</button><button class="ghost" type="button" id="waiting-solo-ai">Solo AI Rating</button><button class="primary" type="button" id="waiting-find-match">Find Match</button></div>`;
+  setTimeout(()=>{
+    const solo = document.getElementById('waiting-solo-ai');
+    if(solo) solo.onclick = () => {
+      document.getElementById('modal').close();
+      if(typeof options.onSolo === 'function') options.onSolo();
+      else startAiPracticeFromModal(battle);
+    };
+    const find = document.getElementById('waiting-find-match');
+    if(find) find.onclick = async () => {
+      find.disabled = true;
+      find.textContent = 'Searching…';
+      const result = await findCompatibleServerBattle({
+        mode: battle.modeId || 'all',
+        genre: battle.genre || 'all',
+        duration: battle.durationMinutes ? String(battle.durationMinutes) : 'all'
+      });
+      if(result.battle){
+        document.getElementById('modal').close();
+        openBattleLifecycle(result.battle.id);
+        return;
+      }
+      find.disabled = false;
+      find.textContent = 'Find Match';
+      const note = result.skipped
+        ? 'Sign in with a live server to find a real opponent, or use Solo AI Rating.'
+        : (result.error || 'No compatible live battle was available right now.');
+      const notice = document.querySelector('#modal-content .notice span');
+      if(notice) notice.textContent = note;
+    };
+  },0);
+}
+
 function openBattle(id){
   const b=battles.find(x=>x.id===id); if(!b) return;
-  // If battle requires stems and user is not premium, show premium modal
+  // Legacy entry path: route through the lifecycle modal so we never invent a Rival DJ.
+  if(typeof openBattleLifecycle === 'function') return openBattleLifecycle(id);
   if(b.stems && !state.premium){ openPremium(`“${b.title}” is stem-enabled. Premium unlocks stem battles and AI stem separation.`); return; }
-  const stemsAllowed = Boolean(b.stems || state.premium);
   const selectedLength = parseMinutes(b.time);
   const lengthOptions = [10, 20, 30, 60];
-  openModal(`<span class="eyebrow accent">READY TO ENTER</span><h3>${b.title}</h3><p>${b.desc}</p><div class="form-grid"><label>Mode<select id="enter-mode"><option value="Standard Battle">Standard Battle</option><option value="Scratch Battle">Scratch Battle</option><option value="Own Selection (Premium)">Own Selection (Premium)</option></select></label><label>Genre<select id="enter-genre">${GENRES.map(g=>`<option value="${g}" ${g===b.genre?'selected':''}>${g}</option>`).join('')}</select></label><label>Battle length<select id="enter-length">${lengthOptions.map(minutes=>`<option value="${minutes}" ${minutes===selectedLength?'selected':''}>${minutes} minutes</option>`).join('')}</select></label><label class="toggle-row">Allow stems <input type="checkbox" id="enter-stems" ${stemsAllowed?'':'disabled'} ${b.stems||state.premium?'checked':''}></label></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="find-opponent">Find Opponent</button><button class="ghost" type="button" id="practice-only">Solo AI Rating</button></div>`);
-
+  openModal(`<span class="eyebrow accent">READY TO ENTER</span><h3>${esc(b.title)}</h3><p>${esc(b.desc || '')}</p><div class="form-grid"><label>Genre<select id="enter-genre">${GENRES.map(g=>`<option value="${g}" ${g===b.genre?'selected':''}>${g}</option>`).join('')}</select></label><label>Battle length<select id="enter-length">${lengthOptions.map(minutes=>`<option value="${minutes}" ${minutes===selectedLength?'selected':''}>${minutes} minutes</option>`).join('')}</select></label></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="find-opponent">Join Waiting Room</button><button class="ghost" type="button" id="practice-only">Solo AI Rating</button></div>`);
   setTimeout(()=>{
-    const findBtn=document.getElementById('find-opponent'); if(findBtn) findBtn.onclick=()=>{
+    const findBtn=document.getElementById('find-opponent');
+    if(findBtn) findBtn.onclick=()=>{
       const chosenGenre=document.getElementById('enter-genre').value;
-      const wantStems=document.getElementById('enter-stems').checked;
-      const chosenMode=document.getElementById('enter-mode').value;
       const chosenLength=Number(document.getElementById('enter-length').value||10);
-      openModal(`<span class="eyebrow accent">MATCHING</span><h3>Finding compatible DJs...</h3><p style="color:var(--muted)">Genre: ${chosenGenre} • Mode: ${chosenMode} • Length: ${chosenLength}m</p><div class="panel" style="margin-top:12px;text-align:center;color:var(--muted)">Searching…</div>`);
-      setTimeout(()=>{
-        const noOpponent = Math.random() < 0.35;
-        const numMatch=(String(b.tracks).match(/(\d+)/)||[])[0];
-        const num = numMatch? Number(numMatch) : (b.type&&b.type.includes('5')?5:2);
-        let assigned=[];
-        if((b.selection && b.selection.toLowerCase().includes('assigned')) || (b.tracks && b.tracks.toLowerCase().includes('assigned'))){
-          assigned = assignTracksForBattle(b,num);
-        } else if((b.selection && b.selection.toLowerCase().includes('dj')) || (b.tracks && b.tracks.toLowerCase().includes('own'))){
-          if(state.library.length>0) assigned = [state.library[Math.floor(Math.random()*state.library.length)].name+' (use your selection)'];
-          else assigned = ['Your selection — choose from My Music'];
-        } else {
-          assigned = assignTracksForBattle(b,num);
-        }
-        if(noOpponent){
-          // Solo AI Rating fallback
-          document.getElementById('modal').close();
-          startBattleSession({ id: Date.now(), title: b.title, type: b.type }, { mode: chosenMode, genre: chosenGenre, duration: chosenLength, opponent: null, assigned });
-          return;
-        }
-        // mock opponent
-        const opponent = { name: 'Rival DJ', country: 'US', belt: 'Blue', record: '21-4' };
-        document.getElementById('modal-content').innerHTML = `<span class="eyebrow accent">ASSIGNED</span><h3>Your Assigned Tracks</h3><p style="color:var(--muted)">${esc(b.desc)}</p><div class="panel" style="margin-top:12px">${assigned.map(a=>`<div style="padding:8px 0;border-bottom:1px solid #1f2730">♫ <strong>${esc(a)}</strong></div>`).join('')}</div><div class="notice" style="margin-top:12px"><strong>Match found</strong><span>Opponent: ${opponent.name} • ${opponent.country} • ${opponent.belt}</span></div><div class="modal-actions" style="margin-top:12px"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="enter-battle-now">Enter Battle Room</button></div>`;
-        setTimeout(()=>{const eb=document.getElementById('enter-battle-now'); if(eb) eb.onclick=()=>{document.getElementById('modal').close(); startBattleSession({ id: Date.now(), title: b.title, type: b.type }, { mode: chosenMode, genre: chosenGenre, duration: chosenLength, opponent, assigned }); };},200);
-      },900);
+      const numMatch=(String(b.tracks).match(/(\d+)/)||[])[0];
+      const num = numMatch? Number(numMatch) : (b.type&&b.type.includes('5')?5:2);
+      const assigned = assignTracksForBattle(b,num);
+      const waitingBattle = { ...b, genre: chosenGenre, durationMinutes: chosenLength, status:'waiting', lobbyStatus:'waiting' };
+      showLocalWaitingRoom(waitingBattle, assigned, {
+        onSolo: () => startBattleSession({ id: Date.now(), title: b.title, type: b.type }, { mode: 'Solo AI Rating', genre: chosenGenre, duration: chosenLength, opponent: null, assigned: [] })
+      });
     };
-
-    const practiceBtn=document.getElementById('practice-only'); if(practiceBtn) practiceBtn.onclick=()=>{ const chosenMode = document.getElementById('enter-mode')?.value || 'Solo'; const chosenGenre = document.getElementById('enter-genre')?.value || b.genre; const chosenLength = Number(document.getElementById('enter-length')?.value||10); document.getElementById('modal').close(); startBattleSession({ id: Date.now(), title: b.title, type: b.type }, { mode: 'Solo AI Rating', genre: chosenGenre, duration: chosenLength, opponent: null, assigned: [] }); };
+    const practiceBtn=document.getElementById('practice-only');
+    if(practiceBtn) practiceBtn.onclick=()=>{
+      const chosenGenre = document.getElementById('enter-genre')?.value || b.genre;
+      const chosenLength = Number(document.getElementById('enter-length')?.value||10);
+      document.getElementById('modal').close();
+      startBattleSession({ id: Date.now(), title: b.title, type: b.type }, { mode: 'Solo AI Rating', genre: chosenGenre, duration: chosenLength, opponent: null, assigned: [] });
+    };
   },0);
 }
 
@@ -2363,41 +2569,45 @@ async function joinBattleFromModal(b){
   let joined = BattleModes.joinBattle(updated, { userId: currentProfileUserId(), name: currentUser().displayName }, { now: new Date().toISOString() });
   if(joined.error && joined.code !== 'duplicate_entry') return alert(joined.error);
   let joinedBattle = joined.battle || updated;
-  let opponent = null;
-  if(joinedBattle.opponentRequirement === 'required' && !(joined.error && joined.code === 'duplicate_entry')){
-    const rivalId = `local-opponent-${joinedBattle.id}`;
-    const rivalJoin = BattleModes.joinBattle(joinedBattle, { userId: rivalId, name:'Rival DJ' }, { now: new Date().toISOString() });
-    joinedBattle = rivalJoin.battle || joinedBattle;
-    opponent = { userId: rivalId, name:'Rival DJ', country:'US', belt:'Blue', record:'21-4' };
-  } else {
-    const existingOpponent = (joinedBattle.participants || []).find(p=>p.userId !== currentProfileUserId());
-    if(existingOpponent) opponent = { userId: existingOpponent.userId, name: existingOpponent.name || 'Rival DJ', country:'US', belt:'Blue', record:'21-4' };
+  let opponent = realOpponentFromBattle(joinedBattle);
+  const needsOpponent = joinedBattle.opponentRequirement === 'required';
+  if(needsOpponent && !opponent){
+    joinedBattle = { ...joinedBattle, status:'waiting', lobbyStatus:'waiting' };
   }
   const assigned = resolveBattleTracks(joinedBattle);
-  const prepared = BattleModes.prepareBattle(joinedBattle, { userId: currentProfileUserId(), assignedTracks: assigned, now: new Date().toISOString() });
-  if(prepared.error) return alert(prepared.error);
+  let preparedBattle = joinedBattle;
+  if(!needsOpponent || opponent){
+    const prepared = BattleModes.prepareBattle(joinedBattle, { userId: currentProfileUserId(), assignedTracks: assigned, now: new Date().toISOString() });
+    if(prepared.error) return alert(prepared.error);
+    preparedBattle = prepared.battle;
+  }
   if(selectedCrate && validation.ready){
     if(battlePrepServerApiAvailable() && serverBackedBattlePrepCrate(selectedCrate)){
       if(err) err.textContent = 'Syncing Battle Prep snapshot...';
-      const serverResult = await joinAuthenticatedBattleWithPrepSnapshot(prepared.battle, selectedCrate, validation);
+      const serverResult = await joinAuthenticatedBattleWithPrepSnapshot(preparedBattle, selectedCrate, validation);
       if(serverResult.error){ if(err) err.textContent = serverResult.error; return; }
       if(serverResult.snapshot){
-        prepared.battle = attachBattlePrepSnapshotToBattle(prepared.battle, serverResult.snapshot, currentProfileUserId(), serverResult.entry);
+        preparedBattle = attachBattlePrepSnapshotToBattle(preparedBattle, serverResult.snapshot, currentProfileUserId(), serverResult.entry);
       }
     } else {
-      const snapshot = buildBattlePrepEntrySnapshot(selectedCrate, prepared.battle, validation, currentProfileUserId());
-      prepared.battle = attachBattlePrepSnapshotToBattle(prepared.battle, snapshot, currentProfileUserId());
+      const snapshot = buildBattlePrepEntrySnapshot(selectedCrate, preparedBattle, validation, currentProfileUserId());
+      preparedBattle = attachBattlePrepSnapshotToBattle(preparedBattle, snapshot, currentProfileUserId());
     }
   }
   const idx = battles.findIndex(x=>String(x.id)===String(b.id));
-  if(idx >= 0) battles[idx] = prepared.battle;
+  if(idx >= 0) battles[idx] = preparedBattle;
+  else battles.unshift(preparedBattle);
   persistBattles();
   renderBattles();
+  if(needsOpponent && !opponent){
+    showLocalWaitingRoom(preparedBattle, assigned, { onSolo: () => startAiPracticeFromModal(preparedBattle) });
+    return;
+  }
   const tracksHtml = assigned.length ? assigned.map(a=>`<div style="padding:8px 0;border-bottom:1px solid #1f2730">♫ <strong>${esc(a)}</strong></div>`).join('') : '<div style="color:var(--muted)">Own-selection battle: choose eligible tracks from My Music.</div>';
-  document.getElementById('modal-content').innerHTML = `<span class="eyebrow accent">READY</span><h3>${esc(prepared.battle.title)}</h3><p style="color:var(--muted)">${esc(prepared.battle.desc)}</p><div class="panel" style="margin-top:12px">${tracksHtml}</div><div class="notice" style="margin-top:12px"><strong>${opponent ? 'Match ready' : 'Solo practice ready'}</strong><span>${opponent ? `Opponent: ${esc(opponent.name)} | ${esc(opponent.country)} | ${esc(opponent.belt)}` : 'No opponent required for this mode.'}</span></div><div class="modal-actions" style="margin-top:12px"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="enter-battle-now">Enter Battle Room</button><button class="ghost" type="button" id="open-studio-now">Open Studio</button></div>`;
+  document.getElementById('modal-content').innerHTML = `<span class="eyebrow accent">READY</span><h3>${esc(preparedBattle.title)}</h3><p style="color:var(--muted)">${esc(preparedBattle.desc || '')}</p><div class="panel" style="margin-top:12px">${tracksHtml}</div><div class="notice" style="margin-top:12px"><strong>${opponent ? 'Match ready' : 'Solo practice ready'}</strong><span>${opponent ? `Opponent: ${esc(opponent.name)}${opponent.country ? ' | ' + esc(opponent.country) : ''}${opponent.belt ? ' | ' + esc(opponent.belt) : ''}` : 'No opponent required for this mode.'}</span></div><div class="modal-actions" style="margin-top:12px"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="enter-battle-now">Enter Battle Room</button><button class="ghost" type="button" id="open-studio-now">Open Studio</button></div>`;
   setTimeout(()=>{
-    const eb=document.getElementById('enter-battle-now'); if(eb) eb.onclick=()=>{document.getElementById('modal').close(); startBattleSession(prepared.battle, { opponent, assigned }); };
-    const os=document.getElementById('open-studio-now'); if(os) os.onclick=()=>{document.getElementById('modal').close(); startBattleSession(prepared.battle, { opponent, assigned, view:'studio' }); };
+    const eb=document.getElementById('enter-battle-now'); if(eb) eb.onclick=()=>{document.getElementById('modal').close(); startBattleSession(preparedBattle, { opponent, assigned }); };
+    const os=document.getElementById('open-studio-now'); if(os) os.onclick=()=>{document.getElementById('modal').close(); startBattleSession(preparedBattle, { opponent, assigned, view:'studio' }); };
   },0);
 }
 
@@ -3527,6 +3737,8 @@ function initAuth(detail = {}){
 // Until Supabase setup reports back, the button explains that sign-in is loading instead of doing nothing.
 const editProfileButton = document.getElementById('edit-profile-button');
 if(editProfileButton) editProfileButton.onclick = openEditProfileModal;
+const shareProfileButton = document.getElementById('share-profile-button');
+if(shareProfileButton) shareProfileButton.onclick = () => { shareCurrentProfile().catch(err => console.warn('Profile share failed', err)); };
 
 (function wireAuthButtonUntilReady(){
   renderCurrentUserUI();
@@ -3546,6 +3758,124 @@ renderJudgingOperationsAccess();
 function persistPlatform(){ localStorage.setItem('djBattlePlatformLibrary', JSON.stringify(state.platformLibrary)); localStorage.setItem('djBattlePlaylists', JSON.stringify(sanitizedCratesForStorage(state.playlists.filter(crate => !crate.serverBacked)))); if(state.musicLibrarySync && state.musicLibrarySync.accountId) persistCrateCacheForAccount(state.musicLibrarySync.accountId); }
 
 const librarySessionAudioUrls = new Map();
+const LIBRARY_AUDIO_DB_NAME = 'djBattleLibraryAudio';
+const LIBRARY_AUDIO_STORE = 'blobs';
+
+function openLibraryAudioDb(){
+  return new Promise((resolve, reject) => {
+    if(typeof indexedDB === 'undefined') return reject(new Error('IndexedDB unavailable'));
+    const request = indexedDB.open(LIBRARY_AUDIO_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if(!db.objectStoreNames.contains(LIBRARY_AUDIO_STORE)) db.createObjectStore(LIBRARY_AUDIO_STORE);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('IndexedDB open failed'));
+  });
+}
+
+function idbRequest(request){
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('IndexedDB request failed'));
+  });
+}
+
+async function saveLibraryAudioBlob(trackId, blob){
+  const key = String(trackId || '');
+  if(!key || !blob) return { ok:false, error:'Missing track audio' };
+  try{
+    const db = await openLibraryAudioDb();
+    await idbRequest(db.transaction(LIBRARY_AUDIO_STORE, 'readwrite').objectStore(LIBRARY_AUDIO_STORE).put(blob, key));
+    db.close();
+    return { ok:true };
+  }catch(error){
+    return { ok:false, error:String(error && error.message || error) };
+  }
+}
+
+async function loadLibraryAudioBlob(trackId){
+  const key = String(trackId || '');
+  if(!key) return null;
+  try{
+    const db = await openLibraryAudioDb();
+    const blob = await idbRequest(db.transaction(LIBRARY_AUDIO_STORE, 'readonly').objectStore(LIBRARY_AUDIO_STORE).get(key));
+    db.close();
+    return blob || null;
+  }catch(error){
+    return null;
+  }
+}
+
+async function deleteLibraryAudioBlob(trackId){
+  const key = String(trackId || '');
+  if(!key) return { ok:false };
+  try{
+    const db = await openLibraryAudioDb();
+    await idbRequest(db.transaction(LIBRARY_AUDIO_STORE, 'readwrite').objectStore(LIBRARY_AUDIO_STORE).delete(key));
+    db.close();
+    return { ok:true };
+  }catch(error){
+    return { ok:false, error:String(error && error.message || error) };
+  }
+}
+
+async function attachLibraryAudioBlob(trackId, blob, options = {}){
+  const key = String(trackId || '');
+  if(!key || !blob) return { ok:false, error:'Missing track audio' };
+  const saved = await saveLibraryAudioBlob(key, blob);
+  if(!saved.ok) return saved;
+  if(window.URL && window.URL.createObjectURL){
+    const previous = librarySessionAudioUrls.get(key);
+    if(previous && window.URL.revokeObjectURL && options.revokePrevious !== false){
+      try{ window.URL.revokeObjectURL(previous); }catch(e){}
+    }
+    try{ librarySessionAudioUrls.set(key, window.URL.createObjectURL(blob)); }catch(e){ return { ok:false, error:String(e && e.message || e) }; }
+  }
+  const track = (state.library || []).find(item => String(item.id) === key || String(item.originalId || '') === key);
+  if(track){
+    track.localAudioPersisted = true;
+    track.audioMissing = false;
+  }
+  return { ok:true, track };
+}
+
+async function restoreLibraryAudioFromIndexedDb(){
+  const rows = (state.library || []).filter(track => track && !track.serverBacked);
+  for(const track of rows){
+    const key = String(track.id || '');
+    if(!key) continue;
+    if(librarySessionAudioUrls.has(key)){
+      track.audioMissing = false;
+      continue;
+    }
+    if(!track.localAudioPersisted && !track.size){
+      track.audioMissing = false;
+      continue;
+    }
+    const blob = await loadLibraryAudioBlob(key);
+    if(blob && window.URL && window.URL.createObjectURL){
+      try{
+        librarySessionAudioUrls.set(key, window.URL.createObjectURL(blob));
+        track.localAudioPersisted = true;
+        track.audioMissing = false;
+      }catch(e){
+        track.audioMissing = true;
+      }
+    } else if(track.localAudioPersisted || track.size){
+      track.audioMissing = true;
+    }
+  }
+  return rows;
+}
+
+function libraryAudioStatusLabel(track){
+  if(!track || track.serverBacked) return '';
+  if(securePlaybackSource(track)) return 'Audio ready';
+  if(track.audioMissing || track.localAudioPersisted) return 'audio missing - re-attach';
+  return 'No local audio yet';
+}
+
 const KEY_TO_CAMELOT = {
   'a minor':'8A','c major':'8B','e minor':'9A','g major':'9B','b minor':'10A','d major':'10B',
   'f# minor':'11A','gb minor':'11A','a major':'11B','c# minor':'12A','db minor':'12A','e major':'12B',
@@ -5863,6 +6193,7 @@ function renderLibraryDetail(track){
       <div class="library-readout"><span>RIGHTS</span><strong>${track.battleEligible ? 'READY' : 'LOCKED'}</strong></div>
     </div>
     ${editable ? `<label class="artwork-control">Track artwork<input type="file" accept="image/*" data-artwork-track="${esc(track.libraryId)}"></label>` : '<small style="color:var(--muted)">Platform artwork is controlled by the approved source catalog.</small>'}
+    ${editable && !track.serverBacked ? `<div class="library-audio-status ${track.audioMissing ? 'missing' : ''}" id="library-audio-status"><strong>${esc(libraryAudioStatusLabel(track))}</strong>${track.audioMissing || (!securePlaybackSource(track) && track.localAudioPersisted) ? '<p style="color:var(--muted);margin:4px 0 0">Local audio was not found after refresh. Re-attach the file to restore playback.</p><label class="artwork-control">Re-attach audio<input type="file" accept="audio/*" data-reattach-audio="' + esc(track.id || track.libraryId) + '"></label>' : ''}</div>` : ''}
     ${renderCrateEditorPanel()}
   `;
   renderCompatibleList(track);
@@ -6228,18 +6559,14 @@ function handleLibraryFilesWithMeta(files){
         const declared = !!document.getElementById('meta-declare').checked;
         const serverUpload = await createServerBackedLibraryTrackFromFile(f, { title, artist, genre, rightsClassification:rightsCategoryToClassification(rights) }).catch(error => ({ error:String(error && error.message || error) }));
         if(serverUpload && serverUpload.data && serverUpload.data.track){
-          if(window.URL && window.URL.createObjectURL){
-            try{ librarySessionAudioUrls.set(serverUpload.data.track.id, window.URL.createObjectURL(f)); }catch(e){}
-          }
+          await attachLibraryAudioBlob(serverUpload.data.track.id, f);
           document.getElementById('modal').close();
           next();
           return;
         }
-        const track = { id: 'u-'+Date.now(), title, name: title, artist, uploader: (document.getElementById('profile-name')?.textContent||'You'), album:null, artwork:null, artworkDataUrl:null, genre, bpm:'--', key:'--', duration:'--', uploadDate: new Date().toISOString(), size: f.size||0, source:'MY_LIBRARY', rightsCategory: rights, rightsDeclared: declared, copyrightCheck: 'Not Checked', battleEligible: rights !== 'Commercial / Copyrighted Music', permissions: defaultPermissions(), stems:false };
-        if(window.URL && window.URL.createObjectURL){
-          try{ librarySessionAudioUrls.set(track.id, window.URL.createObjectURL(f)); }catch(e){}
-        }
+        const track = { id: 'u-'+Date.now(), title, name: title, artist, uploader: (document.getElementById('profile-name')?.textContent||'You'), album:null, artwork:null, artworkDataUrl:null, genre, bpm:'--', key:'--', duration:'--', uploadDate: new Date().toISOString(), size: f.size||0, source:'MY_LIBRARY', rightsCategory: rights, rightsDeclared: declared, copyrightCheck: 'Not Checked', battleEligible: rights !== 'Commercial / Copyrighted Music', permissions: defaultPermissions(), stems:false, localAudioPersisted:false, audioMissing:false };
         state.library.push(track);
+        await attachLibraryAudioBlob(track.id, f);
         persist();
         document.getElementById('modal').close();
         next();
@@ -6301,7 +6628,7 @@ function renderLibrary(){
     body.innerHTML=rows.map((t)=>`
       <tr data-library-row="${esc(t.libraryId)}" tabindex="0" draggable="${crateEditing ? 'true' : 'false'}" class="${selected && selected.libraryId === t.libraryId ? 'selected' : ''} ${selectedCrateIds.has(t.libraryId) ? 'crate-selected' : ''} ${state.crateEditor.dragOverTrackId === t.libraryId ? 'crate-drop-target' : ''}">
         <td>${crateEditing ? `<label class="crate-row-select"><input type="checkbox" data-crate-select-track="${esc(t.libraryId)}" ${selectedCrateIds.has(t.libraryId) ? 'checked' : ''}><span class="drag-handle" data-crate-drag="${esc(t.libraryId)}" aria-label="Drag reorder handle">::</span></label>` : artworkMarkup(t)}</td>
-        <td><strong class="library-track-title">${esc(trackTitle(t))}</strong><small class="library-track-meta">${esc(t.duration || '—')} / ${t.battleEligible ? 'Battle ready' : 'Rights locked'}</small></td>
+        <td><strong class="library-track-title">${esc(trackTitle(t))}</strong><small class="library-track-meta">${esc(t.duration || '—')} / ${t.battleEligible ? 'Battle ready' : 'Rights locked'}${t.audioMissing ? ' / <span class="library-audio-missing">audio missing - re-attach</span>' : ''}</small></td>
         <td>${esc(trackArtist(t))}</td>
         <td>${esc(trackSource(t))}</td>
         <td>${esc(t.genre || 'Unsorted')}</td>
@@ -6330,7 +6657,7 @@ function renderLibrary(){
   document.querySelectorAll('[data-library-select]').forEach(b=>b.onclick=(e)=>selectLibraryTrack(e.currentTarget.dataset.librarySelect, { loadPlayer:false }));
   document.querySelectorAll('[data-library-play]').forEach(b=>b.onclick=(e)=>selectLibraryTrack(e.currentTarget.dataset.libraryPlay, { play:true }));
   document.querySelectorAll('[data-library-load-deck]').forEach(b=>b.onclick=(e)=>loadLibraryTrackToDeck(e.currentTarget.dataset.libraryTrack, e.currentTarget.dataset.libraryLoadDeck));
-  document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{const editable=getEditableLibraryTrack(b.dataset.remove); if(editable){state.library.splice(editable.index,1);persist();renderLibrary();renderStudioLibrary();}});
+  document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{const editable=getEditableLibraryTrack(b.dataset.remove); if(editable){const removedId=editable.track && editable.track.id; state.library.splice(editable.index,1); if(removedId && !editable.track.serverBacked){ const url=librarySessionAudioUrls.get(String(removedId)); if(url && window.URL && window.URL.revokeObjectURL){ try{ window.URL.revokeObjectURL(url); }catch(e){} } librarySessionAudioUrls.delete(String(removedId)); deleteLibraryAudioBlob(removedId).catch(()=>{}); } persist();renderLibrary();renderStudioLibrary();}});
   document.querySelectorAll('[data-rights-check]').forEach(b=>b.onclick=async(e)=>{const editable=getEditableLibraryTrack(e.currentTarget.dataset.rightsCheck); if(editable){ await runCopyrightCheck(editable.track); renderLibrary(); }});
   document.querySelectorAll('[data-add-playlist]').forEach(b=>b.onclick=()=>{ const editable=getEditableLibraryTrack(b.dataset.addPlaylist); if(editable) addTrackToPlaylist(editable.track); });
   document.querySelectorAll('[data-artwork-track]').forEach(input=>input.onchange=async(e)=>{ const result = await attachArtworkToTrack(e.currentTarget.dataset.artworkTrack, e.currentTarget.files && e.currentTarget.files[0]); if(!result.ok) alert(result.error); });
@@ -9855,7 +10182,8 @@ async function loadDjChallengeInbox(options = {}){
   if(!djChallengeApiAvailable()){
     state.djChallenges.status = 'offline';
     state.djChallenges.error = 'Sign in and server access are required for the Challenge Inbox.';
-    renderChallengeInbox();
+    if(options.render !== false) renderChallengeInbox();
+    if((state.battleViewTab || 'open') === 'invites') renderBattles();
     return { skipped:true, reason:'api_unavailable' };
   }
   const seq = ++state.djChallenges.requestSeq;
@@ -9880,7 +10208,8 @@ async function loadDjChallengeInbox(options = {}){
   state.djChallenges.page = state.djChallenges.pagination.page || nextPage;
   state.djChallenges.status = 'synced';
   state.djChallenges.lastSuccessfulAt = new Date().toISOString();
-  renderChallengeInbox();
+  if(options.render !== false) renderChallengeInbox();
+  if((state.battleViewTab || 'open') === 'invites') renderBattles();
   loadDjChallengeCount().catch(()=>{});
   return { challenges:state.djChallenges.rows, response };
 }
@@ -10967,6 +11296,7 @@ window.addEventListener('beforeunload', event => {
 state.library = sanitizedLibraryForStorage(state.library).filter(track => !track.serverBacked);
 state.playlists = sanitizedCratesForStorage(state.playlists).filter(crate => !crate.serverBacked);
 renderBattles();renderPosts();renderLibrary();renderProfile();renderPlatformLibrary();renderStreamingServices();renderStreamBrowser();renderAiLeaderboard();updateBattleProgressUi();timerText();recoverActiveBattleSession();
+restoreLibraryAudioFromIndexedDb().then(() => { renderLibrary(); renderStudioLibrary && renderStudioLibrary(); }).catch(err => console.warn('Library audio restore failed', err));
 
 setTimeout(()=>{
   const hash = String(window.location && window.location.hash || '');
@@ -10981,12 +11311,34 @@ setTimeout(()=>{
   if(profileMatch) loadPublicDjProfile(decodeURIComponent(profileMatch[1]));
 },0);
 
+
+document.addEventListener('change', event => {
+  const input = event.target && event.target.closest && event.target.closest('[data-reattach-audio]');
+  if(!input) return;
+  const file = input.files && input.files[0];
+  const trackId = input.dataset.reattachAudio;
+  if(!file || !trackId) return;
+  attachLibraryAudioBlob(trackId, file).then(result => {
+    if(!result.ok){
+      alert(result.error || 'Could not re-attach audio');
+      return;
+    }
+    persist();
+    renderLibrary();
+    if(typeof renderStudioLibrary === 'function') renderStudioLibrary();
+  }).catch(err => console.warn('Re-attach audio failed', err));
+});
+
 window.__DJBattleTestHooks = {
   initAuth,
   currentUser,
   renderCurrentUserUI,
   saveLocalProfile,
   openEditProfileModal,
+  shareCurrentProfile,
+  currentPublicProfileShareId,
+  currentProfileShareUrl,
+  showAppToast,
   localCommunityPosts,
   getAuthInitState: () => ({ ...authInitState, liveMode:LIVE_MODE }),
   getDataSourceState: () => ({ ...dataSourceState }),
@@ -11020,6 +11372,9 @@ window.__DJBattleTestHooks = {
   openCreateBattleModal,
   openBattleLifecycle,
   joinBattleFromModal,
+  showLocalWaitingRoom,
+  realOpponentFromBattle,
+  isFabricatedLocalOpponent,
   createAuthenticatedBattleWithPrepSnapshot,
   joinAuthenticatedBattleWithPrepSnapshot,
   hydrateServerBattlePrepSnapshot,
@@ -11059,6 +11414,11 @@ window.__DJBattleTestHooks = {
   loadDjChallengeInbox,
   loadDjChallengeCount,
   renderChallengeInbox,
+  pendingInviteChallenges,
+  battleInvitesPanelHtml,
+  openChallengeInboxFromBattles,
+  getDjChallenges: () => state.djChallenges,
+  renderBattles,
   acceptDjChallengeFromInbox,
   updateDjChallengeTerminal,
   routeAcceptedChallengeToBattleRoom,
@@ -11132,6 +11492,13 @@ window.__DJBattleTestHooks = {
   getPracticeHistory: () => state.practiceHistory,
   getBattleHistoryFilters: () => state.battleHistoryFilters,
   getBattles: () => battles,
+  saveLibraryAudioBlob,
+  loadLibraryAudioBlob,
+  deleteLibraryAudioBlob,
+  attachLibraryAudioBlob,
+  restoreLibraryAudioFromIndexedDb,
+  libraryAudioStatusLabel,
+  getLibrarySessionAudioUrls: () => librarySessionAudioUrls,
   getBattleLobbyState: () => state.battleLobby,
   setBattleLobbyFilters: filters => { state.battleLobby.filters = { ...state.battleLobby.filters, ...filters }; },
   getBattleRoomSyncState: () => state.battleRoomSync,
