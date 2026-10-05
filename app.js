@@ -714,6 +714,7 @@ function sanitizedTrackForStorage(track){
     'artworkStorageObjectPath'
   ].forEach(key => { delete clone[key]; });
   if(clone.playbackAccess) delete clone.playbackAccess;
+  delete clone.audioMissing;
   if(clone.audio && typeof clone.audio === 'string' && /^data:audio\//i.test(clone.audio)) delete clone.audio;
   Object.keys(clone).forEach(key => {
     if(/path|token|service/i.test(key) && typeof clone[key] === 'string' && /(private\/|service[_-]?key|token=)/i.test(clone[key])) delete clone[key];
@@ -3757,6 +3758,124 @@ renderJudgingOperationsAccess();
 function persistPlatform(){ localStorage.setItem('djBattlePlatformLibrary', JSON.stringify(state.platformLibrary)); localStorage.setItem('djBattlePlaylists', JSON.stringify(sanitizedCratesForStorage(state.playlists.filter(crate => !crate.serverBacked)))); if(state.musicLibrarySync && state.musicLibrarySync.accountId) persistCrateCacheForAccount(state.musicLibrarySync.accountId); }
 
 const librarySessionAudioUrls = new Map();
+const LIBRARY_AUDIO_DB_NAME = 'djBattleLibraryAudio';
+const LIBRARY_AUDIO_STORE = 'blobs';
+
+function openLibraryAudioDb(){
+  return new Promise((resolve, reject) => {
+    if(typeof indexedDB === 'undefined') return reject(new Error('IndexedDB unavailable'));
+    const request = indexedDB.open(LIBRARY_AUDIO_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if(!db.objectStoreNames.contains(LIBRARY_AUDIO_STORE)) db.createObjectStore(LIBRARY_AUDIO_STORE);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('IndexedDB open failed'));
+  });
+}
+
+function idbRequest(request){
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('IndexedDB request failed'));
+  });
+}
+
+async function saveLibraryAudioBlob(trackId, blob){
+  const key = String(trackId || '');
+  if(!key || !blob) return { ok:false, error:'Missing track audio' };
+  try{
+    const db = await openLibraryAudioDb();
+    await idbRequest(db.transaction(LIBRARY_AUDIO_STORE, 'readwrite').objectStore(LIBRARY_AUDIO_STORE).put(blob, key));
+    db.close();
+    return { ok:true };
+  }catch(error){
+    return { ok:false, error:String(error && error.message || error) };
+  }
+}
+
+async function loadLibraryAudioBlob(trackId){
+  const key = String(trackId || '');
+  if(!key) return null;
+  try{
+    const db = await openLibraryAudioDb();
+    const blob = await idbRequest(db.transaction(LIBRARY_AUDIO_STORE, 'readonly').objectStore(LIBRARY_AUDIO_STORE).get(key));
+    db.close();
+    return blob || null;
+  }catch(error){
+    return null;
+  }
+}
+
+async function deleteLibraryAudioBlob(trackId){
+  const key = String(trackId || '');
+  if(!key) return { ok:false };
+  try{
+    const db = await openLibraryAudioDb();
+    await idbRequest(db.transaction(LIBRARY_AUDIO_STORE, 'readwrite').objectStore(LIBRARY_AUDIO_STORE).delete(key));
+    db.close();
+    return { ok:true };
+  }catch(error){
+    return { ok:false, error:String(error && error.message || error) };
+  }
+}
+
+async function attachLibraryAudioBlob(trackId, blob, options = {}){
+  const key = String(trackId || '');
+  if(!key || !blob) return { ok:false, error:'Missing track audio' };
+  const saved = await saveLibraryAudioBlob(key, blob);
+  if(!saved.ok) return saved;
+  if(window.URL && window.URL.createObjectURL){
+    const previous = librarySessionAudioUrls.get(key);
+    if(previous && window.URL.revokeObjectURL && options.revokePrevious !== false){
+      try{ window.URL.revokeObjectURL(previous); }catch(e){}
+    }
+    try{ librarySessionAudioUrls.set(key, window.URL.createObjectURL(blob)); }catch(e){ return { ok:false, error:String(e && e.message || e) }; }
+  }
+  const track = (state.library || []).find(item => String(item.id) === key || String(item.originalId || '') === key);
+  if(track){
+    track.localAudioPersisted = true;
+    track.audioMissing = false;
+  }
+  return { ok:true, track };
+}
+
+async function restoreLibraryAudioFromIndexedDb(){
+  const rows = (state.library || []).filter(track => track && !track.serverBacked);
+  for(const track of rows){
+    const key = String(track.id || '');
+    if(!key) continue;
+    if(librarySessionAudioUrls.has(key)){
+      track.audioMissing = false;
+      continue;
+    }
+    if(!track.localAudioPersisted && !track.size){
+      track.audioMissing = false;
+      continue;
+    }
+    const blob = await loadLibraryAudioBlob(key);
+    if(blob && window.URL && window.URL.createObjectURL){
+      try{
+        librarySessionAudioUrls.set(key, window.URL.createObjectURL(blob));
+        track.localAudioPersisted = true;
+        track.audioMissing = false;
+      }catch(e){
+        track.audioMissing = true;
+      }
+    } else if(track.localAudioPersisted || track.size){
+      track.audioMissing = true;
+    }
+  }
+  return rows;
+}
+
+function libraryAudioStatusLabel(track){
+  if(!track || track.serverBacked) return '';
+  if(securePlaybackSource(track)) return 'Audio ready';
+  if(track.audioMissing || track.localAudioPersisted) return 'audio missing - re-attach';
+  return 'No local audio yet';
+}
+
 const KEY_TO_CAMELOT = {
   'a minor':'8A','c major':'8B','e minor':'9A','g major':'9B','b minor':'10A','d major':'10B',
   'f# minor':'11A','gb minor':'11A','a major':'11B','c# minor':'12A','db minor':'12A','e major':'12B',
@@ -6074,6 +6193,7 @@ function renderLibraryDetail(track){
       <div class="library-readout"><span>RIGHTS</span><strong>${track.battleEligible ? 'READY' : 'LOCKED'}</strong></div>
     </div>
     ${editable ? `<label class="artwork-control">Track artwork<input type="file" accept="image/*" data-artwork-track="${esc(track.libraryId)}"></label>` : '<small style="color:var(--muted)">Platform artwork is controlled by the approved source catalog.</small>'}
+    ${editable && !track.serverBacked ? `<div class="library-audio-status ${track.audioMissing ? 'missing' : ''}" id="library-audio-status"><strong>${esc(libraryAudioStatusLabel(track))}</strong>${track.audioMissing || (!securePlaybackSource(track) && track.localAudioPersisted) ? '<p style="color:var(--muted);margin:4px 0 0">Local audio was not found after refresh. Re-attach the file to restore playback.</p><label class="artwork-control">Re-attach audio<input type="file" accept="audio/*" data-reattach-audio="' + esc(track.id || track.libraryId) + '"></label>' : ''}</div>` : ''}
     ${renderCrateEditorPanel()}
   `;
   renderCompatibleList(track);
@@ -6439,18 +6559,14 @@ function handleLibraryFilesWithMeta(files){
         const declared = !!document.getElementById('meta-declare').checked;
         const serverUpload = await createServerBackedLibraryTrackFromFile(f, { title, artist, genre, rightsClassification:rightsCategoryToClassification(rights) }).catch(error => ({ error:String(error && error.message || error) }));
         if(serverUpload && serverUpload.data && serverUpload.data.track){
-          if(window.URL && window.URL.createObjectURL){
-            try{ librarySessionAudioUrls.set(serverUpload.data.track.id, window.URL.createObjectURL(f)); }catch(e){}
-          }
+          await attachLibraryAudioBlob(serverUpload.data.track.id, f);
           document.getElementById('modal').close();
           next();
           return;
         }
-        const track = { id: 'u-'+Date.now(), title, name: title, artist, uploader: (document.getElementById('profile-name')?.textContent||'You'), album:null, artwork:null, artworkDataUrl:null, genre, bpm:'--', key:'--', duration:'--', uploadDate: new Date().toISOString(), size: f.size||0, source:'MY_LIBRARY', rightsCategory: rights, rightsDeclared: declared, copyrightCheck: 'Not Checked', battleEligible: rights !== 'Commercial / Copyrighted Music', permissions: defaultPermissions(), stems:false };
-        if(window.URL && window.URL.createObjectURL){
-          try{ librarySessionAudioUrls.set(track.id, window.URL.createObjectURL(f)); }catch(e){}
-        }
+        const track = { id: 'u-'+Date.now(), title, name: title, artist, uploader: (document.getElementById('profile-name')?.textContent||'You'), album:null, artwork:null, artworkDataUrl:null, genre, bpm:'--', key:'--', duration:'--', uploadDate: new Date().toISOString(), size: f.size||0, source:'MY_LIBRARY', rightsCategory: rights, rightsDeclared: declared, copyrightCheck: 'Not Checked', battleEligible: rights !== 'Commercial / Copyrighted Music', permissions: defaultPermissions(), stems:false, localAudioPersisted:false, audioMissing:false };
         state.library.push(track);
+        await attachLibraryAudioBlob(track.id, f);
         persist();
         document.getElementById('modal').close();
         next();
@@ -6512,7 +6628,7 @@ function renderLibrary(){
     body.innerHTML=rows.map((t)=>`
       <tr data-library-row="${esc(t.libraryId)}" tabindex="0" draggable="${crateEditing ? 'true' : 'false'}" class="${selected && selected.libraryId === t.libraryId ? 'selected' : ''} ${selectedCrateIds.has(t.libraryId) ? 'crate-selected' : ''} ${state.crateEditor.dragOverTrackId === t.libraryId ? 'crate-drop-target' : ''}">
         <td>${crateEditing ? `<label class="crate-row-select"><input type="checkbox" data-crate-select-track="${esc(t.libraryId)}" ${selectedCrateIds.has(t.libraryId) ? 'checked' : ''}><span class="drag-handle" data-crate-drag="${esc(t.libraryId)}" aria-label="Drag reorder handle">::</span></label>` : artworkMarkup(t)}</td>
-        <td><strong class="library-track-title">${esc(trackTitle(t))}</strong><small class="library-track-meta">${esc(t.duration || '—')} / ${t.battleEligible ? 'Battle ready' : 'Rights locked'}</small></td>
+        <td><strong class="library-track-title">${esc(trackTitle(t))}</strong><small class="library-track-meta">${esc(t.duration || '—')} / ${t.battleEligible ? 'Battle ready' : 'Rights locked'}${t.audioMissing ? ' / <span class="library-audio-missing">audio missing - re-attach</span>' : ''}</small></td>
         <td>${esc(trackArtist(t))}</td>
         <td>${esc(trackSource(t))}</td>
         <td>${esc(t.genre || 'Unsorted')}</td>
@@ -6541,7 +6657,7 @@ function renderLibrary(){
   document.querySelectorAll('[data-library-select]').forEach(b=>b.onclick=(e)=>selectLibraryTrack(e.currentTarget.dataset.librarySelect, { loadPlayer:false }));
   document.querySelectorAll('[data-library-play]').forEach(b=>b.onclick=(e)=>selectLibraryTrack(e.currentTarget.dataset.libraryPlay, { play:true }));
   document.querySelectorAll('[data-library-load-deck]').forEach(b=>b.onclick=(e)=>loadLibraryTrackToDeck(e.currentTarget.dataset.libraryTrack, e.currentTarget.dataset.libraryLoadDeck));
-  document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{const editable=getEditableLibraryTrack(b.dataset.remove); if(editable){state.library.splice(editable.index,1);persist();renderLibrary();renderStudioLibrary();}});
+  document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{const editable=getEditableLibraryTrack(b.dataset.remove); if(editable){const removedId=editable.track && editable.track.id; state.library.splice(editable.index,1); if(removedId && !editable.track.serverBacked){ const url=librarySessionAudioUrls.get(String(removedId)); if(url && window.URL && window.URL.revokeObjectURL){ try{ window.URL.revokeObjectURL(url); }catch(e){} } librarySessionAudioUrls.delete(String(removedId)); deleteLibraryAudioBlob(removedId).catch(()=>{}); } persist();renderLibrary();renderStudioLibrary();}});
   document.querySelectorAll('[data-rights-check]').forEach(b=>b.onclick=async(e)=>{const editable=getEditableLibraryTrack(e.currentTarget.dataset.rightsCheck); if(editable){ await runCopyrightCheck(editable.track); renderLibrary(); }});
   document.querySelectorAll('[data-add-playlist]').forEach(b=>b.onclick=()=>{ const editable=getEditableLibraryTrack(b.dataset.addPlaylist); if(editable) addTrackToPlaylist(editable.track); });
   document.querySelectorAll('[data-artwork-track]').forEach(input=>input.onchange=async(e)=>{ const result = await attachArtworkToTrack(e.currentTarget.dataset.artworkTrack, e.currentTarget.files && e.currentTarget.files[0]); if(!result.ok) alert(result.error); });
@@ -11180,6 +11296,7 @@ window.addEventListener('beforeunload', event => {
 state.library = sanitizedLibraryForStorage(state.library).filter(track => !track.serverBacked);
 state.playlists = sanitizedCratesForStorage(state.playlists).filter(crate => !crate.serverBacked);
 renderBattles();renderPosts();renderLibrary();renderProfile();renderPlatformLibrary();renderStreamingServices();renderStreamBrowser();renderAiLeaderboard();updateBattleProgressUi();timerText();recoverActiveBattleSession();
+restoreLibraryAudioFromIndexedDb().then(() => { renderLibrary(); renderStudioLibrary && renderStudioLibrary(); }).catch(err => console.warn('Library audio restore failed', err));
 
 setTimeout(()=>{
   const hash = String(window.location && window.location.hash || '');
@@ -11193,6 +11310,24 @@ setTimeout(()=>{
   if(resultMatch) loadPublicVerifiedResult(decodeURIComponent(resultMatch[1]));
   if(profileMatch) loadPublicDjProfile(decodeURIComponent(profileMatch[1]));
 },0);
+
+
+document.addEventListener('change', event => {
+  const input = event.target && event.target.closest && event.target.closest('[data-reattach-audio]');
+  if(!input) return;
+  const file = input.files && input.files[0];
+  const trackId = input.dataset.reattachAudio;
+  if(!file || !trackId) return;
+  attachLibraryAudioBlob(trackId, file).then(result => {
+    if(!result.ok){
+      alert(result.error || 'Could not re-attach audio');
+      return;
+    }
+    persist();
+    renderLibrary();
+    if(typeof renderStudioLibrary === 'function') renderStudioLibrary();
+  }).catch(err => console.warn('Re-attach audio failed', err));
+});
 
 window.__DJBattleTestHooks = {
   initAuth,
@@ -11357,6 +11492,13 @@ window.__DJBattleTestHooks = {
   getPracticeHistory: () => state.practiceHistory,
   getBattleHistoryFilters: () => state.battleHistoryFilters,
   getBattles: () => battles,
+  saveLibraryAudioBlob,
+  loadLibraryAudioBlob,
+  deleteLibraryAudioBlob,
+  attachLibraryAudioBlob,
+  restoreLibraryAudioFromIndexedDb,
+  libraryAudioStatusLabel,
+  getLibrarySessionAudioUrls: () => librarySessionAudioUrls,
   getBattleLobbyState: () => state.battleLobby,
   setBattleLobbyFilters: filters => { state.battleLobby.filters = { ...state.battleLobby.filters, ...filters }; },
   getBattleRoomSyncState: () => state.battleRoomSync,
