@@ -59,9 +59,10 @@
         <div class="top-actions">
           <button class="ghost" id="quick-upload">Add Music</button>
           <button class="ghost" id="auth-button">Sign In</button>
-          <button class="profile-chip" data-view-target="profile"><span class="avatar">DK</span><span id="profile-name">Digital King</span><span id="profile-belt" class="belt-badge" title="Belt rank">White</span></button>
+          <button class="profile-chip" data-view-target="profile"><span class="avatar">G</span><span id="profile-name">Guest</span><span id="profile-belt" class="belt-badge" title="Belt rank">White</span></button>
         </div>
       </header>
+      <div id="offline-demo-banner" class="offline-demo-banner hidden" role="status" aria-live="polite"><strong>Offline demo data</strong><span id="offline-demo-banner-text"></span></div>
 
       <section id="dashboard" class="view">
         <div class="hero">
@@ -87,8 +88,8 @@
           </div>
           <div class="panel">
             <div class="section-head compact"><div><span class="eyebrow">YOUR PATH</span><h3>Battle Record</h3></div></div>
-            <div class="stats"><div><strong>12</strong><span>Wins</span></div><div><strong>4</strong><span>Losses</span></div><div><strong>87</strong><span>AI Avg</span></div><div><strong>#18</strong><span>Rank</span></div></div>
-            <div class="progress-wrap"><div class="progress-label"><span>Judge XP</span><strong>620 / 1,000</strong></div><div class="progress"><i style="width:62%"></i></div><p>Judge battles to earn XP and unlock higher-weight community judging.</p></div>
+            <div class="stats"><div><strong id="dashboard-wins">0</strong><span>Wins</span></div><div><strong id="dashboard-losses">0</strong><span>Losses</span></div><div><strong id="dashboard-ai-avg">0</strong><span>AI Avg</span></div><div><strong id="dashboard-rank">Unranked</strong><span>Rank</span></div></div>
+            <div class="progress-wrap"><div class="progress-label"><span>Judge XP</span><strong id="dashboard-xp-label">0 / 1000</strong></div><div class="progress"><i id="dashboard-xp-bar" style="width:0%"></i></div><p>Judge battles to earn XP and unlock higher-weight community judging.</p></div>
           </div>
         </div>
       </section>
@@ -97,7 +98,7 @@
         <div class="section-head"><div><span class="eyebrow accent">BATTLE ROOM</span><h3 id="br-title">Preparing Battle</h3></div><button class="text-btn" id="br-leave">← Back</button></div>
         <div class="battle-room-grid">
           <div class="panel players">
-            <div class="player-card" id="br-dj1"><div class="avatar">DK</div><div><strong id="br-dj1-name">Digital King</strong><div id="br-dj1-meta">Tampa • White Belt</div></div><div class="belt">White</div></div>
+            <div class="player-card" id="br-dj1"><div class="avatar">G</div><div><strong id="br-dj1-name">Guest</strong><div id="br-dj1-meta">Tampa • White Belt</div></div><div class="belt">White</div></div>
             <div class="player-card" id="br-dj2"><div class="avatar">AI</div><div><strong id="br-dj2-name">Solo Mode</strong><div id="br-dj2-meta">—</div></div><div class="belt" id="br-dj2-belt">—</div></div>
             <div class="battle-meta panel" id="br-meta">
               <div><span>Mode</span><strong id="br-mode">—</strong></div>
@@ -224,7 +225,7 @@
 
             <div class="panel" id="mini-battle-panel" style="display:flex;align-items:center;justify-content:space-between;padding:12px">
               <div style="display:flex;gap:12px;align-items:center">
-                <div style="display:flex;flex-direction:column"><strong id="mini-dj1">Digital King</strong><small id="mini-meta1" style="color:var(--muted)">White • Tampa</small></div>
+                <div style="display:flex;flex-direction:column"><strong id="mini-dj1">Guest</strong><small id="mini-meta1" style="color:var(--muted)">White • Tampa</small></div>
                 <div style="font-size:18px;font-weight:900;color:var(--accent)">VS</div>
                 <div style="display:flex;flex-direction:column"><strong id="mini-dj2">Solo Mode</strong><small id="mini-meta2" style="color:var(--muted)">—</small></div>
               </div>
@@ -460,8 +461,8 @@
       </section>
 
       <section id="profile" class="view">
-        <div class="profile-hero"><div class="avatar huge">DK</div><div><span class="eyebrow accent">DJ PROFILE</span><h2>Digital King <span id="profile-belt-hero" class="belt-badge">White</span></h2><p>Tampa Bay • Bass House • Hip-Hop • Dubstep</p><div class="profile-actions"><button class="primary">Edit Profile</button><button class="ghost">Share</button></div><div style="margin-top:8px"><button class="primary" id="take-belt-test">Take Belt Test</button></div></div><div class="profile-score"><strong>87</strong><span>Battle Rating</span></div></div>
-        <div class="stats profile-stats"><div><strong>12</strong><span>Wins</span></div><div><strong>4</strong><span>Losses</span></div><div><strong>28</strong><span>Uploads</span></div><div><strong>620</strong><span>Judge XP</span></div><div><strong>184</strong><span>Followers</span></div></div>
+        <div class="profile-hero"><div class="avatar huge" id="profile-hero-avatar">G</div><div><span class="eyebrow accent">DJ PROFILE</span><h2><span id="profile-hero-name">Guest</span> <span id="profile-belt-hero" class="belt-badge">White</span></h2><p id="profile-hero-tagline">Guest • Local DJ profile saved in this browser</p><div class="profile-actions"><button class="primary" id="edit-profile-button" type="button">Edit Profile</button><button class="ghost" id="share-profile-button" type="button">Share</button></div><div style="margin-top:8px"><button class="primary" id="take-belt-test">Take Belt Test</button></div></div><div class="profile-score"><strong>0</strong><span>Battle Rating</span></div></div>
+        <div class="stats profile-stats"><div><strong>0</strong><span>Wins</span></div><div><strong>0</strong><span>Losses</span></div><div><strong>0</strong><span>Uploads</span></div><div><strong>0</strong><span>Judge XP</span></div><div><strong>0</strong><span>Followers</span></div></div>
         <div class="panel" id="promotion-history-panel" style="margin-top:16px"><div class="section-head compact"><div><span class="eyebrow">ACHIEVEMENTS</span><h3>Promotion History</h3></div><button class="text-btn" id="refresh-promotions">Refresh</button></div><div id="promotion-history-list" style="display:grid;gap:8px;margin-top:8px"></div></div>
         <div class="profile-tabs"><button class="active" data-profile-tab="music">Music</button><button data-profile-tab="history">Battle History</button><button data-profile-tab="progression">Progression History</button><button data-profile-tab="challenges">Challenges <span id="challenge-count-pill">0</span></button><button data-profile-tab="relationships">Relationships</button><button data-profile-tab="feed">Feed</button><button data-profile-tab="opponents">Opponents</button><button data-profile-tab="preferences">Preferences</button><button data-profile-tab="mixes">Mixes</button><button data-profile-tab="battles">Battles</button><button data-profile-tab="posts">Posts</button><button data-profile-tab="achievements">Achievements</button></div><div id="profile-media" class="card-grid"></div>
       </section>
@@ -493,12 +494,17 @@
     const config = window.DJ_BATTLE_SUPABASE_CONFIG || {};
     window.SUPABASE_URL = config.url || '';
     window.SUPABASE_ANON_KEY = config.anonKey || '';
-    if(window.SUPABASE_URL && window.SUPABASE_ANON_KEY){
+    const supabaseState = { ready:true, configured:Boolean(window.SUPABASE_URL && window.SUPABASE_ANON_KEY), client:false, error:'' };
+    if(supabaseState.configured){
       try{
         const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
         window.supabase = createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
-      }catch(e){console.warn('Supabase init failed',e)}
+        supabaseState.client = true;
+      }catch(e){ console.warn('Supabase init failed', e); supabaseState.error = String(e && e.message || e); }
     }
+    // Module scripts run after app.js, so publish the result and let app.js initialize auth from this event.
+    window.DJB_SUPABASE_STATE = supabaseState;
+    window.dispatchEvent(new CustomEvent('djb:supabase-ready', { detail:supabaseState }));
   </script>
   <script>
     // Minimal belt UI helper for local profile state.

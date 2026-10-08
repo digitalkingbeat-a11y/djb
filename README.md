@@ -4,17 +4,39 @@ A dependency-free browser DJ battle platform with battle discovery, Battle Studi
 
 ## Run It
 
-### Open Directly
-Open `index.html` in a modern browser.
+The front end is plain HTML/CSS/JS. All API calls go through `api_client.js` to `/api/...` on the
+**API base URL** (`window.DJB_API_BASE`). The Node/Express server in `server/` runs on port 4000.
 
-### Local Server
-From this folder:
+### Recommended: one server for app + API
 
 ```bash
-npx serve .
+cd server
+npm install
+export SUPABASE_URL="https://your-project.supabase.co"
+export SUPABASE_KEY="your-anon-key"
+export SUPABASE_SERVICE_KEY="your-service-role-key"
+npm start
 ```
 
-or use the VS Code Live Server extension.
+Open http://localhost:4000. The server serves the front end (only `index.html`, root CSS/JS, `studio/`,
+and `judge/` files) and the API from the same origin, so no API base URL is needed. Set
+`SERVE_FRONTEND=false` to run the server as API-only.
+
+### Front end served separately
+
+1. Copy `supabase-browser-config.example.js` to `supabase-browser-config.local.js` (git-ignored).
+2. Fill in the browser-safe Supabase URL and anon key to enable Sign In.
+3. Set `window.DJB_API_BASE = 'http://localhost:4000';` so API calls reach the server.
+4. Serve this folder, for example `npx serve .` or VS Code Live Server, and start the server as above.
+
+Opening `index.html` straight from disk (`file://`) defaults the API base to `http://localhost:4000`.
+
+### Offline demo data
+
+If the server can't be reached, or Supabase sign-in isn't configured, the app keeps working with
+built-in sample battles, posts, and rankings and shows an **Offline demo data** banner. Changes made
+in that mode are stored only in this browser. Without Supabase config, Sign In explains that sign-in
+is not configured.
 
 ### VS Code
 

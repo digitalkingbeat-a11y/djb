@@ -121,8 +121,8 @@ test('judge result completion updates battle status, progression, rankings, and 
   assert.equal(completed.battle.status, 'completed');
   assert.equal(completed.result.reward.type, 'bitcoin');
   assert.equal(completed.result.reward.metadata.amountSats, 2500);
-  assert.equal(window.__DJBattleTestHooks.getBattleProgress().wins, 13);
-  assert.ok(window.__DJBattleTestHooks.getBattleProgress().xp > 620);
+  assert.equal(window.__DJBattleTestHooks.getBattleProgress().wins, 1);
+  assert.ok(window.__DJBattleTestHooks.getBattleProgress().xp > 0);
   const awardedProgress = { ...window.__DJBattleTestHooks.getBattleProgress() };
   const duplicate = window.__DJBattleTestHooks.completeBattleWithJudgeResult({
     id: 'bitcoin-lifecycle-test',

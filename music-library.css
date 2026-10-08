@@ -515,3 +515,21 @@
   .library-player{left:10px;right:10px;bottom:74px;grid-template-columns:44px 1fr auto;min-height:62px}
   .library-player-readouts,#library-player-progress{display:none}
 }
+
+.library-audio-missing{
+  color:#ffb347;
+  font-weight:600;
+}
+.library-audio-status{
+  margin-top:12px;
+  padding:10px 12px;
+  border:1px solid rgba(255,255,255,0.08);
+  border-radius:10px;
+}
+.library-audio-status.missing{
+  border-color:rgba(255,179,71,0.45);
+  background:rgba(255,179,71,0.06);
+}
+.library-audio-status.missing strong{
+  color:#ffb347;
+}

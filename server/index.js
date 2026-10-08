@@ -21,6 +21,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { buildJudgeBreakdownPayload } = require('./analysis_storage');
+const { createFrontendRouter, shouldServeFrontend } = require('./static_frontend');
 const { getFFmpegCapability, publicFFmpegCapabilityStatus } = require('./ffmpeg_capability');
 const { requireAuthenticatedUser, requireConfiguredDataClient, requireOwnedUserId, requireOwnedUserIds, requireOperatorUser, getOwnedBeltAttempt, getOwnedBeltTest } = require('./auth');
 const { getOrCreateBattleEntry, createDraftSubmission, getOwnedMixSubmission, issueUploadAuthorization, completeUpload, getSubmissionJudgingResult, MIX_BUCKET } = require('./battle_submission');
@@ -2757,6 +2758,9 @@ app.post('/api/submitJudgeBreakdown', requireAuth, async (req, res) => {
     return res.status(500).json({ error: 'Judge breakdown submission failed' });
   }
 });
+
+// Serve the static front end (index.html, app.js, CSS) from the same origin unless SERVE_FRONTEND=false.
+if(shouldServeFrontend()) app.use(createFrontendRouter());
 
 const PORT = process.env.PORT || 4000;
 
