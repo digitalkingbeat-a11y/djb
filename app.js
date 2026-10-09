@@ -841,7 +841,7 @@ function installProfessionalShell(){
     ops.type = 'button';
     ops.dataset.view = 'operations';
     ops.title = 'Judging Operations';
-    ops.innerHTML = '<b>OP</b><span>Judging Ops</span>';
+    ops.innerHTML = '<b>OP</b><span>Judging Operations</span>';
     sidebar.insertBefore(ops, sidebar.querySelector('.side-card') || null);
   }
   const studio = document.getElementById('studio');
@@ -1322,7 +1322,7 @@ function battleLobbyStatusStripHtml(){
     acc[key] = (acc[key] || 0) + 1;
     return acc;
   }, {});
-  const lamps = ['open','waiting','full','started','expired'].map(key => `<span class="tag">${esc(key.toUpperCase())}: ${counts[key] || 0}</span>`).join('');
+  const lamps = ['open','waiting','full','started','completed','expired'].map(key => `<span class="tag"><span>${esc(key.charAt(0).toUpperCase() + key.slice(1))}</span><strong>${counts[key] || 0}</strong></span>`).join('');
   const statusLabel = status === 'synced' ? 'SYNCED' : status === 'syncing' ? 'SYNCING' : status === 'failed' ? 'LIMITED' : 'LOCAL';
   const note = status === 'syncing'
     ? 'Syncing open battles'

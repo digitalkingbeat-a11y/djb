@@ -16,6 +16,7 @@
   <link rel="stylesheet" href="challenges.css" />
   <link rel="stylesheet" href="music-library.css" />
   <link rel="stylesheet" href="professional-redesign.css" />
+  <link rel="stylesheet" href="battles-workstation.css" />
   <style>
     /* Ensure battle meta has 4 columns for additional metadata */
     .battle-meta{grid-template-columns:repeat(4,1fr) !important}
@@ -128,10 +129,11 @@
       <section id="battles" class="view active">
         <div class="product-page-head">
           <div>
-            <span class="eyebrow accent">BATTLE MARKET</span>
-            <h2>Battles</h2>
+            <span class="eyebrow">BATTLE DIRECTORY</span>
+            <h2>Find your next opponent.</h2>
+            <p>Choose a format. Find your sound. Take your place.</p>
           </div>
-          <button class="primary compact" id="create-battle">Create Battle</button>
+          <button class="primary" id="create-battle">Create Battle</button>
         </div>
         <div class="tabs compact-tabs" id="battle-tabs" role="tablist" aria-label="Battle lists">
           <button class="active" data-battle-tab="open" type="button">Open Battles</button>
@@ -139,26 +141,28 @@
           <button data-battle-tab="invites" type="button">Invites</button>
           <button data-battle-tab="completed" type="button">Completed</button>
         </div>
-        <div class="battle-layout-switch" role="group" aria-label="Battle layout">
+        <div class="battle-browse-heading"><h3>Browse battles</h3><div class="battle-layout-switch" role="group" aria-label="Battle layout">
           <button class="active" data-battle-layout="list" type="button">List</button>
           <button data-battle-layout="grid" type="button">Grid</button>
+        </div>
         </div>
         <div class="battle-filter-row" aria-label="Battle filters">
           <label>Mode<select id="battle-lobby-mode-filter"></select></label>
           <label>Genre<select id="battle-lobby-genre-filter"></select></label>
           <label>Duration<select id="battle-lobby-duration-filter"><option value="all">Any</option><option value="short">2-10 min</option><option value="medium">20-30 min</option><option value="long">60 min</option></select></label>
-          <label>Entry<select id="battle-lobby-entry-filter"><option value="all">Any</option><option value="assigned">Assigned Tracks</option><option value="own_selection">Own Selection</option><option value="premium">Premium</option></select></label>
+          <label>Entry Type<select id="battle-lobby-entry-filter"><option value="all">Any</option><option value="assigned">Assigned Tracks</option><option value="own_selection">Own Selection</option><option value="premium">Premium</option></select></label>
           <label class="battle-search">Search<input id="battle-lobby-search-filter" type="search" placeholder="Battle, host, genre"></label>
           <label>Sort<select id="battle-lobby-sort"><option value="ending_soon">Ending Soon</option><option value="newest">Newest</option><option value="players">Most Players</option><option value="rating">Rating Range</option></select></label>
         </div>
+        <div class="battle-format-heading"><h3>Battle format</h3><p>Pick the discipline you want to compete in.</p></div>
         <div class="battle-format-tour" id="battle-format-filter" aria-label="Battle formats">
-          <button class="active" data-battle-format="all"><span>All</span><b>Formats</b></button>
+          <button class="active" data-battle-format="all"><span>All Formats</span><b>Explore every discipline</b></button>
           <button data-battle-format="transition_battle"><span>Transition</span><b>Bass House</b></button>
-          <button data-battle-format="scratching_battle"><span>Scratch</span><b>Assigned</b></button>
-          <button data-battle-format="five_song_mix_battle"><span>5-Song</span><b>Mix</b></button>
-          <button data-battle-format="own_selection_battle"><span>10-Min</span><b>Open Mix</b></button>
-          <button data-battle-format="half_hour_mix_battle"><span>30-Minute</span><b>Mix</b></button>
-          <button data-battle-format="full_mix_battle"><span>60-Minute</span><b>Mix</b></button>
+          <button data-battle-format="scratching_battle"><span>Scratching</span><b>Assigned tracks</b></button>
+          <button data-battle-format="five_song_mix_battle"><span>5-Song Mix</span><b>Build your sequence</b></button>
+          <button data-battle-format="own_selection_battle"><span>10-Minute Mix</span><b>Own selection</b></button>
+          <button data-battle-format="half_hour_mix_battle"><span>30-Minute Mix</span><b>Extended session</b></button>
+          <button data-battle-format="full_mix_battle"><span>60-Minute Mix</span><b>Full-length set</b></button>
         </div>
         <div class="segmented hidden" id="genre-filter"><button class="active" data-genre="All">All</button></div>
         <div id="battle-grid" class="battle-list"></div>
@@ -473,7 +477,7 @@
   <div class="library-player" id="library-player" aria-live="polite">
     <div class="library-player-art" id="library-player-art"></div>
     <div class="library-player-main">
-      <span class="eyebrow">PERSISTENT PLAYER</span>
+      <span class="eyebrow">NOW PLAYING</span>
       <strong id="library-player-title">No track loaded</strong>
       <small id="library-player-artist">Select a track from My Music</small>
     </div>
@@ -483,6 +487,7 @@
     </div>
     <button class="primary" id="library-player-toggle" type="button">Play</button>
     <input id="library-player-progress" type="range" min="0" max="100" value="0" aria-label="Track progress">
+    <label class="player-volume">Volume<input type="range" min="0" max="1" step="0.01" value="1" aria-label="Player volume" oninput="document.getElementById('library-player-audio').volume = Number(this.value)"></label>
     <audio id="library-player-audio"></audio>
   </div>
 
@@ -500,6 +505,7 @@
         const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
         window.supabase = createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
         supabaseState.client = true;
+        window.dispatchEvent(new Event('supabase-ready'));
       }catch(e){ console.warn('Supabase init failed', e); supabaseState.error = String(e && e.message || e); }
     }
     // Module scripts run after app.js, so publish the result and let app.js initialize auth from this event.

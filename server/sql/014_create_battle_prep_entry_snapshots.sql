@@ -102,13 +102,16 @@ ALTER TABLE public.battle_entries
 CREATE INDEX IF NOT EXISTS battle_entries_room_state_idx
   ON public.battle_entries (battle_id, status, presence_last_seen_at DESC);
 
-DO $$
-BEGIN
-  ALTER TABLE public.battle_entries
-    ADD CONSTRAINT battle_entries_live_status_check
-      CHECK (status IN ('active', 'joined', 'preparing', 'ready', 'started', 'submitted', 'disconnected', 'withdrawn', 'completed'));
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
+-- Replace 009's active/withdrawn-only check; both checks must not coexist.
+-- Revalidate the intended definition rather than swallowing duplicate names.
+ALTER TABLE public.battle_entries
+  DROP CONSTRAINT IF EXISTS battle_entries_status_check,
+  DROP CONSTRAINT IF EXISTS battle_entries_live_status_check,
+  ADD CONSTRAINT battle_entries_live_status_check
+    CHECK (status IN (
+      'active', 'joined', 'preparing', 'ready', 'started',
+      'submitted', 'disconnected', 'withdrawn', 'completed'
+    ));
 
 DO $$
 BEGIN

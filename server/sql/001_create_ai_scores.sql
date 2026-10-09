@@ -20,8 +20,10 @@ ALTER TABLE public.ai_scores ENABLE ROW LEVEL SECURITY;
 -- Allow authenticated users to INSERT only for their own user_id
 CREATE POLICY "allow_insert_own" ON public.ai_scores
   FOR INSERT
-  USING (auth.uid() IS NOT NULL)
-  WITH CHECK (auth.uid() = user_id);
+  WITH CHECK (
+    auth.uid() IS NOT NULL
+    AND auth.uid() = user_id
+  );
 
 -- Allow public SELECT for leaderboard queries
 CREATE POLICY "allow_select_public" ON public.ai_scores

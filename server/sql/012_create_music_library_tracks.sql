@@ -1,12 +1,17 @@
 -- Server-backed Music Library metadata.
 -- Audio may be owned library audio or an existing owned mix submission; files are not duplicated.
 
+-- Forward prerequisite on the already-applied 009 schema; no owner/data conversion.
+-- Fail if this named constraint already exists rather than hiding schema drift.
+ALTER TABLE public.mix_submissions
+  ADD CONSTRAINT mix_submissions_id_user_id_key UNIQUE (id, user_id);
+
 CREATE TABLE IF NOT EXISTS music_library_tracks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL,
+  user_id text NOT NULL,
   source_type text NOT NULL DEFAULT 'track'
     CHECK (source_type IN ('track', 'mix', 'submission', 'practice_recording')),
-  linked_submission_id uuid REFERENCES mix_submissions(id) ON DELETE SET NULL,
+  linked_submission_id uuid,
   title text NOT NULL,
   artist text NOT NULL,
   bpm numeric,
@@ -59,30 +64,34 @@ CREATE TABLE IF NOT EXISTS music_library_tracks (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   archived_at timestamptz,
+  UNIQUE (id, user_id),
   UNIQUE (user_id, file_hash),
   UNIQUE (user_id, linked_submission_id),
   UNIQUE (user_id, audio_storage_object_path),
-  FOREIGN KEY (linked_submission_id, user_id) REFERENCES mix_submissions(id, user_id) ON DELETE SET NULL
+  -- One same-owner FK replaces both original submission FKs. PostgreSQL 15+:
+  -- unlink a deleted submission without nulling the track's non-null owner.
+  FOREIGN KEY (linked_submission_id, user_id) REFERENCES public.mix_submissions(id, user_id)
+    ON DELETE SET NULL (linked_submission_id)
 );
 
 ALTER TABLE music_library_tracks ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY allow_select_own_music_library_tracks
   ON music_library_tracks FOR SELECT
-  USING (auth.uid() = user_id);
+  USING (auth.uid()::text = user_id);
 
 CREATE POLICY allow_insert_own_music_library_tracks
   ON music_library_tracks FOR INSERT
-  WITH CHECK (auth.uid() = user_id);
+  WITH CHECK (auth.uid()::text = user_id);
 
 CREATE POLICY allow_update_own_music_library_tracks
   ON music_library_tracks FOR UPDATE
-  USING (auth.uid() = user_id)
-  WITH CHECK (auth.uid() = user_id);
+  USING (auth.uid()::text = user_id)
+  WITH CHECK (auth.uid()::text = user_id);
 
 CREATE POLICY allow_delete_own_music_library_tracks
   ON music_library_tracks FOR DELETE
-  USING (auth.uid() = user_id);
+  USING (auth.uid()::text = user_id);
 
 CREATE INDEX IF NOT EXISTS music_library_tracks_user_updated_idx
   ON music_library_tracks (user_id, updated_at DESC)

@@ -124,8 +124,12 @@ test('Battles and Community controls are styled and label/value pairs stay separ
   const document = window.document;
   assert.ok(document.querySelector('#battle-tabs.compact-tabs'));
   assert.ok(document.querySelector('.battle-filter-row #battle-lobby-mode-filter'));
-  const counts = [...document.querySelectorAll('.battle-lobby-counts .tag')].map(node => node.textContent.trim());
-  assert.deepEqual(counts.map(text => text.split(':')[0]), ['OPEN', 'WAITING', 'FULL', 'STARTED', 'EXPIRED']);
+  const counts = [...document.querySelectorAll('.battle-lobby-counts .tag')].map(node => ({
+    label: node.querySelector('span')?.textContent.trim(),
+    value: node.querySelector('strong')?.textContent.trim()
+  }));
+  assert.deepEqual(counts.map(item => item.label), ['Open', 'Waiting', 'Full', 'Started', 'Completed', 'Expired']);
+  counts.forEach(item => assert.match(item.value, /^\d+$/));
   const firstRowMain = document.querySelector('.battle-row-main > div');
   assert.ok(firstRowMain.querySelector('strong') && firstRowMain.querySelector('small'));
 
