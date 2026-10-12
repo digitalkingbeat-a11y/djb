@@ -812,6 +812,7 @@ function installProfessionalShell(){
   const nav = document.getElementById('nav');
   if(nav){
     const items = [
+      ['dashboard','HM','Home'],
       ['battles','BT','Battles'],
       ['studio','ST','Battle Studio'],
       ['library','ML','Music Library'],
@@ -1026,6 +1027,11 @@ function switchView(view){
 }
 document.querySelectorAll('[data-view-target]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.viewTarget)));
 document.querySelectorAll('.nav-btn').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
+const brandHome = document.getElementById('brand-home');
+if(brandHome){
+  brandHome.addEventListener('click',()=>switchView('dashboard'));
+  brandHome.addEventListener('keydown',event=>{ if(event.key === 'Enter' || event.key === ' '){ event.preventDefault(); switchView('dashboard'); } });
+}
 const sidebarToggle = document.getElementById('sidebar-toggle');
 if(sidebarToggle){
   const collapsed = localStorage.getItem('djBattleSidebarCollapsed') === '1';
@@ -1722,7 +1728,33 @@ function buildBattleResultProfileRecord(result, battle, progressionState){
   };
 }
 
+function latestBattleScore(results = state.battleResults){
+  const list = Array.isArray(results) ? results : [];
+  const scored = list.filter(item => item && item.score !== null && item.score !== undefined && item.score !== '' && Number.isFinite(Number(item.score)));
+  if(!scored.length) return null;
+  const time = item => { const t = Date.parse(item.completedAt || ''); return Number.isFinite(t) ? t : 0; };
+  const latest = scored.reduce((best, item) => time(item) > time(best) ? item : best, scored[0]);
+  return { score: Math.round(Number(latest.score)), title: latest.title || 'Latest battle', date: latest.date || '', outcome: latest.outcome || '' };
+}
+
+function renderHeroScore(){
+  const wrap = document.getElementById('hero-score'); if(!wrap) return;
+  const latest = latestBattleScore();
+  const set = (id, text) => { const node = document.getElementById(id); if(node) node.textContent = text; };
+  if(!latest){
+    wrap.dataset.state = 'empty';
+    set('hero-score-value', '--'); set('hero-score-unit', 'No battles yet');
+    set('hero-score-title', 'Your latest score shows here'); set('hero-score-date', 'Enter a battle to get judged');
+    return;
+  }
+  wrap.dataset.state = 'scored';
+  set('hero-score-value', String(latest.score)); set('hero-score-unit', '/100');
+  set('hero-score-title', `Latest: ${latest.title}`);
+  set('hero-score-date', [latest.outcome && latest.outcome !== 'recorded' ? latest.outcome.toUpperCase() : '', latest.date].filter(Boolean).join(' · ') || 'Latest battle');
+}
+
 function updateBattleProgressUi(){
+  renderHeroScore();
   const progress = state.battleProgress;
   const belt = progress.belt || beltForXp(progress.xp).name;
   if(window.setCurrentBelt) window.setCurrentBelt(belt);
@@ -11486,6 +11518,8 @@ window.__DJBattleTestHooks = {
   getProfileRankingState: () => state.profileRanking,
   setPublicRankingsState: patch => { state.publicRankings = { ...state.publicRankings, ...patch, filters:{ ...state.publicRankings.filters, ...(patch && patch.filters || {}) } }; },
   getBattleResults: () => state.battleResults,
+  latestBattleScore,
+  renderHeroScore,
   getBattleProgress: () => state.battleProgress,
   getPracticeHistory: () => state.practiceHistory,
   getBattleHistoryFilters: () => state.battleHistoryFilters,

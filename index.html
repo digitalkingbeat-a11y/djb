@@ -25,12 +25,13 @@
 <body>
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="brand">
+      <div class="brand" id="brand-home" role="button" tabindex="0" title="Go to Battle Home" aria-label="Go to Battle Home">
         <div class="brand-mark">DB</div>
         <div><strong>DJ BATTLE</strong><span>Battle • Community • Studio</span></div>
       </div>
       <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Collapse sidebar" title="Collapse sidebar">Collapse</button>
       <nav id="nav">
+        <button class="nav-btn" data-view="dashboard" title="Battle Home"><b>HM</b><span>Home</span></button>
         <button class="nav-btn active" data-view="battles" title="Battles"><b>BT</b><span>Battles</span></button>
         <button class="nav-btn" data-view="studio" title="Battle Studio"><b>ST</b><span>Battle Studio</span></button>
         <button class="nav-btn" data-view="library" title="Music Library"><b>ML</b><span>Music Library</span></button>
@@ -72,9 +73,9 @@
             <p>Get assigned tracks, race the clock, submit your performance, and let AI + the community decide who won.</p>
             <div class="hero-actions"><button class="primary" data-view-target="battles">Enter a Battle</button><button class="ghost" data-view-target="studio">Open Battle Studio</button></div>
           </div>
-          <div class="score-orbit">
-            <div class="score-ring"><span>AI</span><strong>91</strong><small>/100</small></div>
-            <div class="orbit-tag top">Phrasing 19/20</div><div class="orbit-tag right">Timing 18/20</div><div class="orbit-tag bottom">Creativity 17/20</div>
+          <div class="score-orbit" id="hero-score" data-state="empty">
+            <div class="score-ring"><span id="hero-score-label">AI</span><strong id="hero-score-value">--</strong><small id="hero-score-unit">No battles yet</small></div>
+            <div class="orbit-tag top" id="hero-score-title">Your latest score shows here</div><div class="orbit-tag bottom" id="hero-score-date">Enter a battle to get judged</div>
           </div>
         </div>
 

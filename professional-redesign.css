@@ -1500,3 +1500,9 @@ td{
   color:#6b7686;
   cursor:not-allowed;
 }
+
+/* Battle Home: clickable logo + honest hero score */
+#brand-home{cursor:pointer;border-radius:12px}
+#brand-home:focus-visible{outline:2px solid var(--accent, #c6ff00);outline-offset:3px}
+#hero-score[data-state="empty"] .score-ring strong{opacity:.55}
+#hero-score[data-state="empty"] .score-ring small{font-size:.7rem;letter-spacing:.04em}
