@@ -1500,3 +1500,25 @@ td{
   color:#6b7686;
   cursor:not-allowed;
 }
+
+/* Battle Home: clickable logo + honest hero score */
+#brand-home{cursor:pointer;border-radius:12px}
+#brand-home:focus-visible{outline:2px solid var(--accent, #c6ff00);outline-offset:3px}
+#hero-score[data-state="empty"] .score-ring strong{opacity:.55}
+#hero-score[data-state="empty"] .score-ring small{font-size:.7rem;letter-spacing:.04em}
+
+/* Oct 13: activity filters, timestamps, settings data panel */
+.activity-filters{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
+.activity-filter{display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:#11151b;color:#c9d1d9;font-weight:700;font-size:13px;cursor:pointer}
+.activity-filter b{font-size:11px;padding:1px 7px;border-radius:999px;background:rgba(255,255,255,.08);color:#9aa4b2}
+.activity-filter:hover{border-color:rgba(198,255,0,.45)}
+.activity-filter.active{background:#c6ff00;color:#0b0d10;border-color:#c6ff00}
+.activity-filter.active b{background:rgba(0,0,0,.18);color:#0b0d10}
+.activity-time{display:flex;flex-direction:column;align-items:flex-end;font-size:12px;font-weight:700;color:#c6ff00;white-space:nowrap;margin-left:auto}
+.activity-time em{font-style:normal;font-weight:500;color:var(--muted,#8b949e);font-size:11px}
+.settings-data-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.settings-data-actions .danger{border-color:rgba(255,82,82,.55);color:#ff8a8a}
+.settings-data-actions .danger:hover{background:rgba(255,82,82,.12)}
+.settings-data-status{display:block;margin-top:8px;color:var(--muted,#8b949e)}
+.settings-data-status[data-tone="ok"]{color:#c6ff00}
+.settings-data-status[data-tone="denied"]{color:#ff8a8a}
