@@ -108,12 +108,14 @@
           syncStatus:'local'
         };
         state.playlists.unshift(crate);
+        const added = typeof deps.addImportedItemsToLibrary === 'function' ? deps.addImportedItemsToLibrary(items, file.name) : 0;
         deps.persist();
         deps.renderLibrary();
         state.studioLibrarySource = 'PLAYLISTS';
         if(deps.localStorage && deps.localStorage.setItem) deps.localStorage.setItem('djBattleStudioLibrarySource', state.studioLibrarySource);
         deps.renderStudioLibrary();
-        deps.setStudioRuleStatus(`${items.length} playlist item(s) imported from ${file.name}.`, 'ok');
+        deps.setStudioRuleStatus(`${items.length} playlist item(s) imported from ${file.name}${added ? ` (${added} new in your library)` : ''}. Audio files are not transferred.`, 'ok');
+        if(typeof deps.onImported === 'function') deps.onImported({ items, added, crate });
       };
       reader.onerror = () => deps.setStudioRuleStatus('Playlist import failed in this browser.', 'denied');
       reader.readAsText(file);
@@ -121,14 +123,14 @@
     }
 
     function exportRowsForCrate(crate){
-      const trackRows = deps.resolveCrateTrackIds(crate).map((id, index) => {
-        const track = deps.getLibraryTrackById(id);
+      const trackRows = (crate.libraryTracks || deps.resolveCrateTrackIds(crate).map(id => deps.getLibraryTrackById(id))).map((track, index) => {
         return track ? {
           title:deps.trackTitle(track),
           artist:deps.trackArtist(track),
           album:track.album || '',
           bpm:deps.parseBpm(track) || track.bpm || '',
           key:track.key || '',
+          duration:track.duration && track.duration !== '--' ? track.duration : '',
           playlistOrder:index + 1,
           artwork:deps.secureArtworkSource(track) || '',
           source:deps.trackSource(track),
@@ -142,19 +144,29 @@
     }
 
     function rowsToCsv(rows){
-      const headers = ['title','artist','album','bpm','key','playlistOrder','artwork','source','sourceTrackId','sourcePlaylistId','transferType'];
+      const headers = ['title','artist','album','bpm','key','duration','playlistOrder','artwork','source','sourceTrackId','sourcePlaylistId','transferType'];
       return [headers.join(','), ...rows.map(row => headers.map(header => `"${String(row[header] ?? '').replace(/"/g,'""')}"`).join(','))].join('\n');
+    }
+
+    function durationSeconds(value){
+      const match = String(value || '').match(/^(\d+):(\d{2})$/);
+      return match ? Number(match[1]) * 60 + Number(match[2]) : -1;
     }
 
     function rowsToM3u(rows){
       return ['#EXTM3U', ...rows.flatMap(row => {
         const title = row.artist ? `${row.artist} - ${row.title}` : row.title;
-        return [`#EXTINF:-1,${title}`, `#DJ-BATTLE:${encodeURIComponent(JSON.stringify(row))}`, row.sourceTrackId || row.title];
+        const seconds = durationSeconds(row.duration);
+        return [`#EXTINF:${seconds},${title}`, `#DJ-BATTLE:${encodeURIComponent(JSON.stringify(row))}`, row.sourceTrackId || row.title];
       })].join('\n');
     }
 
     function exportActiveStudioPlaylist(format){
-      const crate = deps.getLibraryCrateById(state.libraryFilters.crate) || deps.allLibraryCrates().find(item => !item.builtIn && (deps.resolveCrateTrackIds(item).length || item.items?.length));
+      let crate = deps.getLibraryCrateById(state.libraryFilters.crate) || deps.allLibraryCrates().find(item => !item.builtIn && (deps.resolveCrateTrackIds(item).length || item.items?.length));
+      const libraryTracks = (state.library || []).filter(track => track && !track.metadataOnly);
+      if(!crate && libraryTracks.length){
+        crate = { id:'my-library', name:'My Library', libraryTracks };
+      }
       if(!crate){
         deps.setStudioRuleStatus('Create or import a playlist before exporting.', 'warn');
         return { ok:false, error:'No playlist available.' };
@@ -195,6 +207,7 @@
       exportRowsForCrate,
       rowsToCsv,
       rowsToM3u,
+      durationSeconds,
       exportActiveStudioPlaylist,
       wireControls
     };

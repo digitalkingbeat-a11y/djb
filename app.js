@@ -980,7 +980,7 @@ function installAuxiliaryViews(){
     const section = document.createElement('section');
     section.id = 'settings';
     section.className = 'view';
-    section.innerHTML = `<div class="product-page-head"><div><span class="eyebrow accent">SETTINGS</span><h2>Settings</h2></div></div><div class="settings-grid"><section class="panel"><span class="eyebrow">TOUR</span><h3>Virtual Tour</h3><p>Replay the product walkthrough from the navigation at any time.</p><button class="primary small" data-view-target="tour" type="button">Open Tour</button></section><section class="panel"><span class="eyebrow">STUDIO</span><h3>Device Preferences</h3><p>Controller and audio device choices are browser-scoped and never imply unsupported output routing.</p><button class="ghost small" data-view-target="studio" type="button">Open Studio Setup</button></section><section class="panel"><span class="eyebrow">ACCOUNT</span><h3>Profile Controls</h3><p>Public profile, relationships, battle history, and privacy controls stay in Profile.</p><button class="ghost small" data-view-target="profile" type="button">Open Profile</button></section></div>`;
+    section.innerHTML = `<div class="product-page-head"><div><span class="eyebrow accent">SETTINGS</span><h2>Settings</h2></div></div><div class="settings-grid"><section class="panel" id="settings-data-panel"><span class="eyebrow">YOUR DATA</span><h3>Back up &amp; restore</h3><p>Everything you make here lives in this browser. Save one backup file, restore it on any browser, or start fresh.</p><div class="settings-data-actions"><button class="primary small" id="settings-backup" type="button">Back up my data</button><button class="ghost small" id="settings-restore" type="button">Restore from backup</button><button class="ghost small danger" id="settings-reset" type="button">Reset</button><input id="settings-restore-file" type="file" accept=".json,application/json" hidden></div><small id="settings-data-status" class="settings-data-status"></small></section><section class="panel"><span class="eyebrow">TOUR</span><h3>Virtual Tour</h3><p>Replay the product walkthrough from the navigation at any time.</p><button class="primary small" data-view-target="tour" type="button">Open Tour</button></section><section class="panel"><span class="eyebrow">STUDIO</span><h3>Device Preferences</h3><p>Controller and audio device choices are browser-scoped and never imply unsupported output routing.</p><button class="ghost small" data-view-target="studio" type="button">Open Studio Setup</button></section><section class="panel"><span class="eyebrow">ACCOUNT</span><h3>Profile Controls</h3><p>Public profile, relationships, battle history, and privacy controls stay in Profile.</p><button class="ghost small" data-view-target="profile" type="button">Open Profile</button></section></div>`;
     main.insertBefore(section, document.getElementById('operations') || null);
   }
 }
@@ -2764,17 +2764,81 @@ function renderVirtualTour(){
   startGuidedTour();
 }
 
-function activityItem(label, title, detail, actionView){
-  return `<article class="activity-row"><span>${esc(label)}</span><div><strong>${esc(title)}</strong><small>${esc(detail)}</small></div>${actionView ? `<button class="ghost small" data-view-target="${esc(actionView)}" type="button">Open</button>` : ''}</article>`;
+const ACTIVITY_FILTERS = [
+  { id:'all', label:'All' },
+  { id:'alert', label:'Alerts' },
+  { id:'battle', label:'Battles' },
+  { id:'community', label:'Community' },
+  { id:'challenge', label:'Challenges' }
+];
+function activityTimestamp(row){
+  if(!row) return null;
+  const raw = row.createdAt || row.created_at || row.updatedAt || row.updated_at || row.startsAt || row.startAt || row.timestamp || row.date || null;
+  const time = raw ? new Date(raw).getTime() : NaN;
+  return Number.isFinite(time) ? time : null;
+}
+function formatRelativeTime(time, nowMs){
+  if(time === null || time === undefined) return 'Time unknown';
+  const now = nowMs === undefined ? Date.now() : nowMs;
+  const diff = Math.round((now - time) / 1000);
+  const future = diff < 0;
+  const abs = Math.abs(diff);
+  let text;
+  if(abs < 45) return 'Just now';
+  if(abs < 3600) text = `${Math.round(abs / 60)} min`;
+  else if(abs < 86400) text = `${Math.round(abs / 3600)} hr`;
+  else if(abs < 86400 * 30) { const d = Math.round(abs / 86400); text = `${d} day${d === 1 ? '' : 's'}`; }
+  else return new Date(time).toLocaleDateString(undefined, { month:'short', day:'numeric', year:'numeric' });
+  return future ? `In ${text}` : `${text} ago`;
+}
+function formatAbsoluteTime(time){
+  if(time === null || time === undefined) return '';
+  return new Date(time).toLocaleString(undefined, { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' });
+}
+function activityItem(label, title, detail, actionView, time, kind){
+  const when = time === undefined ? '' : `<time class="activity-time" ${time ? `datetime="${esc(new Date(time).toISOString())}" title="${esc(formatAbsoluteTime(time))}"` : ''}>${esc(formatRelativeTime(time))}${time ? `<em>${esc(formatAbsoluteTime(time))}</em>` : ''}</time>`;
+  return `<article class="activity-row" data-activity-kind="${esc(kind || String(label).toLowerCase())}"><span>${esc(label)}</span><div><strong>${esc(title)}</strong><small>${esc(detail)}</small></div>${when}${actionView ? `<button class="ghost small" data-view-target="${esc(actionView)}" type="button">Open</button>` : ''}</article>`;
+}
+function collectActivityEntries(){
+  const entries = [];
+  (state.djNotifications.rows || []).slice(0, 20).forEach(row => entries.push({ kind:'alert', label:'Alert', title:row.title || row.type || 'Notification', detail:row.body || 'Platform activity', view:'activity', time:activityTimestamp(row) }));
+  (state.djChallenges.rows || []).slice(0, 20).forEach(row => entries.push({ kind:'challenge', label:'Challenge', title:row.title || 'Battle challenge', detail:row.status || 'Pending', view:'profile', time:activityTimestamp(row) }));
+  battles.slice(0, 20).forEach(battle => entries.push({ kind:'battle', label:'Battle', title:battle.title || 'Battle', detail:`${battleModeDisplayLabel(battle.modeId, battle.type)} / ${battle.genre || 'Open Format'} / ${formatBattleStatus(battle.status || battle.lobbyStatus || 'open')}`, view:'battles', time:activityTimestamp(battle) }));
+  (state.community.posts && state.community.posts.length ? state.community.posts : localCommunityPosts()).slice(0, 20).forEach(post => entries.push({ kind:'community', label:'Community', title:post.title || 'Post', detail:`${post.authorName || post.user || 'DJ'} / ${post.categoryLabel || post.room || 'Feed'}`, view:'community', time:activityTimestamp(post) }));
+  return sortActivityEntries(entries);
+}
+function sortActivityEntries(entries){
+  return entries.map((entry, index) => ({ entry, index })).sort((a, b) => {
+    const at = a.entry.time, bt = b.entry.time;
+    if(at === null && bt === null) return a.index - b.index;
+    if(at === null) return 1;
+    if(bt === null) return -1;
+    return bt - at || a.index - b.index;
+  }).map(item => item.entry);
 }
 function renderActivityPage(){
   const target = document.getElementById('activity-feed');
   if(!target) return;
-  const notifications = (state.djNotifications.rows || []).slice(0,4).map(row => activityItem('Alert', row.title || row.type || 'Notification', row.body || row.createdAt || 'Unread platform activity', 'activity'));
-  const battleRows = battles.slice(0,5).map(battle => activityItem('Battle', battle.title || 'Battle', `${battleModeDisplayLabel(battle.modeId, battle.type)} / ${battle.genre || 'Open Format'} / ${formatBattleStatus(battle.status || battle.lobbyStatus || 'open')}`, 'battles'));
-  const posts = (state.community.posts && state.community.posts.length ? state.community.posts : localCommunityPosts()).slice(0,5).map(post => activityItem('Community', post.title || 'Post', `${post.authorName || post.user || 'DJ'} / ${post.categoryLabel || post.room || 'Feed'}`, 'community'));
-  const challenges = (state.djChallenges.rows || []).slice(0,4).map(row => activityItem('Challenge', row.title || 'Battle challenge', row.status || 'Pending', 'profile'));
-  target.innerHTML = [...notifications, ...challenges, ...battleRows, ...posts].join('') || '<div class="panel"><strong>No activity yet.</strong><p>Battle entries, follows, challenges, results and community interactions will appear here.</p></div>';
+  if(!state.activityFilter) state.activityFilter = 'all';
+  let bar = document.getElementById('activity-filters');
+  if(!bar){
+    bar = document.createElement('div');
+    bar.id = 'activity-filters';
+    bar.className = 'activity-filters';
+    bar.setAttribute('role', 'tablist');
+    bar.setAttribute('aria-label', 'Filter activity');
+    target.parentNode.insertBefore(bar, target);
+  }
+  const all = collectActivityEntries();
+  bar.innerHTML = ACTIVITY_FILTERS.map(filter => {
+    const count = filter.id === 'all' ? all.length : all.filter(entry => entry.kind === filter.id).length;
+    const active = state.activityFilter === filter.id;
+    return `<button class="activity-filter${active ? ' active' : ''}" data-activity-filter="${filter.id}" role="tab" aria-selected="${active}" type="button">${esc(filter.label)}<b>${count}</b></button>`;
+  }).join('');
+  bar.querySelectorAll('[data-activity-filter]').forEach(button => button.onclick = () => { state.activityFilter = button.dataset.activityFilter; renderActivityPage(); });
+  const shown = state.activityFilter === 'all' ? all : all.filter(entry => entry.kind === state.activityFilter);
+  const emptyLabel = (ACTIVITY_FILTERS.find(filter => filter.id === state.activityFilter) || ACTIVITY_FILTERS[0]).label.toLowerCase();
+  target.innerHTML = shown.map(entry => activityItem(entry.label, entry.title, entry.detail, entry.view, entry.time, entry.kind)).join('') || `<div class="panel"><strong>No ${state.activityFilter === 'all' ? 'activity' : esc(emptyLabel)} yet.</strong><p>Battle entries, follows, challenges, results and community interactions will appear here.</p></div>`;
   target.querySelectorAll('[data-view-target]').forEach(button=>button.onclick=()=>switchView(button.dataset.viewTarget));
   const refresh = document.getElementById('activity-refresh');
   if(refresh) refresh.onclick = () => {
@@ -2786,6 +2850,7 @@ function renderActivityPage(){
 }
 
 function renderSettingsPage(){
+  wireDataBackupControls();
   const replay = document.querySelector('#settings [data-view-target="tour"]');
   if(replay) replay.onclick = () => { activeTourStep = 0; startGuidedTour(); };
 }
@@ -2796,9 +2861,6 @@ aiFilterButtons.forEach(btn=>btn.addEventListener('click',()=>{
   renderAiLeaderboard(btn.dataset.aiFilter);
 }));
 
-function renderPosts(){const html=state.posts.map(p=>`<article class="forum-post"><div class="post-head"><div class="avatar">${esc(p.initials)}</div><div><strong>${esc(p.user)}</strong><span>${esc(p.room)} • ${esc(p.time)}</span></div></div><h4>${esc(p.title)}</h4><p>${esc(p.body)}</p>${p.media?`<div class="audio-embed"><button>▶</button><div><strong>${esc(p.media)}</strong><small style="display:block;color:#7f8997">Attached from profile library</small></div><div class="bars"></div></div>`:''}<div class="post-foot"><span>♡ ${p.likes}</span><span>💬 ${p.comments}</span><span>↗ Share</span></div></article>`).join('');document.getElementById('forum-feed').innerHTML=html;document.getElementById('latest-posts').innerHTML=state.posts.slice(0,3).map(p=>`<div class="feed-item"><div class="mini-art">♫</div><div><strong>${esc(p.title)}</strong><p>${esc(p.user)} • ${esc(p.room)}</p></div></div>`).join('');}
-
-document.getElementById('new-post').onclick=()=>{const options=state.library.map((t,i)=>`<option value="${i}">${esc(t.name)}</option>`).join('');openModal(`<span class="eyebrow accent">COMMUNITY</span><h3>Create Post</h3><div class="form-grid"><label>Room<select id="post-room"><option>General DJ Talk</option><option>Transitions</option><option>Scratching</option><option>Track Feedback</option><option>Production</option><option>Promo Feed</option></select></label><label>Title<input id="post-title" placeholder="What are you sharing?"></label><label>Post<textarea id="post-body" placeholder="Tell the community about it..."></textarea></label><label>Attach from My Music<select id="post-media"><option value="">No attachment</option>${options}</select></label></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="publish-post">Publish</button></div>`);setTimeout(()=>document.getElementById('publish-post').onclick=()=>{const mediaIdx=document.getElementById('post-media').value;state.posts.unshift({user:currentUser().displayName,initials:currentUser().initials,userId:currentUser().id,room:document.getElementById('post-room').value,time:'now',title:document.getElementById('post-title').value||'New post',body:document.getElementById('post-body').value||'',media:mediaIdx!==''?state.library[Number(mediaIdx)]?.name:null,likes:0,comments:0});persist();renderPosts();document.getElementById('modal').close();},0)};
 
 const COMMUNITY_DEFAULT_CATEGORIES = [
   { id:'general', label:'General DJ Discussion' },
@@ -6577,7 +6639,14 @@ async function attachArtworkToTrack(trackId, file){
 }
 
 function handleLibraryFilesWithMeta(files){
-  const list = Array.from(files || []);
+  const incoming = Array.from(files || []);
+  const list = [];
+  const skipped = [];
+  incoming.forEach(f => {
+    if(findDuplicateUpload(f, list)) skipped.push(f.name);
+    else list.push(f);
+  });
+  if(skipped.length) showAppToast('Already in your library', `Skipped ${skipped.length} duplicate upload(s): ${skipped.join(', ')}`);
   function next(){
     if(list.length===0){ persist(); persistPlatform(); renderLibrary(); renderPlatformLibrary(); renderStreamingServices(); return; }
     const f = list.shift();
@@ -6596,7 +6665,8 @@ function handleLibraryFilesWithMeta(files){
           next();
           return;
         }
-        const track = { id: 'u-'+Date.now(), title, name: title, artist, uploader: (document.getElementById('profile-name')?.textContent||'You'), album:null, artwork:null, artworkDataUrl:null, genre, bpm:'--', key:'--', duration:'--', uploadDate: new Date().toISOString(), size: f.size||0, source:'MY_LIBRARY', rightsCategory: rights, rightsDeclared: declared, copyrightCheck: 'Not Checked', battleEligible: rights !== 'Commercial / Copyrighted Music', permissions: defaultPermissions(), stems:false, localAudioPersisted:false, audioMissing:false };
+        const realDuration = await readAudioDuration(f);
+        const track = { id: 'u-'+Date.now(), title, name: title, artist, uploader: (document.getElementById('profile-name')?.textContent||'You'), album:null, artwork:null, artworkDataUrl:null, genre, bpm:'--', key:'--', duration: realDuration || '--', uploadDate: new Date().toISOString(), size: f.size||0, fileName: f.name, source:'MY_LIBRARY', rightsCategory: rights, rightsDeclared: declared, copyrightCheck: 'Not Checked', battleEligible: rights !== 'Commercial / Copyrighted Music', permissions: defaultPermissions(), stems:false, localAudioPersisted:false, audioMissing:false };
         state.library.push(track);
         await attachLibraryAudioBlob(track.id, f);
         persist();
@@ -6609,22 +6679,6 @@ function handleLibraryFilesWithMeta(files){
 }
 document.getElementById('library-upload').onchange=e=>handleLibraryFilesWithMeta(e.target.files);
 document.getElementById('quick-upload').onclick=()=>{switchView('library');document.getElementById('library-upload').click();};
-
-function renderLibrary(){
-  const body=document.getElementById('library-table');
-  if(!state.library.length){
-    body.innerHTML='<tr><td colspan="7"><small>No tracks yet. Upload music to build your DJ library.</small></td></tr>';
-  } else {
-    body.innerHTML=state.library.map((t,i)=>`<tr><td><strong>${esc(t.name)}</strong><small>${(t.size/1024/1024||0).toFixed(1)} MB</small></td><td>${t.source||'MY_LIBRARY'}</td><td>${t.genre}</td><td>${t.bpm}</td><td>${t.key}</td><td>${t.rightsCategory?('<span style="color:'+ (t.rightsCategory.includes('Commercial')? '#f66':'var(--accent)') +'">'+esc(t.rightsCategory)+'</span>'):'—'}</td><td class="track-actions"><button data-rights-check="${i}">Check Rights</button> <button data-add-playlist="${i}">＋Pl</button> <button data-remove="${i}">×</button></td></tr>`).join('');
-  }
-  const max=state.premium?50:5;
-  document.getElementById('storage-progress').style.width=`${Math.min(100,state.library.length/max*100)}%`;
-  document.getElementById('storage-label').textContent=`${state.library.length} / ${max} tracks`;
-  document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{state.library.splice(Number(b.dataset.remove),1);persist();renderLibrary();});
-  document.querySelectorAll('[data-rights-check]').forEach(b=>b.onclick=async(e)=>{const idx=Number(e.currentTarget.dataset.rightsCheck); await runCopyrightCheck(state.library[idx]); renderLibrary();});
-  document.querySelectorAll('[data-add-playlist]').forEach(b=>b.onclick=()=>{ const idx=Number(b.dataset.addPlaylist); addTrackToPlaylist(state.library[idx]); });
-  renderProfile();
-}
 
 function renderLibrary(){
   const body=document.getElementById('library-table');
@@ -10786,7 +10840,9 @@ playlistTransferManager = StudioModules.playlistTransfer.create({
   secureArtworkSource,
   trackSource,
   rawServerTrackIdForMembership,
-  securePlaybackSource
+  securePlaybackSource,
+  addImportedItemsToLibrary: (items, fileName) => addImportedItemsToLibrary(items, fileName),
+  onImported: result => showAppToast('Playlist imported', `${result.items.length} item(s) read${result.added ? `, ${result.added} added to your library` : ''}.`)
 });
 studioBrowserManager = StudioModules.browser.create({
   window,
@@ -11665,3 +11721,196 @@ wireControllerAndAudioControls();
 // initial render of studio library if present
 renderStudioLibrary();
 renderStudioLibraryDrawer();
+
+
+/* ---- Upload details: real duration + duplicate detection ---- */
+function formatTrackDuration(seconds){
+  const total = Math.round(Number(seconds));
+  if(!Number.isFinite(total) || total <= 0) return '';
+  const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), sec = total % 60;
+  return h ? `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}` : `${m}:${String(sec).padStart(2,'0')}`;
+}
+function readAudioDuration(file, timeoutMs){
+  return new Promise(resolve => {
+    try{
+      if(!file || !window.URL || typeof window.URL.createObjectURL !== 'function') return resolve('');
+      const audio = document.createElement('audio');
+      const url = window.URL.createObjectURL(file);
+      let done = false;
+      const finish = value => { if(done) return; done = true; try{ window.URL.revokeObjectURL(url); }catch(e){} resolve(value); };
+      audio.preload = 'metadata';
+      audio.onloadedmetadata = () => finish(formatTrackDuration(audio.duration));
+      audio.onerror = () => finish('');
+      const timer = setTimeout(() => finish(''), timeoutMs || 4000);
+      if(timer && typeof timer.unref === 'function') timer.unref();
+      audio.src = url;
+    }catch(error){ resolve(''); }
+  });
+}
+function uploadIdentity(item){
+  const name = String(item && (item.fileName || item.name) || '').trim().toLowerCase();
+  const size = Number(item && item.size) || 0;
+  return name && size ? `${name}::${size}` : '';
+}
+function findDuplicateUpload(file, pending){
+  const id = uploadIdentity(file);
+  if(!id) return null;
+  const pool = [...(state.library || []), ...(pending || [])];
+  return pool.find(item => {
+    if(uploadIdentity(item) === id) return true;
+    const title = String(item && (item.title || item.name) || '').trim().toLowerCase();
+    const base = String(file.name || '').replace(/\.[^/.]+$/, '').trim().toLowerCase();
+    return !item.fileName && title && title === base && Number(item.size) === Number(file.size);
+  }) || null;
+}
+function addImportedItemsToLibrary(items, fileName){
+  let added = 0;
+  const key = item => `${String(item.title || item.name || '').trim().toLowerCase()}::${String(item.artist || '').trim().toLowerCase()}`;
+  const known = new Set((state.library || []).map(key));
+  (items || []).forEach((item, index) => {
+    if(!item || !item.title) return;
+    const k = key(item);
+    if(known.has(k)) return;
+    known.add(k);
+    state.library.push({
+      id:`pl-${Date.now()}-${index}`,
+      title:item.title, name:item.title, artist:item.artist || 'Unknown', album:item.album || null,
+      genre:item.genre || 'Unsorted', bpm:item.bpm || '--', key:item.key || '--', duration:item.duration || '--',
+      uploadDate:new Date().toISOString(), size:0, source:'PLAYLIST_IMPORT', importedFrom:fileName || '',
+      metadataOnly:true, audioMissing:true, rightsCategory:null
+    });
+    added += 1;
+  });
+  return added;
+}
+
+/* ---- Settings: back up, restore, reset ---- */
+const APP_STORAGE_PREFIX = 'djBattle';
+const APP_BACKUP_FORMAT = 'djb-backup';
+function appOwnedStorageKeys(){
+  const keys = [];
+  for(let i = 0; i < localStorage.length; i += 1){
+    const k = localStorage.key(i);
+    if(k && k.indexOf(APP_STORAGE_PREFIX) === 0) keys.push(k);
+  }
+  return keys.sort();
+}
+function blobToDataUrl(blob){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+function dataUrlToBlob(dataUrl){
+  const match = String(dataUrl || '').match(/^data:([^;,]*)(;base64)?,(.*)$/);
+  if(!match) return null;
+  const bytes = match[2] ? atob(match[3]) : decodeURIComponent(match[3]);
+  const arr = new Uint8Array(bytes.length);
+  for(let i = 0; i < bytes.length; i += 1) arr[i] = bytes.charCodeAt(i);
+  return new Blob([arr], { type:match[1] || 'application/octet-stream' });
+}
+async function listLibraryAudioKeys(){
+  try{
+    const db = await openLibraryAudioDb();
+    const keys = await idbRequest(db.transaction(LIBRARY_AUDIO_STORE, 'readonly').objectStore(LIBRARY_AUDIO_STORE).getAllKeys());
+    db.close();
+    return (keys || []).map(String);
+  }catch(error){ return []; }
+}
+async function buildAppBackup(){
+  const storage = {};
+  appOwnedStorageKeys().forEach(k => { storage[k] = localStorage.getItem(k); });
+  const audio = {};
+  for(const key of await listLibraryAudioKeys()){
+    const blob = await loadLibraryAudioBlob(key);
+    if(blob) { try{ audio[key] = await blobToDataUrl(blob); }catch(e){} }
+  }
+  return { format:APP_BACKUP_FORMAT, version:1, createdAt:new Date().toISOString(), localStorage:storage, libraryAudio:audio };
+}
+function validateAppBackup(data){
+  if(!data || typeof data !== 'object') return 'That file is not a DJ Battle backup.';
+  if(data.format !== APP_BACKUP_FORMAT) return 'That file is not a DJ Battle backup.';
+  if(!data.localStorage || typeof data.localStorage !== 'object') return 'The backup has no saved app data.';
+  return '';
+}
+async function restoreAppBackup(data){
+  const error = validateAppBackup(data);
+  if(error) return { ok:false, error };
+  appOwnedStorageKeys().forEach(k => localStorage.removeItem(k));
+  let keys = 0;
+  Object.keys(data.localStorage).forEach(k => {
+    if(k.indexOf(APP_STORAGE_PREFIX) !== 0) return;
+    localStorage.setItem(k, String(data.localStorage[k]));
+    keys += 1;
+  });
+  let audio = 0;
+  for(const [key, value] of Object.entries(data.libraryAudio || {})){
+    const blob = dataUrlToBlob(value);
+    if(blob && (await saveLibraryAudioBlob(key, blob)).ok) audio += 1;
+  }
+  return { ok:true, keys, audio };
+}
+async function resetAppData(){
+  const keys = appOwnedStorageKeys();
+  keys.forEach(k => localStorage.removeItem(k));
+  for(const key of await listLibraryAudioKeys()) await deleteLibraryAudioBlob(key);
+  return { ok:true, keys:keys.length };
+}
+function setDataStatus(text, tone){
+  const el = document.getElementById('settings-data-status');
+  if(el){ el.textContent = text; el.dataset.tone = tone || ''; }
+}
+function reloadAfterDataChange(){
+  if(window.DJB_NO_RELOAD) return;
+  setTimeout(() => window.location.reload(), 900);
+}
+async function downloadAppBackup(){
+  const backup = await buildAppBackup();
+  const json = JSON.stringify(backup, null, 2);
+  if(window.URL && typeof window.URL.createObjectURL === 'function' && !window.DJB_NO_DOWNLOAD){
+    const url = window.URL.createObjectURL(new Blob([json], { type:'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `djb-backup-${backup.createdAt.slice(0,10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+  }
+  const summary = `${Object.keys(backup.localStorage).length} saved item(s), ${Object.keys(backup.libraryAudio).length} audio file(s).`;
+  setDataStatus(`Backup saved: ${summary}`, 'ok');
+  showAppToast('Backup saved', summary);
+  return { ok:true, backup, json };
+}
+async function restoreAppBackupFromFile(file){
+  if(!file) return { ok:false, error:'Choose a backup file.' };
+  let data;
+  try{ data = JSON.parse(await file.text()); }catch(error){ data = null; }
+  const problem = validateAppBackup(data);
+  if(problem){ setDataStatus(problem, 'denied'); showAppToast('Restore failed', problem); return { ok:false, error:problem }; }
+  if(!window.confirm(`Restore the backup from ${String(data.createdAt || '').slice(0,10) || 'this file'}? This replaces the data in this browser.`)) return { ok:false, cancelled:true };
+  const result = await restoreAppBackup(data);
+  setDataStatus(`Restored ${result.keys} saved item(s) and ${result.audio} audio file(s). Reloading…`, 'ok');
+  showAppToast('Backup restored', 'Reloading the app with your saved data.');
+  reloadAfterDataChange();
+  return result;
+}
+async function confirmAndResetAppData(){
+  if(!window.confirm('Reset this app? This deletes your library, playlists, battles, posts and settings saved in this browser. Back up first if you want to keep them.')) return { ok:false, cancelled:true };
+  const result = await resetAppData();
+  setDataStatus('App data reset. Reloading…', 'ok');
+  showAppToast('App reset', `${result.keys} saved item(s) removed.`);
+  reloadAfterDataChange();
+  return result;
+}
+function wireDataBackupControls(){
+  const backup = document.getElementById('settings-backup');
+  const restore = document.getElementById('settings-restore');
+  const input = document.getElementById('settings-restore-file');
+  const reset = document.getElementById('settings-reset');
+  if(backup) backup.onclick = () => downloadAppBackup().catch(error => setDataStatus(`Backup failed: ${error.message || error}`, 'denied'));
+  if(restore && input) restore.onclick = () => input.click();
+  if(input) input.onchange = event => { const file = event.currentTarget.files && event.currentTarget.files[0]; event.currentTarget.value = ''; restoreAppBackupFromFile(file).catch(error => setDataStatus(`Restore failed: ${error.message || error}`, 'denied')); };
+  if(reset) reset.onclick = () => confirmAndResetAppData().catch(error => setDataStatus(`Reset failed: ${error.message || error}`, 'denied'));
+}
+wireDataBackupControls();
