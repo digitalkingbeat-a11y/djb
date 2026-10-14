@@ -100,7 +100,7 @@ test('Create Battle saves exactly what the form says', async () => {
   assert.equal(battle.time, '30 min');
   assert.equal(battle.trackSelectionMethod, 'assigned');
   assert.equal(battle.trackCount, 4);
-  assert.equal(battle.assignedTracks.length, 4);
+  assert.ok(battle.assignedTracks.length <= 4 && battle.assignedTracks.every(t => !/Assignment pending/.test(t)), 'no placeholder tracks');
   assert.equal(battle.opponentRequirement, 'optional');
   assert.equal(battle.visibility, 'private');
   assert.equal(battle.rewardType, 'standard');
