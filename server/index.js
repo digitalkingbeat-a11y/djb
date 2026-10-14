@@ -104,6 +104,7 @@ const {
   getPublicBattleShare,
   recordCommunityBattleVote
 } = require('./battle_community_voting');
+const { getCrowdVoteSummary, recordCrowdVote } = require('./battle_crowd_votes');
 const {
   LIBRARY_ARTWORK_BUCKET,
   checkMusicLibrarySchemaReadiness,
@@ -1616,6 +1617,41 @@ app.post('/api/publicBattles/:battleId/votes', requireAuth, async (req, res) => 
   }catch(err){
     console.error('publicBattle vote error', err);
     return res.status(500).json({ error:'Public battle vote request failed' });
+  }
+});
+
+app.get('/api/battles/:battleId/crowdVotes', async (req, res) => {
+  const validation = validateRouteIdentifier(req.params.battleId, 'battleId');
+  if(validation.error) return rejectProtectedWriteError(res, validation);
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await getCrowdVoteSummary(supabaseService, validation.value.battleId, null);
+    if(result.notFound) return res.status(404).json({ error:'Battle not found' });
+    if(result.validationError) return res.status(422).json({ error:result.validationError });
+    if(result.error) throw result.error;
+    return res.json({ success:true, finished:Boolean(result.finished), schemaMissing:Boolean(result.schemaMissing), summary:result.summary });
+  }catch(err){
+    console.error('crowd vote summary error', err);
+    return res.status(500).json({ error:'Crowd vote summary request failed' });
+  }
+});
+
+app.post('/api/battles/:battleId/crowdVotes', requireAuth, async (req, res) => {
+  const validation = validateRouteIdentifier(req.params.battleId, 'battleId');
+  if(validation.error) return rejectProtectedWriteError(res, validation);
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await recordCrowdVote(supabaseService, req.authUser.id, validation.value.battleId, req.body || {});
+    if(result.notFound) return res.status(404).json({ error:'Battle not found' });
+    if(result.forbidden) return res.status(403).json({ error:result.reason || 'Crowd vote is not permitted' });
+    if(result.validationError) return res.status(422).json({ error:result.validationError });
+    if(result.votingClosed) return res.status(409).json({ error:result.reason });
+    if(result.schemaMissing) return res.status(503).json({ error:'Crowd voting table is not installed (apply sql/028_create_battle_crowd_votes.sql)' });
+    if(result.error) throw result.error;
+    return res.json({ success:true, duplicate:Boolean(result.duplicate), summary:result.summary });
+  }catch(err){
+    console.error('crowd vote error', err);
+    return res.status(500).json({ error:'Crowd vote request failed' });
   }
 });
 

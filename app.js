@@ -1302,6 +1302,7 @@ function battleCard(b){
     <div class="battle-row-cell"><span>State</span><strong>${esc(status)}</strong></div>
     <div class="battle-row-cell"><span>Start</span><strong>${esc(startCondition)}</strong></div>
     <button class="${b.premiumRequired?'ghost':'primary'} small enter tone-action" data-enter="${esc(b.id)}" ${b.joinable === false || ['full','matched','started','active','submission_pending','judging','completed'].includes(rawStatus) ? 'disabled' : ''}>${b.premiumRequired?'Premium':'Join'}</button>
+    ${crowdVoteCardButtonHtml(b)}
     <p>${esc(b.desc || '')}</p>
     <span class="tag battle-status-tag">${esc(status)}</span>
   </article>`;
@@ -2042,7 +2043,7 @@ function renderHeroScoreActions(record){
   const id = historyResultId(record);
   const canRematch = Boolean(historyRematchProfileId(record));
   wrap.hidden = false;
-  wrap.innerHTML = `${canRematch ? `<button class="primary small" type="button" data-result-rematch="${esc(id)}">Rematch</button>` : ''}<button class="ghost small" type="button" data-result-share="${esc(id)}">Share result</button>`;
+  wrap.innerHTML = `${canRematch ? `<button class="primary small" type="button" data-result-rematch="${esc(id)}">Rematch</button>` : ''}<button class="ghost small" type="button" data-result-share="${esc(id)}">Share result</button>${headToHeadLineHtml(record)}`;
   wireResultActionButtons(wrap);
 }
 
@@ -2445,7 +2446,7 @@ function completedResultActionsHtml(battle, result){
   state.lastCompletedShareRecord = record;
   const id = historyResultId(record);
   const canRematch = Boolean(findBattleHistoryResult(id) && historyRematchProfileId(record));
-  return `${canRematch ? `<button class="primary" type="button" data-result-rematch="${esc(id)}">Rematch</button>` : ''}<button class="ghost" type="button" data-result-share="${esc(id)}">Share result</button>`;
+  return `${canRematch ? `<button class="primary" type="button" data-result-rematch="${esc(id)}">Rematch</button>` : ''}<button class="ghost" type="button" data-result-share="${esc(id)}">Share result</button>${headToHeadLineHtml(record)}`;
 }
 
 function renderCompletedBattleResult(battle, result, options = {}){
@@ -2475,8 +2476,7 @@ function renderCompletedBattleResult(battle, result, options = {}){
     ['Measurable analysis', hasMeasurable ? 'Audio evidence stored' : 'Unavailable'],
     ['Rule-based scoring', scoringModel.ruleBasedScoring || result.evidenceType || 'Deterministic rules'],
     ['AI feedback', result.aiFeedback ? 'Provided' : trained.used ? 'Trained model used' : 'Not used'],
-    ['Human voting', result.humanVoting ? 'Recorded' : 'Not included yet']
-  ].map(([label,value])=>`<div class="battle-result-module"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('');
+  ].map(([label,value])=>`<div class="battle-result-module"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('') + crowdVoteResultModuleHtml(battle, result);
   const audioUrl = result.securePlaybackUrl || result.playbackUrl || null;
   const playback = audioUrl ? `<audio controls src="${esc(audioUrl)}" style="width:100%"></audio>` : '<p style="color:var(--muted);margin:0">Secure playback is unavailable unless the server supplies a temporary playback URL.</p>';
   const duplicateNote = options.progressionState && options.progressionState.duplicate ? '<div class="battle-reward-note">Progression was already recorded for this submission. No duplicate XP, rating or belt award was applied.</div>' : '';
@@ -2484,7 +2484,7 @@ function renderCompletedBattleResult(battle, result, options = {}){
   if(panel){
     panel.innerHTML = `<div class="battle-result-surface">
       <div class="battle-result-top">
-        <div class="battle-score-lcd"><span>Overall score</span><strong>${esc(result.score)}</strong><small>/100</small></div>
+        <div class="battle-score-lcd"><span>Overall score</span><strong>${esc(result.score)}</strong><small>/100</small>${crowdVoteInlineHtml(battle)}</div>
         <div class="battle-result-module battle-${outcome.level}"><div class="battle-lamp-row"><i class="battle-lamp"></i><b>${esc(outcome.label)}</b></div><strong>${esc(opponent.label)}</strong><p>${esc(opponent.detail)}</p></div>
         <div class="battle-result-module"><span>Confidence</span><strong>${esc(confidence)}</strong><p>${esc(result.explanation || 'Measured audio analysis was scored by deterministic rules.')}</p></div>
       </div>
@@ -3417,6 +3417,8 @@ function localCommunityPosts(){
     commentCount:Number(post.comments || 0),
     attachments:post.media ? [{ id:`local-media-${index}`, type:'library_track', title:post.media, artist:'Local library', status:'local_saved', playbackPermitted:false, playbackContract:'local_saved_only' }] : [],
     viewer:{ canEdit:isOwnLocalPost(post), canDelete:isOwnLocalPost(post), isOwner:isOwnLocalPost(post) },
+    editedAt:post.editedAt || null,
+    localIndex:index,
     localOnly:true
   }));
 }
@@ -3527,7 +3529,7 @@ function communityPostHtml(post){
   return `<article class="forum-post community-post ${post.localOnly ? 'local' : ''}" data-community-post="${esc(post.id)}">
     <div class="post-head">
       <div class="avatar">${esc((post.author && (post.author.displayName || post.author.name) || 'DJ').split(/\s+/).map(part=>part[0]).join('').slice(0,2).toUpperCase())}</div>
-      <div class="post-author-copy"><strong>${esc(post.author && (post.author.displayName || post.author.name) || 'DJ')}</strong><span>${esc(communityCategoryLabel(post.categoryId))} / ${relativeTimeHtml(post.createdAt)}${esc(edited)}${esc(locked)}</span></div>
+      <div class="post-author-copy"><strong>${esc(post.author && (post.author.displayName || post.author.name) || 'DJ')}</strong><span>${esc(communityCategoryLabel(post.categoryId))} / ${relativeTimeHtml(post.createdAt)}${edited ? ' <em class="edited-tag" title="Edited">edited</em>' : ''}${esc(locked)}</span></div>
       ${postAuthorFollowButtonHtml(post)}
       ${canChallenge ? `<button class="ghost small request-battle" type="button" data-community-challenge="${esc(authorProfileId)}" data-community-post="${esc(post.id)}">Request Battle</button>` : ''}
     </div>
@@ -3929,11 +3931,12 @@ function communityCommentHtml(comment){
   const counts = communityReactionCounts(comment.reactionCounts);
   const owner = comment.viewer && comment.viewer.isOwner;
   return `<div class="community-comment ${comment.parentCommentId ? 'reply' : ''}" data-community-comment="${esc(comment.id)}">
-    <div><strong>${esc(comment.author && (comment.author.displayName || comment.author.name) || 'DJ')}</strong><span>${relativeTimeHtml(comment.createdAt)}${comment.editedAt ? ' / edited' : ''}</span></div>
+    <div><strong>${esc(comment.author && (comment.author.displayName || comment.author.name) || 'DJ')}</strong><span>${relativeTimeHtml(comment.createdAt)}${comment.editedAt ? ' <em class="edited-tag" title="Edited">edited</em>' : ''}</span></div>
     <p>${comment.tombstone ? esc('Comment unavailable.') : mentionifyText(comment.bodyText || '')}</p>
     <div class="community-comment-actions">
       <span>Like ${esc(counts.like)}</span>
       ${communityServerMode() ? `<button class="ghost small" type="button" data-community-reply="${esc(comment.id)}">Reply</button>` : ''}
+      ${owner && !comment.tombstone ? `<button class="ghost small" type="button" data-community-comment-edit="${esc(comment.id)}">Edit</button>` : ''}
       ${owner ? `<button class="ghost small" type="button" data-community-comment-delete="${esc(comment.id)}">Remove</button>` : ''}
     </div>
   </div>`;
@@ -3952,6 +3955,9 @@ function renderCommunityCommentsModal(postId){
       const body = document.getElementById('community-comment-body');
       if(body) body.focus();
     };
+  });
+  list.querySelectorAll('[data-community-comment-edit]').forEach(button => {
+    button.onclick = event => startInlineCommentEdit(event.currentTarget.dataset.communityCommentEdit, postId);
   });
   list.querySelectorAll('[data-community-comment-delete]').forEach(button => {
     button.onclick = event => deleteCommunityComment(event.currentTarget.dataset.communityCommentDelete, postId).catch(err=>console.warn('Community comment delete failed', err));
@@ -4099,8 +4105,7 @@ function wireCommunityControls(){
   });
   document.querySelectorAll('[data-community-edit]').forEach(button => {
     button.onclick = event => {
-      const post = state.community.posts.find(row => String(row.id) === String(event.currentTarget.dataset.communityEdit));
-      if(post) openCommunityPostComposer(post);
+      startInlinePostEdit(event.currentTarget.dataset.communityEdit);
     };
   });
   document.querySelectorAll('[data-community-delete]').forEach(button => {
@@ -7599,8 +7604,9 @@ function renderLibrary(){
   const max=state.premium?50:5;
   const storageProgress = document.getElementById('storage-progress');
   const storageLabel = document.getElementById('storage-label');
-  if(storageProgress) storageProgress.style.width=`${Math.min(100,state.library.length/max*100)}%`;
-  if(storageLabel) storageLabel.textContent=`${state.library.length} / ${max} tracks`;
+  const limitCounts = libraryLimitCounts();
+  if(storageProgress) storageProgress.style.width=`${Math.min(100,limitCounts.tracks/max*100)}%`;
+  if(storageLabel) storageLabel.textContent=`${limitCounts.tracks} / ${max} tracks${limitCounts.drafts ? ` · ${limitCounts.drafts} draft${limitCounts.drafts === 1 ? '' : 's'} (don't count)` : ''}`;
   renderLibraryStatus(rows);
   renderLibraryDetail(selected);
   renderLibraryPlayer();
@@ -11493,6 +11499,7 @@ function renderPublicDjProfile(profile, status){
     ? media.map(item => `<div class="battle-result-row"><b>${esc(item.title || 'Public media')}</b><em>${item.securePlaybackPermitted && item.publicUrl ? `<audio controls src="${esc(item.publicUrl)}" style="max-width:220px"></audio>` : 'On-site playback unavailable'}</em></div>`).join('')
     : '<div class="battle-result-row"><b>Public media</b><em>None approved</em></div>';
   openModal(`<span class="eyebrow accent">PUBLIC DJ PROFILE</span><h3>${esc(profile.displayName || 'DJ')}</h3>
+    ${headToHeadProfileHtml({ publicProfileId:profileIdValue, name:profile.displayName || profile.name })}
     <div class="battle-result-surface">
       <div class="battle-result-top">
         <div class="battle-result-module"><span>Country</span><strong>${esc(countryCode(country))}</strong><p>${esc(country)}</p></div>
@@ -13131,3 +13138,290 @@ function renderRatingHistory(){
   el.innerHTML = `<div class="rating-history-head"><span class="eyebrow">RATING OVER TIME</span><strong class="rating-history-delta" data-tone="${tone}">${sign}${Math.abs(delta)} since last week</strong></div>${points.length > 1 ? ratingHistorySvg(points) : `<p class="rating-history-empty">One battle so far (rating ${points[0].rating}). Battle again to see your trend.</p>`}`;
 }
 renderRatingHistory();
+
+
+// ---- Community stats: crowd voting, editing, head-to-head, streaks & badges, drafts ----
+function libraryLimitCounts(rows = state.library){
+  const list = Array.isArray(rows) ? rows : [];
+  const drafts = list.filter(t => t && t.sourceType === 'draft_take').length;
+  return { tracks:list.length - drafts, drafts };
+}
+
+// Crowd voting
+function crowdVoteParticipants(battle){
+  return ((battle && battle.participants) || []).filter(p => p && p.userId != null && String(p.status || '') !== 'withdrawn').map(p => ({ userId:String(p.userId), name:p.name || p.displayName || 'DJ' }));
+}
+function isFinishedBattleForCrowd(battle){
+  return Boolean(battle) && ['completed','finished','resolved'].includes(String(battle.lobbyStatus || battle.status || '').toLowerCase());
+}
+function crowdVoteStore(){
+  try{ const parsed = JSON.parse(localStorage.getItem('djBattleCrowdVotes') || '{}'); return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}; }catch(e){ return {}; }
+}
+function saveCrowdVoteStore(store){ localStorage.setItem('djBattleCrowdVotes', JSON.stringify(store)); }
+function crowdVoteSummaryFrom(participants, votes, viewerId){
+  const counts = Object.fromEntries(participants.map(p => [p.userId, 0]));
+  let total = 0; let viewerPick = null;
+  Object.entries(votes || {}).forEach(([voter, pick]) => {
+    if(!(String(pick) in counts)) return;
+    counts[pick] += 1; total += 1;
+    if(viewerId && String(voter) === String(viewerId)) viewerPick = String(pick);
+  });
+  return { totalVotes:total, viewerPick, shares:participants.map(p => ({ userId:p.userId, name:p.name, votes:counts[p.userId], percent: total ? Math.round(counts[p.userId] / total * 100) : 0 })) };
+}
+function localCrowdVoteSummary(battle){
+  const entry = crowdVoteStore()[String(battle && battle.id)] || {};
+  return { ...crowdVoteSummaryFrom(crowdVoteParticipants(battle), entry.votes || {}, currentProfileUserId()), source:'local' };
+}
+function crowdVoteEligibility(battle){
+  const participants = crowdVoteParticipants(battle);
+  const me = String(currentProfileUserId());
+  if(!battle || participants.length < 2) return { canVote:false, reason:'no_opponent' };
+  if(!isFinishedBattleForCrowd(battle)) return { canVote:false, reason:'not_finished' };
+  if(participants.some(p => p.userId === me)) return { canVote:false, reason:'participant' };
+  return { canVote:true };
+}
+function recordLocalCrowdVote(battle, pickedUserId){
+  const check = crowdVoteEligibility(battle);
+  if(!check.canVote) return { ok:false, reason:check.reason };
+  if(!crowdVoteParticipants(battle).some(p => p.userId === String(pickedUserId))) return { ok:false, reason:'invalid_pick' };
+  const store = crowdVoteStore();
+  const key = String(battle.id);
+  const entry = store[key] || { votes:{} };
+  const me = String(currentProfileUserId());
+  if(entry.votes[me]) return { ok:false, duplicate:true, summary:localCrowdVoteSummary(battle) };
+  entry.votes[me] = String(pickedUserId);
+  store[key] = entry;
+  saveCrowdVoteStore(store);
+  return { ok:true, summary:localCrowdVoteSummary(battle) };
+}
+function crowdVoteText(summary){
+  if(!summary || !summary.totalVotes) return 'Crowd: No votes yet';
+  return `Crowd: ${summary.shares.map(s => `${s.percent}%`).join(' / ')} (${summary.totalVotes} vote${summary.totalVotes === 1 ? '' : 's'})`;
+}
+function crowdVoteOrderedForViewer(battle, summary){
+  const me = String(currentProfileUserId());
+  const shares = (summary.shares || []).slice().sort((a, b) => (a.userId === me ? -1 : b.userId === me ? 1 : 0));
+  return { ...summary, shares };
+}
+function crowdVoteInlineHtml(battle){
+  if(crowdVoteParticipants(battle).length < 2) return '';
+  const summary = crowdVoteOrderedForViewer(battle, localCrowdVoteSummary(battle));
+  return `<em class="crowd-vote-inline" data-crowd-inline="${esc(battle.id)}">${esc(crowdVoteText(summary))}</em>`;
+}
+function crowdVoteResultModuleHtml(battle){
+  const participants = crowdVoteParticipants(battle);
+  if(participants.length < 2) return `<div class="battle-result-module crowd-vote-module"><span>Crowd vote</span><strong>Solo battle</strong><p>Crowd voting needs two DJs.</p></div>`;
+  const summary = crowdVoteOrderedForViewer(battle, localCrowdVoteSummary(battle));
+  if(battle && battle.id) setTimeout(() => refreshCrowdVoteSummary(battle).catch(() => {}), 0);
+  return `<div class="battle-result-module crowd-vote-module" data-crowd-module="${esc(battle.id)}"><span>Crowd vote</span><strong data-crowd-text>${esc(crowdVoteText(summary))}</strong><p>${esc(summary.shares.map(s => s.name).join(' vs '))} · listeners only, one vote each</p></div>`;
+}
+async function fetchServerCrowdSummary(battle){
+  if(!communityApiAvailable() || !battle || !battle.serverBacked && !/^[0-9a-f-]{8,}$/i.test(String(battle.id || ''))) return null;
+  const response = await window.DJBattleApi.apiRequest(`/api/battles/${encodeURIComponent(battle.id)}/crowdVotes`, { public:true });
+  if(!response || response.error || !response.data || !response.data.summary) return null;
+  const names = Object.fromEntries(crowdVoteParticipants(battle).map(p => [p.userId, p.name]));
+  const summary = response.data.summary;
+  return { ...summary, shares:(summary.shares || []).map(s => ({ ...s, name:names[s.userId] || 'DJ' })), source:'server' };
+}
+async function refreshCrowdVoteSummary(battle){
+  let summary = null;
+  try{ summary = await fetchServerCrowdSummary(battle); }catch(e){ summary = null; }
+  if(!summary) summary = localCrowdVoteSummary(battle);
+  summary = crowdVoteOrderedForViewer(battle, summary);
+  document.querySelectorAll(`[data-crowd-module="${window.CSS && window.CSS.escape ? window.CSS.escape(String(battle.id)) : String(battle.id)}"] [data-crowd-text]`).forEach(el => { el.textContent = crowdVoteText(summary); });
+  document.querySelectorAll(`[data-crowd-inline="${window.CSS && window.CSS.escape ? window.CSS.escape(String(battle.id)) : String(battle.id)}"]`).forEach(el => { el.textContent = crowdVoteText(summary); });
+  return summary;
+}
+function crowdVoteCardButtonHtml(b){
+  const check = crowdVoteEligibility(b);
+  if(!check.canVote) return '';
+  const voted = localCrowdVoteSummary(b).viewerPick;
+  return `<button class="ghost small crowd-vote-btn" type="button" data-crowd-vote="${esc(b.id)}">${voted ? 'Crowd result' : 'Vote'}</button>`;
+}
+function findBattleForCrowd(battleId){
+  const list = typeof battles !== 'undefined' && Array.isArray(battles) ? battles : [];
+  return list.find(b => String(b.id) === String(battleId)) || null;
+}
+async function submitCrowdVote(battle, pickedUserId){
+  if(communityServerMode() && (battle.serverBacked || /^[0-9a-f-]{8,}$/i.test(String(battle.id || '')))){
+    const response = await window.DJBattleApi.apiRequest(`/api/battles/${encodeURIComponent(battle.id)}/crowdVotes`, { method:'POST', body:{ pickedUserId } });
+    if(response && !response.error){
+      recordLocalCrowdVote(battle, pickedUserId);
+      return { ok:true, server:true, duplicate:Boolean(response.data && response.data.duplicate) };
+    }
+    if(response && response.status && response.status !== 503) return { ok:false, error:response.error };
+  }
+  return recordLocalCrowdVote(battle, pickedUserId);
+}
+function openCrowdVote(battleId){
+  const battle = findBattleForCrowd(battleId);
+  if(!battle) return null;
+  const summary = localCrowdVoteSummary(battle);
+  const voted = summary.viewerPick;
+  const buttons = summary.shares.map(s => `<button class="${voted === s.userId ? 'primary' : 'ghost'} crowd-pick" type="button" data-crowd-pick="${esc(s.userId)}" ${voted ? 'disabled' : ''}><strong>${esc(s.name)}</strong><small>${esc(s.percent)}% · ${esc(s.votes)} vote${s.votes === 1 ? '' : 's'}</small></button>`).join('');
+  openModal(`<span class="eyebrow accent">CROWD VOTE</span><h3>${esc(battle.title || 'Battle')}</h3><p style="color:var(--muted)">${voted ? 'Thanks — your vote is in. One vote per listener.' : 'Who won? Pick one DJ. You can vote once.'}</p><div class="crowd-pick-row">${buttons}</div><p class="crowd-vote-total" id="crowd-vote-total">${esc(crowdVoteText(summary))}</p><div class="modal-actions"><button class="ghost" value="cancel">Close</button></div>`);
+  document.querySelectorAll('[data-crowd-pick]').forEach(button => {
+    button.onclick = async event => {
+      const pick = event.currentTarget.dataset.crowdPick;
+      const result = await submitCrowdVote(battle, pick);
+      if(result && result.ok === false && !result.duplicate){ showErrorToast(result.error || 'Vote not counted.'); return; }
+      openCrowdVote(battle.id);
+    };
+  });
+  return summary;
+}
+document.addEventListener('click', event => {
+  const target = event.target && event.target.closest && event.target.closest('[data-crowd-vote]');
+  if(target){ event.preventDefault(); openCrowdVote(target.dataset.crowdVote); }
+});
+
+// Inline editing for own posts and comments
+function startInlinePostEdit(postId){
+  const card = document.querySelector(`[data-community-post="${window.CSS && window.CSS.escape ? window.CSS.escape(String(postId)) : postId}"].community-post`);
+  const post = state.community.posts.find(row => String(row.id) === String(postId)) || localCommunityPosts().find(row => String(row.id) === String(postId));
+  if(!card || !post || !(post.viewer && post.viewer.isOwner)) return null;
+  if(card.querySelector('.inline-editor')) return card.querySelector('.inline-editor');
+  const editor = document.createElement('form');
+  editor.className = 'inline-editor';
+  editor.innerHTML = `<label>Title<input data-edit-title maxlength="180" value="${esc(post.title || '')}"></label><label>Post<textarea data-edit-body maxlength="4000" rows="4">${esc(post.bodyText || '')}</textarea></label><p class="inline-editor-error hidden" role="alert"></p><div class="inline-editor-actions"><button class="ghost small" type="button" data-edit-cancel>Cancel</button><button class="primary small" type="submit">Save</button></div>`;
+  const body = card.querySelector('h4');
+  card.querySelectorAll(':scope > h4, :scope > p').forEach(el => el.classList.add('hidden'));
+  (body ? body : card).insertAdjacentElement(body ? 'beforebegin' : 'beforeend', editor);
+  if(typeof wireMentionAutocomplete === 'function') wireMentionAutocomplete(editor.querySelector('[data-edit-body]'));
+  if(typeof wireTextLimits === 'function'){ try{ wireTextLimits(editor); }catch(e){} }
+  editor.querySelector('[data-edit-cancel]').onclick = () => renderPosts();
+  editor.onsubmit = event => { event.preventDefault(); saveInlinePostEdit(post, editor.querySelector('[data-edit-title]').value, editor.querySelector('[data-edit-body]').value, editor); };
+  editor.querySelector('[data-edit-body]').focus();
+  return editor;
+}
+async function saveInlinePostEdit(post, title, bodyText, editor){
+  const showError = message => { const el = editor && editor.querySelector('.inline-editor-error'); if(el){ el.textContent = message; el.classList.remove('hidden'); } };
+  const cleanTitle = String(title || '').slice(0, 180);
+  const cleanBody = String(bodyText || '').slice(0, 4000);
+  if(!cleanTitle.trim() || !cleanBody.trim()){ showError('Title and post can’t be empty.'); return { error:'missing_fields' }; }
+  if(post.localOnly){
+    const row = state.posts[post.localIndex];
+    if(!row || !isOwnLocalPost(row)){ showError('You can only edit your own posts.'); return { forbidden:true }; }
+    row.title = cleanTitle; row.body = cleanBody; row.editedAt = new Date().toISOString();
+    persist();
+  }else{
+    const response = await window.DJBattleApi.apiRequest(`/api/community/posts/${encodeURIComponent(post.id)}`, { method:'PATCH', body:{ title:cleanTitle, bodyText:cleanBody, mentionedProfileIds:mentionedProfileIdsFor(cleanBody) } });
+    if(response.error){ showError(`Couldn't save: ${response.error}`); return response; }
+    const updated = response.data && response.data.post;
+    state.community.posts = state.community.posts.map(row => String(row.id) === String(post.id) ? (updated || { ...row, title:cleanTitle, bodyText:cleanBody, editedAt:new Date().toISOString() }) : row);
+  }
+  renderPosts();
+  if(activeProfileTab === 'posts' && typeof renderProfileCommunityPosts === 'function') renderProfileCommunityPosts();
+  return { ok:true };
+}
+function startInlineCommentEdit(commentId, postId){
+  const node = document.querySelector(`[data-community-comment="${window.CSS && window.CSS.escape ? window.CSS.escape(String(commentId)) : commentId}"]`);
+  const comment = (state.community.comments[postId] || []).find(row => String(row.id) === String(commentId));
+  if(!node || !comment || !(comment.viewer && comment.viewer.isOwner)) return null;
+  const para = node.querySelector(':scope > p');
+  const editor = document.createElement('form');
+  editor.className = 'inline-editor';
+  editor.innerHTML = `<textarea data-edit-comment maxlength="2200" rows="3">${esc(comment.bodyText || '')}</textarea><p class="inline-editor-error hidden" role="alert"></p><div class="inline-editor-actions"><button class="ghost small" type="button" data-edit-cancel>Cancel</button><button class="primary small" type="submit">Save</button></div>`;
+  if(para) para.replaceWith(editor); else node.appendChild(editor);
+  editor.querySelector('[data-edit-cancel]').onclick = () => renderCommunityCommentsModal(postId);
+  editor.onsubmit = async event => {
+    event.preventDefault();
+    const bodyText = String(editor.querySelector('[data-edit-comment]').value || '').slice(0, 2200);
+    const err = editor.querySelector('.inline-editor-error');
+    if(!bodyText.trim()){ err.textContent = 'Comment can’t be empty.'; err.classList.remove('hidden'); return; }
+    const response = await window.DJBattleApi.apiRequest(`/api/community/comments/${encodeURIComponent(commentId)}`, { method:'PATCH', body:{ bodyText, mentionedProfileIds:mentionedProfileIdsFor(bodyText) } });
+    if(response.error){ err.textContent = `Couldn't save: ${response.error}`; err.classList.remove('hidden'); return; }
+    const updated = response.data && response.data.comment;
+    state.community.comments[postId] = (state.community.comments[postId] || []).map(row => String(row.id) === String(commentId) ? (updated || { ...row, bodyText, editedAt:new Date().toISOString() }) : row);
+    renderCommunityCommentsModal(postId);
+  };
+  return editor;
+}
+
+// Head-to-head records from real battle history
+function headToHeadKey(opponent){
+  const o = opponent || {};
+  if(o.publicProfileId || o.profileId) return `id:${o.publicProfileId || o.profileId}`;
+  if(o.name) return `name:${String(o.name).trim().toLowerCase()}`;
+  return '';
+}
+function headToHeadRecord(opponent, results = state.battleResults){
+  const key = headToHeadKey(opponent);
+  const nameKey = opponent && opponent.name ? `name:${String(opponent.name).trim().toLowerCase()}` : '';
+  const rows = (results || []).filter(r => {
+    if(!r || !['win','loss','tie'].includes(String(r.outcome))) return false;
+    if(historyOpponentStatus(r) !== 'opponent') return false;
+    const k = headToHeadKey(r.opponent);
+    return Boolean(key) && (k === key || (nameKey && r.opponent && `name:${String(r.opponent.name || '').trim().toLowerCase()}` === nameKey));
+  }).sort((a, b) => (new Date(historyCompletedAt(b) || 0).getTime() || 0) - (new Date(historyCompletedAt(a) || 0).getTime() || 0));
+  const wins = rows.filter(r => r.outcome === 'win').length;
+  const losses = rows.filter(r => r.outcome === 'loss').length;
+  const ties = rows.filter(r => r.outcome === 'tie').length;
+  const last = rows[0] || null;
+  return { wins, losses, ties, total:rows.length, last, name:(opponent && opponent.name) || (last && last.opponent && last.opponent.name) || 'this DJ' };
+}
+function headToHeadSummaryText(record){
+  if(!record || !record.total) return '';
+  return `You're ${record.wins}–${record.losses}${record.ties ? `–${record.ties}` : ''} vs ${record.name}`;
+}
+function headToHeadLastMeetingText(record){
+  if(!record || !record.last) return '';
+  const r = record.last;
+  const label = r.outcome === 'win' ? 'Won' : r.outcome === 'loss' ? 'Lost' : 'Tied';
+  const score = r.score != null ? ` ${r.score}${r.opponent && r.opponent.score != null ? `–${r.opponent.score}` : ''}` : '';
+  return `Last meeting: ${label}${score} · ${historyDateText(r)}`;
+}
+function headToHeadLineHtml(resultRecord){
+  if(!resultRecord || historyOpponentStatus(resultRecord) !== 'opponent') return '';
+  const record = headToHeadRecord(resultRecord.opponent);
+  if(!record.total) return '';
+  return `<div class="h2h-line"><strong>${esc(headToHeadSummaryText(record))}</strong><span>${esc(headToHeadLastMeetingText(record))}</span></div>`;
+}
+function headToHeadProfileHtml(opponent){
+  const record = headToHeadRecord(opponent);
+  if(!record.total) return `<div class="h2h-line h2h-profile muted"><strong>No battles vs ${esc(opponent && opponent.name || 'this DJ')} yet</strong></div>`;
+  return `<div class="h2h-line h2h-profile"><span class="eyebrow">HEAD TO HEAD</span><strong>${esc(headToHeadSummaryText(record))}</strong><span>${esc(headToHeadLastMeetingText(record))}</span></div>`;
+}
+
+// Win streaks and badges from real results only
+function competitiveResultsChronological(results = state.battleResults){
+  return (results || []).filter(r => r && ['win','loss','tie'].includes(String(r.outcome)))
+    .slice().sort((a, b) => (new Date(historyCompletedAt(a) || 0).getTime() || 0) - (new Date(historyCompletedAt(b) || 0).getTime() || 0));
+}
+function winStreaks(results = state.battleResults){
+  const rows = competitiveResultsChronological(results);
+  let best = 0; let run = 0;
+  rows.forEach(r => { if(r.outcome === 'win'){ run += 1; best = Math.max(best, run); } else run = 0; });
+  return { current:run, best, battles:rows.length, wins:rows.filter(r => r.outcome === 'win').length };
+}
+function battleBadges(results = state.battleResults){
+  const s = winStreaks(results);
+  const total = (results || []).filter(r => r && ['win','loss','tie','practice'].includes(String(r.outcome))).length;
+  return [
+    { id:'first_win', label:'First Win', hint:'Win a battle', earned:s.wins >= 1 },
+    { id:'five_battles', label:'5 Battles', hint:`${Math.min(total, 5)}/5 battles`, earned:total >= 5 },
+    { id:'ten_battles', label:'10 Battles', hint:`${Math.min(total, 10)}/10 battles`, earned:total >= 10 },
+    { id:'streak_3', label:'3-Win Streak', hint:'Win 3 in a row', earned:s.best >= 3 },
+    { id:'streak_5', label:'5-Win Streak', hint:'Win 5 in a row', earned:s.best >= 5 }
+  ];
+}
+function renderProfileStreaks(){
+  const el = document.getElementById('profile-streaks');
+  if(!el) return;
+  const s = winStreaks();
+  const badges = battleBadges();
+  el.innerHTML = `<div class="streak-head"><span class="eyebrow">WIN STREAK</span><div class="streak-stats"><div><strong>${esc(s.current)}</strong><small>Current</small></div><div><strong>${esc(s.best)}</strong><small>Best</small></div></div></div><div class="badge-row">${badges.map(b => `<div class="dj-badge ${b.earned ? 'earned' : 'locked'}" data-badge="${esc(b.id)}" title="${esc(b.earned ? 'Earned' : b.hint)}"><span class="dj-badge-icon">${b.earned ? '★' : '🔒'}</span><strong>${esc(b.label)}</strong><small>${esc(b.earned ? 'Earned' : b.hint)}</small></div>`).join('')}</div>`;
+}
+(function wrapRatingHistoryForStreaks(){
+  const original = renderRatingHistory;
+  renderRatingHistory = function(){ const out = original.apply(this, arguments); try{ renderProfileStreaks(); }catch(e){ console.warn('streaks render failed', e); } return out; };
+})();
+renderProfileStreaks();
+
+Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), {
+  libraryLimitCounts, crowdVoteEligibility, recordLocalCrowdVote, localCrowdVoteSummary, crowdVoteText, crowdVoteResultModuleHtml, crowdVoteCardButtonHtml, openCrowdVote,
+  startInlinePostEdit, saveInlinePostEdit, startInlineCommentEdit, communityPostHtml, communityCommentHtml,
+  headToHeadRecord, headToHeadSummaryText, headToHeadLastMeetingText, headToHeadLineHtml, headToHeadProfileHtml,
+  winStreaks, battleBadges, renderProfileStreaks, renderCompletedBattleResult, battleCard, renderPosts, renderLibrary,
+  communityStatsState: () => state
+});

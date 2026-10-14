@@ -1717,3 +1717,38 @@ a.mention-link:hover{text-decoration:underline}
 .mention-option strong{color:#c6ff3d}
 .mention-option span{color:#8b94a3;font-size:.85em}
 .follow-author.active{border-color:#c6ff3d;color:#c6ff3d}
+
+/* Community stats: crowd vote, inline edit, head-to-head, streaks & badges */
+.battle-score-lcd .crowd-vote-inline{display:block;margin-top:6px;font-style:normal;font-size:12px;color:var(--accent);letter-spacing:.02em}
+.crowd-vote-module strong{color:var(--accent)}
+.crowd-pick-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}
+.crowd-pick{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:14px;border-radius:12px;text-align:left}
+.crowd-pick small{color:var(--muted)}
+.crowd-pick.primary small{color:inherit}
+.crowd-vote-total{color:var(--accent);font-weight:700}
+.crowd-vote-btn{border-color:var(--accent);color:var(--accent)}
+.edited-tag{font-style:normal;font-size:11px;padding:1px 6px;margin-left:6px;border-radius:999px;border:1px solid rgba(185,255,49,.35);color:var(--accent)}
+.inline-editor{display:grid;gap:8px;margin:10px 0;padding:12px;border:1px solid rgba(185,255,49,.35);border-radius:12px;background:rgba(185,255,49,.04)}
+.inline-editor label{display:grid;gap:4px;font-size:12px;color:var(--muted)}
+.inline-editor input,.inline-editor textarea{width:100%;box-sizing:border-box}
+.inline-editor-actions{display:flex;gap:8px;justify-content:flex-end}
+.inline-editor-error{color:var(--danger,#ff5d5d);margin:0;font-size:12px}
+.h2h-line{display:flex;flex-direction:column;gap:2px;padding:8px 12px;border-left:3px solid var(--accent);background:rgba(185,255,49,.06);border-radius:8px}
+.h2h-line strong{color:var(--accent)}
+.h2h-line span{color:var(--muted);font-size:12px}
+.battle-result-actions .h2h-line,#hero-score-actions .h2h-line{flex-basis:100%}
+.h2h-profile{margin:6px 0 12px}
+.h2h-line.muted strong{color:var(--muted)}
+.profile-streaks{margin:14px 0;display:grid;gap:12px}
+.streak-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.streak-stats{display:flex;gap:18px}
+.streak-stats div{display:grid;text-align:center}
+.streak-stats strong{font-size:26px;color:var(--accent);line-height:1}
+.streak-stats small{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+.badge-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}
+.dj-badge{display:grid;gap:2px;justify-items:center;text-align:center;padding:10px 8px;border-radius:12px;border:1px solid rgba(255,255,255,.08)}
+.dj-badge.earned{border-color:var(--accent);background:rgba(185,255,49,.08)}
+.dj-badge.earned .dj-badge-icon{color:var(--accent)}
+.dj-badge.locked{opacity:.4;filter:grayscale(1)}
+.dj-badge-icon{font-size:20px}
+.dj-badge small{color:var(--muted);font-size:11px}
