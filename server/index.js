@@ -16,6 +16,7 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
+const { buildCorsOptions, securityHeaders } = require('./security');
 const { createClient } = require('@supabase/supabase-js');
 const http = require('http');
 const fs = require('fs');
@@ -257,7 +258,9 @@ function createConfiguredSubmissionJudgeRunner(){
 const submissionJudgeRunner = createConfiguredSubmissionJudgeRunner();
 
 const app = express();
-app.use(cors());
+app.disable('x-powered-by');
+app.use(securityHeaders);
+app.use(cors(buildCorsOptions()));
 app.use((req, res, next) => {
   const contentLength = req.get('content-length');
   if(contentLength){
