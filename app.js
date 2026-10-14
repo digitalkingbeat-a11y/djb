@@ -1764,6 +1764,7 @@ function updateBattleProgressUi(){
   const xp = Number(progress.xp || 0);
   const rankingRating = Number(progress.rankingRating || 0);
   document.querySelectorAll('.profile-score strong').forEach(el=>{ el.textContent = String(rating); });
+  renderRatingHistory();
   const profileStats = document.querySelectorAll('.profile-stats > div');
   if(profileStats[0]) profileStats[0].querySelector('strong').textContent = String(wins);
   if(profileStats[1]) profileStats[1].querySelector('strong').textContent = String(losses);
@@ -3742,7 +3743,7 @@ function updateAuthUI(user){
   renderJudgingOperationsAccess();
   renderCurrentUserUI();
   if(user){
-    if(authBtn){ authBtn.textContent = 'Sign Out'; authBtn.onclick = async ()=>{ await window.supabase.auth.signOut(); updateAuthUI(null); } }
+    if(authBtn){ authBtn.textContent = 'Sign Out'; authBtn.onclick = () => signOutWithDataPrompt(); }
     handleMusicLibraryAuthChange(user).catch(()=>setMusicLibrarySyncStatus('failed', { error:'Library sync failed after sign-in.' }));
   } else {
     if(authBtn){
@@ -6317,7 +6318,7 @@ function attachCrateEditorHandlers(){
     type:document.getElementById('crate-edit-type')?.value || 'playlist'
   }));
   document.querySelectorAll('[data-crate-duplicate-editor]').forEach(button=>button.onclick=()=>duplicateLibraryCrateOptimistic(button.dataset.crateDuplicateEditor));
-  document.querySelectorAll('[data-crate-archive-editor]').forEach(button=>button.onclick=()=>{ if(typeof confirm === 'function' && !confirm('Archive this crate? Audio files will not be deleted.')) return; deleteLibraryCrateOptimistic(button.dataset.crateArchiveEditor); });
+  document.querySelectorAll('[data-crate-archive-editor]').forEach(button=>button.onclick=()=>{ if(typeof confirm === 'function' && !confirm('Archive this crate? Audio files will not be deleted.')) return; archiveCrateWithUndo(button.dataset.crateArchiveEditor); });
   document.querySelectorAll('[data-crate-artwork]').forEach(input=>input.onchange=async e=>{ const result = await attachArtworkToCrate(e.currentTarget.dataset.crateArtwork, e.currentTarget.files && e.currentTarget.files[0]); if(!result.ok) alert(result.error); });
   document.querySelectorAll('[data-crate-select-all]').forEach(button=>button.onclick=selectAllCrateTracks);
   document.querySelectorAll('[data-crate-clear-selection]').forEach(button=>button.onclick=clearCrateSelection);
@@ -11273,21 +11274,26 @@ function wireLifecycleBattleRoom(session){
       const file=e.target.files[0];
       const error=window.DJBattleSubmission?.validateFile(file);
       if(error){ setUploadStatus('Failed'); alert(error); return; }
-      if(file){ setUploadStatus('Draft'); uploadStatus.textContent=`Draft: ${file.name}`; uploadStatus.title=file.name; }
+      if(file){ mixUploadState.file = file; setUploadStatus('Draft'); uploadStatus.textContent=`Draft: ${file.name}`; uploadStatus.title=file.name; }
     };
   }
+  const cancelUploadBtn = document.getElementById('br-upload-cancel');
+  if(cancelUploadBtn) cancelUploadBtn.onclick = () => cancelMixUpload();
   const submitSecureMix = async ()=>{
     if(session.submissionId && !['failed','retryable_failed'].includes(String(session.submissionStatus || '').toLowerCase())){
       alert('This battle entry already has a submission in progress.');
       return;
     }
-    const file=(uploadFile && uploadFile.files && uploadFile.files[0]) || window.lastRecordedMixFile;
+    const file=(uploadFile && uploadFile.files && uploadFile.files[0]) || mixUploadState.file || window.lastRecordedMixFile;
     if(!file){ alert('Choose a mix file first.'); return; }
+    mixUploadState.file = file;
     if(!window.DJBattleSubmission || !window.DJBattleApi){ alert('Authenticated upload is unavailable.'); return; }
     const submissionSource = window.pendingBattleSubmissionSource === 'battle_studio' ? 'battle_studio' : 'uploaded_mix';
     window.pendingBattleSubmissionSource = 'uploaded_mix';
-    const result=await window.DJBattleSubmission.submitMix({ apiRequest:window.DJBattleApi.apiRequest, supabase:window.supabase, battleId:session.battleId || session.id, file, onStatus:setUploadStatus, battleContext:buildBattleSubmissionContext(session), submissionSource });
-    if(result.error){ setUploadStatus('Failed'); alert(result.error); return; }
+    const upload = beginMixUploadUi(file);
+    const result=await window.DJBattleSubmission.submitMix({ apiRequest:window.DJBattleApi.apiRequest, supabase:window.supabase, battleId:session.battleId || session.id, file, onStatus:setUploadStatus, onProgress:upload.onProgress, signal:upload.signal, battleContext:buildBattleSubmissionContext(session), submissionSource });
+    if(result.error){ finishMixUploadUi(result); if(!result.cancelled){ setUploadStatus('Failed'); alert(result.error); } return; }
+    finishMixUploadUi(result);
     session.submissionId = result.submissionId;
     session.submissionStatus = 'uploaded';
     session.status = 'submission_pending';
@@ -11998,3 +12004,196 @@ function wireDataBackupControls(){
   if(reset) reset.onclick = () => confirmAndResetAppData().catch(error => setDataStatus(`Reset failed: ${error.message || error}`, 'denied'));
 }
 wireDataBackupControls();
+
+// ---- Oct 13: sign-out data prompt, mix upload progress, crate undo/archive, rating history ----
+function signOutWithDataPrompt(){
+  document.getElementById('signout-dialog')?.remove();
+  return new Promise(resolve => {
+    const wrap = document.createElement('div');
+    wrap.id = 'signout-dialog';
+    wrap.className = 'djb-modal-backdrop';
+    wrap.innerHTML = `<div class="djb-modal panel" role="dialog" aria-modal="true" aria-labelledby="signout-title">
+      <span class="eyebrow accent">SIGN OUT</span><h3 id="signout-title">Also remove my data from this device?</h3>
+      <p>Your library, battles and profile are saved in this browser. On a shared computer, remove them so the next person can't see them. On your own device, keep them.</p>
+      <div class="djb-modal-actions"><button class="ghost" type="button" data-signout-cancel>Cancel</button><button class="primary" type="button" data-signout-keep>Keep my data</button><button class="ghost danger" type="button" data-signout-remove>Remove my data</button></div>
+    </div>`;
+    document.body.appendChild(wrap);
+    const done = async choice => {
+      wrap.remove();
+      if(choice === 'cancel') return resolve({ ok:false, cancelled:true });
+      try{ if(window.supabase && window.supabase.auth) await window.supabase.auth.signOut(); }catch(e){ console.warn('signOut failed', e); }
+      updateAuthUI(null);
+      if(choice === 'remove'){
+        const result = await resetAppData();
+        showAppToast('Signed out', `Removed ${result.keys} saved item(s) from this device.`);
+        reloadAfterDataChange();
+        return resolve({ ok:true, removed:true, keys:result.keys });
+      }
+      showAppToast('Signed out', 'Your data is still saved on this device.');
+      resolve({ ok:true, removed:false });
+    };
+    wrap.querySelector('[data-signout-cancel]').onclick = () => done('cancel');
+    wrap.querySelector('[data-signout-keep]').onclick = () => done('keep');
+    wrap.querySelector('[data-signout-remove]').onclick = () => done('remove');
+  });
+}
+
+var mixUploadState = { file:null, controller:null };
+function beginMixUploadUi(file){
+  mixUploadState.file = file;
+  mixUploadState.controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const bar = document.querySelector('#br-upload-progress i');
+  const pct = document.getElementById('br-upload-percent');
+  const cancel = document.getElementById('br-upload-cancel');
+  const retry = document.getElementById('br-submit-btn');
+  if(cancel) cancel.hidden = false;
+  if(retry) retry.hidden = true;
+  if(pct) pct.textContent = '0%';
+  return {
+    signal: mixUploadState.controller && mixUploadState.controller.signal,
+    onProgress: fraction => {
+      const value = Math.max(0, Math.min(100, Math.round(Number(fraction || 0) * 100)));
+      if(bar) bar.style.width = `${value}%`;
+      if(pct) pct.textContent = `${value}%`;
+      const status = document.getElementById('br-upload-status');
+      if(status) status.textContent = `Uploading ${file.name}… ${value}%`;
+    }
+  };
+}
+function finishMixUploadUi(result){
+  mixUploadState.controller = null;
+  const cancel = document.getElementById('br-upload-cancel');
+  const retry = document.getElementById('br-submit-btn');
+  const pct = document.getElementById('br-upload-percent');
+  if(cancel) cancel.hidden = true;
+  if(result && result.error){
+    if(retry){ retry.hidden = false; retry.textContent = mixUploadState.file ? `Retry upload (${mixUploadState.file.name})` : 'Retry upload'; }
+    const status = document.getElementById('br-upload-status');
+    if(status && result.cancelled) status.textContent = 'Upload cancelled. Your file is still selected — tap Retry upload.';
+    if(pct && result.cancelled) pct.textContent = '';
+  } else {
+    if(retry) retry.hidden = true;
+    if(pct) pct.textContent = '100%';
+  }
+}
+function cancelMixUpload(){
+  if(mixUploadState.controller){ mixUploadState.controller.abort(); return true; }
+  return false;
+}
+
+var ARCHIVED_CRATES_KEY = 'djBattleArchivedCrates';
+var CRATE_UNDO_MS = 6000;
+function loadArchivedCrates(){ try{ return JSON.parse(localStorage.getItem(ARCHIVED_CRATES_KEY) || '[]') || []; }catch(e){ return []; } }
+function saveArchivedCrates(list){ localStorage.setItem(ARCHIVED_CRATES_KEY, JSON.stringify(list)); }
+var crateUndoTimers = {};
+async function archiveCrateWithUndo(crateId){
+  const editable = getEditableLibraryCrate(crateId);
+  if(!editable) return { ok:false, error:'Crate is unavailable.' };
+  const crate = JSON.parse(JSON.stringify(editable.crate));
+  const index = editable.index;
+  // remove locally now; delay any server delete until the undo window passes
+  state.playlists.splice(index, 1);
+  if(state.libraryFilters.crate === crateLibraryId(crate.id)) state.libraryFilters.crate = 'all';
+  const list = loadArchivedCrates().filter(item => item.crate.id !== crate.id);
+  list.unshift({ crate, index, archivedAt:new Date().toISOString() });
+  saveArchivedCrates(list);
+  persist();
+  renderLibrary();
+  showCrateUndoToast(crate);
+  crateUndoTimers[crate.id] = setTimeout(() => {
+    delete crateUndoTimers[crate.id];
+    hideCrateUndoToast(crate.id);
+    if(crate.serverBacked){
+      const request = window.DJBattleApi && window.DJBattleApi.apiRequest && state.musicLibrarySync.status !== 'offline'
+        ? window.DJBattleApi.apiRequest(`/api/musicLibrary/crates/${encodeURIComponent(crate.id)}`, { method:'DELETE' })
+        : Promise.resolve({ error:'offline' });
+      request.then(r => { if(r && r.error) queueMusicLibrarySyncChange({ type:'crate', action:'delete', crateId:crate.id, body:{} }); }).catch(()=>{});
+    }
+  }, CRATE_UNDO_MS);
+  return { ok:true, crate };
+}
+function restoreArchivedCrate(crateId){
+  const list = loadArchivedCrates();
+  const found = list.find(item => item.crate.id === crateId);
+  if(!found) return { ok:false, error:'Archived crate not found.' };
+  const undoPending = Boolean(crateUndoTimers[crateId]);
+  if(undoPending){ clearTimeout(crateUndoTimers[crateId]); delete crateUndoTimers[crateId]; }
+  const crate = found.crate;
+  // once the server copy is gone, bring it back as a local crate
+  if(crate.serverBacked && !undoPending){ crate.serverBacked = false; crate.syncStatus = 'local'; }
+  state.playlists.splice(Math.min(found.index, state.playlists.length), 0, crate);
+  saveArchivedCrates(list.filter(item => item.crate.id !== crateId));
+  hideCrateUndoToast(crateId);
+  persist();
+  renderLibrary();
+  showAppToast('Crate restored', crate.name || 'Crate');
+  return { ok:true, crate };
+}
+function showCrateUndoToast(crate){
+  hideCrateUndoToast(crate.id);
+  const toast = document.createElement('div');
+  toast.className = 'crate-undo-toast';
+  toast.dataset.crateUndoToast = crate.id;
+  toast.setAttribute('role', 'status');
+  toast.innerHTML = `<span>Crate archived — <strong>${esc(crate.name || 'Crate')}</strong></span><button class="primary small" type="button">Undo</button>`;
+  toast.querySelector('button').onclick = () => restoreArchivedCrate(crate.id);
+  document.body.appendChild(toast);
+}
+function hideCrateUndoToast(crateId){
+  document.querySelectorAll('.crate-undo-toast').forEach(el => { if(el.dataset.crateUndoToast === String(crateId)) el.remove(); });
+}
+function renderArchivedCrates(){
+  const table = document.getElementById('library-table');
+  if(!table) return;
+  const host = table.closest('.panel, section') || table.parentElement;
+  let panel = document.getElementById('archived-crates');
+  const list = loadArchivedCrates();
+  if(!list.length){ if(panel) panel.remove(); return; }
+  if(!panel){ panel = document.createElement('div'); panel.id = 'archived-crates'; panel.className = 'archived-crates panel'; host.appendChild(panel); }
+  panel.innerHTML = `<span class="eyebrow">ARCHIVED CRATES</span><ul>${list.map(item => `<li><span><strong>${esc(item.crate.name || 'Crate')}</strong><small>Archived ${esc(new Date(item.archivedAt).toLocaleDateString())}</small></span><button class="ghost small" type="button" data-crate-restore="${esc(item.crate.id)}">Restore</button></li>`).join('')}</ul>`;
+  panel.querySelectorAll('[data-crate-restore]').forEach(btn => btn.onclick = () => restoreArchivedCrate(btn.dataset.crateRestore));
+}
+(function wrapRenderLibraryForArchive(){
+  const original = renderLibrary;
+  renderLibrary = function(){ const out = original.apply(this, arguments); try{ renderArchivedCrates(); }catch(e){ console.warn('archived crates render failed', e); } return out; };
+})();
+
+function ratingHistoryPoints(results = state.battleResults){
+  return (results || [])
+    .filter(r => r && r.progressAfter && Number.isFinite(Number(r.progressAfter.rating)))
+    .map(r => ({ t:new Date(r.completedAt || r.date || 0).getTime() || 0, rating:Number(r.progressAfter.rating), before:Number(r.progressBefore && r.progressBefore.rating) }))
+    .sort((a,b) => a.t - b.t);
+}
+function ratingChangeSinceLastWeek(points, now = Date.now()){
+  if(!points.length) return null;
+  const weekAgo = now - 7*24*3600*1000;
+  const current = points[points.length - 1].rating;
+  const older = points.filter(p => p.t <= weekAgo);
+  let base;
+  if(older.length) base = older[older.length - 1].rating;
+  else { const first = points[0]; base = Number.isFinite(first.before) ? first.before : first.rating; }
+  return current - base;
+}
+function ratingHistorySvg(points){
+  const w = 320, h = 90, pad = 8;
+  const vals = points.map(p => p.rating);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const span = max - min || 1;
+  const xy = points.map((p, i) => [pad + (points.length === 1 ? (w - 2*pad)/2 : i * (w - 2*pad) / (points.length - 1)), h - pad - ((p.rating - min) / span) * (h - 2*pad)]);
+  const line = xy.map(([x,y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  return `<svg class="rating-history-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Battle rating over your last ${points.length} battles"><polyline points="${line}" fill="none" stroke="var(--accent, #b9ff31)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>${xy.map(([x,y]) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="var(--accent, #b9ff31)"/>`).join('')}</svg>`;
+}
+function renderRatingHistory(){
+  const el = document.getElementById('profile-rating-history');
+  if(!el) return;
+  const points = ratingHistoryPoints().slice(-20);
+  if(!points.length){
+    el.innerHTML = `<span class="eyebrow">RATING OVER TIME</span><p class="rating-history-empty">No battles yet — your rating chart starts after your first judged battle.</p>`;
+    return;
+  }
+  const delta = ratingChangeSinceLastWeek(points);
+  const sign = delta > 0 ? '+' : delta < 0 ? '−' : '±';
+  const tone = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
+  el.innerHTML = `<div class="rating-history-head"><span class="eyebrow">RATING OVER TIME</span><strong class="rating-history-delta" data-tone="${tone}">${sign}${Math.abs(delta)} since last week</strong></div>${points.length > 1 ? ratingHistorySvg(points) : `<p class="rating-history-empty">One battle so far (rating ${points[0].rating}). Battle again to see your trend.</p>`}`;
+}
+renderRatingHistory();

@@ -1543,3 +1543,25 @@ td{
 .auth-msg-success{background:rgba(185,255,49,.08);border:1px solid rgba(185,255,49,.40);color:var(--accent)}
 #auth-email[aria-invalid="true"]{border-color:rgba(255,92,92,.7)!important;box-shadow:0 0 0 2px rgba(255,92,92,.18)}
 #send-magic:disabled{opacity:.6;cursor:not-allowed}
+
+/* Oct 13: sign-out prompt, upload progress, crate undo, rating history */
+.djb-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px}
+.djb-modal{max-width:440px;width:100%;background:#111317;border:1px solid rgba(185,255,49,.35);border-radius:14px;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.djb-modal h3{margin:6px 0 8px}
+.djb-modal p{color:var(--muted)}
+.djb-modal-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-top:16px}
+.djb-modal-actions .danger,.ghost.danger{color:#ff6b6b;border-color:rgba(255,107,107,.5)}
+.upload-progress-meta{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:4px}
+.upload-percent{color:var(--accent);font-variant-numeric:tabular-nums}
+.crate-undo-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);display:flex;gap:14px;align-items:center;background:#111317;border:1px solid var(--accent);color:#fff;padding:10px 14px;border-radius:12px;z-index:9998;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.archived-crates{margin-top:16px}
+.archived-crates ul{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:8px}
+.archived-crates li{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border:1px solid rgba(255,255,255,.08);border-radius:10px}
+.archived-crates li small{display:block;color:var(--muted)}
+.rating-history{margin:14px 0}
+.rating-history-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.rating-history-delta[data-tone="up"]{color:var(--accent)}
+.rating-history-delta[data-tone="down"]{color:#ff6b6b}
+.rating-history-delta[data-tone="flat"]{color:var(--muted)}
+.rating-history-svg{width:100% !important;max-width:none !important;height:90px;margin-top:8px;display:block}
+.rating-history-empty{color:var(--muted);margin:6px 0 0}
