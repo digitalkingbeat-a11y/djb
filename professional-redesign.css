@@ -1536,3 +1536,10 @@ td{
 .library-empty-state small{color:#9aa0a6}
 .library-empty-reset{color:var(--accent);border:1px solid rgba(185,255,49,.4);border-radius:999px;padding:6px 14px;background:transparent;cursor:pointer}
 .library-empty-reset:hover,.library-empty-reset:focus-visible{background:var(--accent);color:#0b0c0e}
+
+/* Magic-link sign-in feedback */
+.auth-msg{margin:6px 0 0;padding:8px 12px;border-radius:10px;font-size:.88rem;line-height:1.35}
+.auth-msg-error{background:rgba(255,92,92,.10);border:1px solid rgba(255,92,92,.45);color:#ff9d9d}
+.auth-msg-success{background:rgba(185,255,49,.08);border:1px solid rgba(185,255,49,.40);color:var(--accent)}
+#auth-email[aria-invalid="true"]{border-color:rgba(255,92,92,.7)!important;box-shadow:0 0 0 2px rgba(255,92,92,.18)}
+#send-magic:disabled{opacity:.6;cursor:not-allowed}

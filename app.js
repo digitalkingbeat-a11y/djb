@@ -3753,18 +3753,69 @@ function updateAuthUI(user){
   }
 }
 
+const SIGNIN_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const SIGNIN_RESEND_SECONDS = 30;
+function isValidSignInEmail(email){ return SIGNIN_EMAIL_RE.test(String(email || '').trim()); }
+function describeSignInError(err){
+  if(!err) return 'Something went wrong. Please try again.';
+  const status = Number(err.status || err.statusCode || 0);
+  const msg = String(err.message || err.error_description || err.msg || (typeof err === 'string' ? err : '') || '').trim();
+  const lower = msg.toLowerCase();
+  if(status === 429 || /rate limit|too many|for security purposes/.test(lower)) return `Too many sign-in emails were requested. Wait a minute and try again.${msg ? ` (${msg})` : ''}`;
+  if(/failed to fetch|networkerror|network request failed|load failed/.test(lower) || (typeof navigator !== 'undefined' && navigator.onLine === false)) return "Couldn't reach the sign-in service. Check your internet connection and try again.";
+  if(/invalid.*email|email.*invalid|unable to validate email/.test(lower)) return 'That email address was rejected. Check it for typos.';
+  if(/signups? not allowed|not allowed/.test(lower)) return 'New sign-ups are turned off for this app, so this email can\'t sign in.';
+  return msg ? `Sign-in failed: ${msg}` : 'Sign-in failed. Please try again.';
+}
+let signInResendTimer = null;
+function setSignInMessage(text, kind){
+  const el = document.getElementById('auth-email-msg'); if(!el) return;
+  el.textContent = text || '';
+  el.className = 'auth-msg' + (kind ? ` auth-msg-${kind}` : '');
+  el.hidden = !text;
+}
+function startSignInResendCountdown(button, seconds = SIGNIN_RESEND_SECONDS){
+  if(signInResendTimer) clearInterval(signInResendTimer);
+  let left = seconds;
+  const tick = () => {
+    if(!document.body.contains(button)){ clearInterval(signInResendTimer); signInResendTimer = null; return; }
+    if(left <= 0){ clearInterval(signInResendTimer); signInResendTimer = null; button.disabled = false; button.textContent = 'Resend Magic Link'; button.removeAttribute('aria-busy'); return; }
+    button.disabled = true; button.textContent = `Resend in ${left}s`; left -= 1;
+  };
+  tick(); signInResendTimer = setInterval(tick, 1000);
+}
+async function sendMagicLink(){
+  const send = document.getElementById('send-magic');
+  const input = document.getElementById('auth-email');
+  if(!send || !input || send.disabled) return;
+  const email = String(input.value || '').trim();
+  if(!email){ setSignInMessage('Enter your email address.', 'error'); input.setAttribute('aria-invalid','true'); input.focus(); return; }
+  if(!isValidSignInEmail(email)){ setSignInMessage(`"${email}" doesn't look like an email address. Use the format name@example.com.`, 'error'); input.setAttribute('aria-invalid','true'); input.focus(); return; }
+  input.removeAttribute('aria-invalid');
+  send.disabled = true; send.setAttribute('aria-busy','true'); send.textContent = 'Sending…';
+  setSignInMessage('', '');
+  try{
+    const { error } = await window.supabase.auth.signInWithOtp({ email });
+    if(error) throw error;
+    setSignInMessage(`Magic link sent to ${email}. Follow the link in your email to finish signing in.`, 'success');
+    startSignInResendCountdown(send);
+  }catch(err){
+    console.error(err);
+    setSignInMessage(describeSignInError(err), 'error');
+    send.disabled = false; send.removeAttribute('aria-busy'); send.textContent = 'Send Magic Link';
+  }
+}
 function openSignInModal(){
-  openModal(`<span class="eyebrow accent">SIGN IN</span><h3>Sign in with email</h3><p style="color:var(--muted)">We'll send a magic link to your email to authenticate.</p><div class="form-grid"><label>Email<input id="auth-email" placeholder="you@djmail.com" type="email"></label></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="send-magic">Send Magic Link</button></div>`);
+  if(signInResendTimer){ clearInterval(signInResendTimer); signInResendTimer = null; }
+  openModal(`<span class="eyebrow accent">SIGN IN</span><h3>Sign in with email</h3><p style="color:var(--muted)">We'll send a magic link to your email to authenticate.</p><div class="form-grid"><label>Email<input id="auth-email" placeholder="you@djmail.com" type="email" autocomplete="email" aria-describedby="auth-email-msg"></label><p id="auth-email-msg" class="auth-msg" role="status" aria-live="polite" hidden></p></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="send-magic">Send Magic Link</button></div>`);
   setTimeout(()=>{
-    const send = document.getElementById('send-magic'); if(!send) return; send.onclick = async ()=>{
-      const email = document.getElementById('auth-email').value;
-      if(!email) return alert('Enter an email');
-      try{
-        const { error } = await window.supabase.auth.signInWithOtp({ email });
-        if(error) return openModal(`<span class="eyebrow accent">ERROR</span><h3>Sign in failed</h3><p style="color:var(--muted)">${esc(String(error.message||error))}</p><div class="modal-actions"><button class="primary" value="cancel">Close</button></div>`);
-        openModal(`<span class="eyebrow accent">CHECK EMAIL</span><h3>Magic link sent</h3><p style="color:var(--muted)">Follow the link in your email to complete sign-in.</p><div class="modal-actions"><button class="primary" value="cancel">Close</button></div>`);
-      }catch(err){ console.error(err); alert('Sign-in error'); }
-    };
+    const send = document.getElementById('send-magic'); if(!send) return;
+    send.onclick = sendMagicLink;
+    const input = document.getElementById('auth-email');
+    if(input){
+      input.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); sendMagicLink(); } });
+      input.addEventListener('input', () => { if(input.getAttribute('aria-invalid')){ input.removeAttribute('aria-invalid'); setSignInMessage('', ''); } });
+    }
   },0);
 }
 
