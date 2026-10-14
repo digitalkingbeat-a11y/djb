@@ -164,9 +164,10 @@ test('presence, cancellation and withdrawal use safe server contracts', async ()
   };
 
   await hooks.sendBattleRoomPresence(session, 'reconnecting');
-  await hooks.cancelServerBattleFromRoom(session);
+  const okSoon = () => setTimeout(() => window.document.querySelector('[data-app-confirm-ok]').click(), 0);
+  okSoon(); await hooks.cancelServerBattleFromRoom(session);
   session.status = 'matched';
-  await hooks.withdrawServerBattleEntryFromRoom(session);
+  okSoon(); await hooks.withdrawServerBattleEntryFromRoom(session);
   assert.deepEqual(calls.map(call => call.url), [
     '/api/battleEntries/entry-live/presence',
     '/api/battles/battle-live/cancel',

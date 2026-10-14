@@ -563,12 +563,12 @@ function appAlert(message, title){
 if(typeof window !== 'undefined') window.appAlert = appAlert;
 
 // In-app confirm dialog (never window.confirm). Resolves true/false.
-function appConfirm({ title='Are you sure?', body='', confirmLabel='Confirm', cancelLabel='Cancel' } = {}){
+function appConfirm({ title='Are you sure?', body='', confirmLabel='Confirm', cancelLabel='Cancel', danger=false } = {}){
   return new Promise(resolve => {
     document.querySelectorAll('.app-confirm-overlay').forEach(el => el.remove());
     const overlay = document.createElement('div');
-    overlay.className = 'app-confirm-overlay';
-    overlay.innerHTML = `<div class="app-confirm" role="alertdialog" aria-modal="true" aria-labelledby="app-confirm-title"><span class="eyebrow accent">CONFIRM</span><h3 id="app-confirm-title">${esc(title)}</h3><p>${esc(body)}</p><div class="modal-actions"><button class="ghost" type="button" data-app-confirm-cancel>${esc(cancelLabel)}</button><button class="primary" type="button" data-app-confirm-ok>${esc(confirmLabel)}</button></div></div>`;
+    overlay.className = 'app-confirm-overlay' + (danger ? ' app-confirm-overlay--danger' : '');
+    overlay.innerHTML = `<div class="app-confirm" role="alertdialog" aria-modal="true" aria-labelledby="app-confirm-title"><span class="eyebrow accent">CONFIRM</span><h3 id="app-confirm-title">${esc(title)}</h3><p>${esc(body)}</p><div class="modal-actions"><button class="ghost" type="button" data-app-confirm-cancel>${esc(cancelLabel)}</button><button class="${danger ? 'danger-btn' : 'primary'}" type="button" data-app-confirm-ok>${esc(confirmLabel)}</button></div></div>`;
     const done = value => { overlay.remove(); resolve(value); };
     overlay.querySelector('[data-app-confirm-ok]').onclick = () => done(true);
     overlay.querySelector('[data-app-confirm-cancel]').onclick = () => done(false);
@@ -578,6 +578,73 @@ function appConfirm({ title='Are you sure?', body='', confirmLabel='Confirm', ca
   });
 }
 if(typeof window !== 'undefined') window.appConfirm = appConfirm;
+function appConfirmDanger(title, body, confirmLabel){ return appConfirm({ title, body, confirmLabel, cancelLabel:'Keep it', danger:true }); }
+
+// Error toast with an optional Retry button.
+function showErrorToast(message, retry){
+  const toast = showAppToast('Something went wrong', String(message && message.message || message || 'Please try again.'));
+  if(!toast) return toast;
+  toast.classList.add('notification-toast--error');
+  toast.setAttribute('role', 'alert');
+  if(typeof retry === 'function'){
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'toast-retry'; btn.textContent = 'Retry'; btn.setAttribute('data-toast-retry', '');
+    btn.onclick = () => { toast.remove(); try { const r = retry(); if(r && typeof r.catch === 'function') r.catch(err => showErrorToast(err)); } catch(err){ showErrorToast(err); } };
+    toast.appendChild(btn);
+  }
+  return toast;
+}
+// Run a button action; if it throws or returns { error }, show an error toast (with Retry when safe).
+async function runAction(fn, { label='That action', retry=true } = {}){
+  try {
+    const result = await fn();
+    if(result && result.error && !result.cancelled) showErrorToast(`${label} failed: ${result.error}`, retry ? () => runAction(fn, { label, retry }) : null);
+    return result;
+  } catch(err){
+    showErrorToast(`${label} failed. ${err && err.message ? err.message : ''}`.trim(), retry ? () => runAction(fn, { label, retry }) : null);
+    return { error: err && err.message || String(err) };
+  }
+}
+// Global safety net: friendly toast for uncaught errors, at most one every 8 seconds.
+let lastGlobalErrorToastAt = 0;
+let lastClickedButton = null, lastClickedAt = 0;
+function handleGlobalError(reason){
+  const now = Date.now();
+  if(now - lastGlobalErrorToastAt < 8000) return false;
+  lastGlobalErrorToastAt = now;
+  const btn = lastClickedButton && now - lastClickedAt < 5000 && lastClickedButton.isConnected && !lastClickedButton.classList.contains('danger') && !lastClickedButton.hasAttribute('data-no-retry') ? lastClickedButton : null;
+  showErrorToast('Something didn\'t work. Your work is safe; try again.', btn ? () => btn.click() : null);
+  return true;
+}
+if(typeof window !== 'undefined' && window.addEventListener){
+  document.addEventListener('click', e => { const b = e.target && e.target.closest && e.target.closest('button'); if(b && !b.closest('.notification-toast')){ lastClickedButton = b; lastClickedAt = Date.now(); } }, true);
+  window.addEventListener('error', e => { if(e && e.error) handleGlobalError(e.error); });
+  window.addEventListener('unhandledrejection', e => handleGlobalError(e && e.reason));
+}
+
+// Shared relative time: "Just now", "5 min ago", "3 hr ago", "Yesterday", "4 days ago", then a date after a week.
+function relativeTimeLabel(value, nowMs){
+  if(value === null || value === undefined || value === '') return '';
+  const time = typeof value === 'number' ? value : new Date(value).getTime();
+  if(!Number.isFinite(time)) return String(value);
+  const now = nowMs === undefined ? Date.now() : nowMs;
+  const diff = Math.max(0, Math.round((now - time) / 1000));
+  if(diff < 45) return 'Just now';
+  if(diff < 3600) return `${Math.max(1, Math.round(diff / 60))} min ago`;
+  const startToday = new Date(now); startToday.setHours(0,0,0,0);
+  if(time >= startToday.getTime()) return `${Math.round(diff / 3600)} hr ago`;
+  if(time >= startToday.getTime() - 86400000) return 'Yesterday';
+  const days = Math.ceil((startToday.getTime() - time) / 86400000);
+  if(days < 7) return `${days} days ago`;
+  return new Date(time).toLocaleDateString(undefined, { month:'short', day:'numeric', year:'numeric' });
+}
+function relativeTimeHtml(value){
+  const label = relativeTimeLabel(value);
+  if(!label) return 'not synced';
+  const d = new Date(value);
+  const iso = Number.isFinite(d.getTime()) ? d.toISOString() : '';
+  return `<time class="rel-time" ${iso ? `datetime="${esc(iso)}" title="${esc(d.toLocaleString())}"` : ''}>${esc(label)}</time>`;
+}
 
 // Wrap a button's click handler: ask first, then lock the button while it runs (blocks double taps).
 function guardActionButton(button, dialog){
@@ -1093,8 +1160,10 @@ function installAuxiliaryViews(){
 installProfessionalShell();
 function switchView(view){
   if(isStudioRecordingActive() && view !== 'studio'){
-    const proceed = typeof confirm === 'function' ? confirm('A recording is in progress. Leave Battle Studio and risk losing the active take?') : false;
-    if(!proceed) return false;
+    if(!switchView.__force){
+      appConfirmDanger('Leave Battle Studio?', 'A recording is in progress. Leaving now risks losing the active take.', 'Leave Studio').then(ok => { if(ok){ switchView.__force = true; try { switchView(view); } finally { switchView.__force = false; } } });
+      return false;
+    }
   }
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===view));
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
@@ -2698,7 +2767,7 @@ function openBattleLifecycle(id){
   if(b.premiumRequired && !state.premium){ openPremium(`"${b.title}" requires Premium for this battle mode.`); return; }
   if(b.serverBacked && !['open','waiting'].includes(String(b.lobbyStatus || b.status || 'open')) && !battlePrepSnapshotForUser(b)){
     openModal(`<span class="eyebrow accent">BATTLE ${esc(String(b.lobbyStatus || b.status || '').toUpperCase())}</span><h3>${esc(b.title)}</h3><p style="color:var(--muted)">This server-backed battle is no longer joinable. Refreshing the lobby will show current open slots.</p><div class="modal-actions"><button class="ghost" value="cancel">Close</button><button class="primary" type="button" id="refresh-lobby-now">Refresh Lobby</button></div>`);
-    setTimeout(()=>{ const btn=document.getElementById('refresh-lobby-now'); if(btn) btn.onclick=()=>loadServerBattleLobby().catch(()=>{}); },0);
+    setTimeout(()=>{ const btn=document.getElementById('refresh-lobby-now'); if(btn) btn.onclick=()=>runAction(()=>loadServerBattleLobby(), { label:'Refreshing the lobby' }); },0);
     return;
   }
   setShareMeta(`${b.title || 'Battle'} — DJ Battle`, `${b.type || 'DJ battle'}${b.genre ? ` · ${b.genre}` : ''}. Join the battle on DJ Battle.`);
@@ -3268,7 +3337,7 @@ function communityPostHtml(post){
   return `<article class="forum-post community-post ${post.localOnly ? 'local' : ''}" data-community-post="${esc(post.id)}">
     <div class="post-head">
       <div class="avatar">${esc((post.author && (post.author.displayName || post.author.name) || 'DJ').split(/\s+/).map(part=>part[0]).join('').slice(0,2).toUpperCase())}</div>
-      <div class="post-author-copy"><strong>${esc(post.author && (post.author.displayName || post.author.name) || 'DJ')}</strong><span>${esc(communityCategoryLabel(post.categoryId))} / ${esc(communityDate(post.createdAt))}${esc(edited)}${esc(locked)}</span></div>
+      <div class="post-author-copy"><strong>${esc(post.author && (post.author.displayName || post.author.name) || 'DJ')}</strong><span>${esc(communityCategoryLabel(post.categoryId))} / ${relativeTimeHtml(post.createdAt)}${esc(edited)}${esc(locked)}</span></div>
       ${canChallenge ? `<button class="ghost small request-battle" type="button" data-community-challenge="${esc(authorProfileId)}" data-community-post="${esc(post.id)}">Request Battle</button>` : ''}
     </div>
     <h4>${esc(post.title || 'Community post')}</h4>
@@ -3460,6 +3529,7 @@ async function publishCommunityPostFromModal(postId){
       userId:currentUser().id,
       room:communityCategoryLabel(payload.categoryId),
       time:'local',
+      createdAt:new Date().toISOString(),
       title:payload.title,
       body:payload.bodyText,
       media:mediaTrack && (mediaTrack.title || mediaTrack.name),
@@ -3513,7 +3583,7 @@ function communityCommentHtml(comment){
   const counts = communityReactionCounts(comment.reactionCounts);
   const owner = comment.viewer && comment.viewer.isOwner;
   return `<div class="community-comment ${comment.parentCommentId ? 'reply' : ''}" data-community-comment="${esc(comment.id)}">
-    <div><strong>${esc(comment.author && (comment.author.displayName || comment.author.name) || 'DJ')}</strong><span>${esc(communityDate(comment.createdAt))}${comment.editedAt ? ' / edited' : ''}</span></div>
+    <div><strong>${esc(comment.author && (comment.author.displayName || comment.author.name) || 'DJ')}</strong><span>${relativeTimeHtml(comment.createdAt)}${comment.editedAt ? ' / edited' : ''}</span></div>
     <p>${esc(comment.tombstone ? 'Comment unavailable.' : comment.bodyText || '')}</p>
     <div class="community-comment-actions">
       <span>Like ${esc(counts.like)}</span>
@@ -3591,23 +3661,46 @@ async function deleteCommunityComment(commentId, postId){
   return response;
 }
 
+const REPORT_REASONS = [
+  { value:'spam', label:'Spam', hint:'Ads, scams or repeated posts' },
+  { value:'harassment', label:'Harassment', hint:'Insults, threats or targeting a DJ' },
+  { value:'copyright', label:'Copyright', hint:'Music or media used without rights' },
+  { value:'other', label:'Other', hint:'Something else; tell us in the note' }
+];
+function chooseReportReason(){
+  return new Promise(resolve => {
+    document.querySelectorAll('.app-confirm-overlay').forEach(el => el.remove());
+    const overlay = document.createElement('div');
+    overlay.className = 'app-confirm-overlay';
+    overlay.innerHTML = `<form class="app-confirm report-reasons" role="dialog" aria-modal="true" aria-labelledby="report-title"><span class="eyebrow accent">REPORT</span><h3 id="report-title">Why are you reporting this post?</h3><div class="report-reason-list">${REPORT_REASONS.map((r,i) => `<label class="report-reason"><input type="radio" name="report-reason" value="${r.value}" ${i===0?'checked':''}><span><strong>${esc(r.label)}</strong><small>${esc(r.hint)}</small></span></label>`).join('')}</div><label class="report-note">Note (optional)<textarea name="report-note" id="report-note" maxlength="500" rows="3" placeholder="Anything that helps the reviewer"></textarea></label><div class="modal-actions"><button class="ghost" type="button" data-report-cancel>Cancel</button><button class="primary" type="submit" data-report-send>Send report</button></div></form>`;
+    const done = v => { overlay.remove(); resolve(v); };
+    const form = overlay.querySelector('form');
+    form.onsubmit = e => { e.preventDefault(); const picked = form.querySelector('input[name="report-reason"]:checked'); done({ reason: picked ? picked.value : 'other', note: String(form.querySelector('textarea').value || '').trim().slice(0,500) }); };
+    overlay.querySelector('[data-report-cancel]').onclick = () => done(null);
+    overlay.addEventListener('keydown', e => { if(e.key === 'Escape') done(null); });
+    document.body.appendChild(overlay);
+  });
+}
+
 async function reportCommunityPost(postId){
   if(!communityServerMode()){
     appAlert('Sign in with server Community access to report posts.');
     return { skipped:true };
   }
-  const reason = 'unsafe_content';
-  const response = await window.DJBattleApi.apiRequest('/api/community/reports', { method:'POST', body:{ targetType:'post', targetId:postId, reason, context:'Reported from Community panel' } });
-  if(response.error) appAlert(response.error);
+  const choice = await chooseReportReason();
+  if(!choice) return { cancelled:true };
+  const send = () => window.DJBattleApi.apiRequest('/api/community/reports', { method:'POST', body:{ targetType:'post', targetId:postId, reason:choice.reason, context:choice.note ? `Reported from Community panel: ${choice.note}` : 'Reported from Community panel', note:choice.note || undefined } });
+  const response = await send();
+  if(response.error) showErrorToast(`Report not sent: ${response.error}`, () => send().then(r => { if(r.error) showErrorToast(`Report not sent: ${r.error}`); else appAlert('Report queued for operator review.'); }));
   else appAlert(response.data && response.data.duplicate ? 'Report already queued for review.' : 'Report queued for operator review.');
   return response;
 }
 
 async function deleteCommunityPost(postId){
   if(!communityServerMode()) return { skipped:true };
-  if(!confirm('Delete this post from the community feed? Comments remain as a thread record.')) return { cancelled:true };
+  if(!(await appConfirmDanger('Delete this post?', 'It is removed from the community feed. Comments remain as a thread record.', 'Delete post'))) return { cancelled:true };
   const response = await window.DJBattleApi.apiRequest(`/api/community/posts/${encodeURIComponent(postId)}`, { method:'DELETE' });
-  if(response.error){ appAlert(response.error); return response; }
+  if(response.error){ showErrorToast(`Couldn't delete the post: ${response.error}`); return response; }
   state.community.posts = state.community.posts.filter(post => String(post.id) !== String(postId));
   renderPosts();
   if(activeProfileTab === 'posts') renderProfileCommunityPosts();
@@ -4290,12 +4383,12 @@ function secureArtworkSource(track){
 }
 function artworkMarkup(track, className='library-art'){
   const src = secureArtworkSource(track);
-  if(src) return `<div class="${className}"><img src="${esc(src)}" alt="${esc(trackTitle(track))} artwork"></div>`;
+  if(src) return `<div class="${className}"><img src="${esc(src)}" alt="${esc(trackTitle(track))} artwork" loading="lazy" decoding="async"></div>`;
   return `<div class="${className}" aria-label="No secure artwork">${esc(trackInitials(track))}</div>`;
 }
 function artworkInnerMarkup(track){
   const src = secureArtworkSource(track);
-  if(src) return `<img src="${esc(src)}" alt="${esc(trackTitle(track))} artwork">`;
+  if(src) return `<img src="${esc(src)}" alt="${esc(trackTitle(track))} artwork" loading="lazy" decoding="async">`;
   return esc(trackInitials(track));
 }
 function isSafePlaybackSource(src){
@@ -5511,7 +5604,7 @@ async function sendBattleRoomPresence(session = activeStudioBattleSession(), pre
 
 async function cancelServerBattleFromRoom(session = activeStudioBattleSession()){
   if(!battleRoomServerApiAvailable() || !session) return { skipped:true, error:'Authenticated Battle Room is unavailable.' };
-  if(!confirm('Cancel this battle for all participants?')) return { cancelled:false };
+  if(!(await appConfirmDanger('Cancel this battle?', 'This cancels the battle for every participant.', 'Cancel battle'))) return { cancelled:false };
   const response = await window.DJBattleApi.apiRequest(`/api/battles/${encodeURIComponent(session.battleId || session.id)}/cancel`, {
     method:'POST',
     body:{ idempotencyKey:stableClientIdempotencyKey('battle-cancel', { battleId:session.battleId || session.id, version:session.battleVersion || 0 }) }
@@ -5526,7 +5619,7 @@ async function cancelServerBattleFromRoom(session = activeStudioBattleSession())
 
 async function withdrawServerBattleEntryFromRoom(session = activeStudioBattleSession()){
   if(!battleRoomServerApiAvailable() || !session || !session.battleEntryId) return { skipped:true, error:'Authenticated Battle Room entry is unavailable.' };
-  if(!confirm('Withdraw from this battle? Your prep snapshot will remain in history evidence.')) return { withdrawn:false };
+  if(!(await appConfirmDanger('Withdraw from this battle?', 'Your prep snapshot stays in your battle history.', 'Withdraw'))) return { withdrawn:false };
   const response = await window.DJBattleApi.apiRequest(`/api/battleEntries/${encodeURIComponent(session.battleEntryId)}/withdraw`, {
     method:'POST',
     body:{ idempotencyKey:stableClientIdempotencyKey('battle-withdraw', { entryId:session.battleEntryId, version:session.battleVersion || 0 }) }
@@ -6514,7 +6607,7 @@ function attachCrateEditorHandlers(){
     type:document.getElementById('crate-edit-type')?.value || 'playlist'
   }));
   document.querySelectorAll('[data-crate-duplicate-editor]').forEach(button=>button.onclick=()=>duplicateLibraryCrateOptimistic(button.dataset.crateDuplicateEditor));
-  document.querySelectorAll('[data-crate-archive-editor]').forEach(button=>button.onclick=()=>{ if(typeof confirm === 'function' && !confirm('Archive this crate? Audio files will not be deleted.')) return; archiveCrateWithUndo(button.dataset.crateArchiveEditor); });
+  document.querySelectorAll('[data-crate-archive-editor]').forEach(button=>button.onclick=async ()=>{ if(!(await appConfirmDanger('Archive this crate?', 'Audio files are not deleted, and you can restore it from Archived Crates.', 'Archive crate'))) return; archiveCrateWithUndo(button.dataset.crateArchiveEditor); });
   document.querySelectorAll('[data-crate-artwork]').forEach(input=>input.onchange=async e=>{ const result = await attachArtworkToCrate(e.currentTarget.dataset.crateArtwork, e.currentTarget.files && e.currentTarget.files[0]); if(!result.ok) appAlert(result.error); });
   document.querySelectorAll('[data-crate-select-all]').forEach(button=>button.onclick=selectAllCrateTracks);
   document.querySelectorAll('[data-crate-clear-selection]').forEach(button=>button.onclick=clearCrateSelection);
@@ -10568,7 +10661,7 @@ async function muteDjNotificationSource(notificationId){
 async function blockDjNotificationSource(notificationId){
   const notification = (state.djNotifications.rows || []).find(row => String(row.id) === String(notificationId));
   if(!notification || !notification.actor || !notification.actor.publicProfileId) return { skipped:true };
-  if(!confirm('Block this DJ from challenge interactions? Pending challenges may be cancelled, but active battles stay controlled by Battle Room rules.')) return { cancelled:true };
+  if(!(await appConfirmDanger('Block this DJ?', 'They can no longer challenge you. Pending challenges may be cancelled; active battles follow Battle Room rules.', 'Block DJ'))) return { cancelled:true };
   const response = await window.DJBattleApi.apiRequest('/api/blocks', {
     method:'POST',
     body:{
@@ -11757,6 +11850,7 @@ document.addEventListener('change', event => {
 });
 
 window.__DJBattleTestHooks = {
+  appConfirmDanger, showErrorToast, runAction, handleGlobalError, relativeTimeLabel, relativeTimeHtml, chooseReportReason, REPORT_REASONS,
   initAuth,
   currentUser,
   renderCurrentUserUI,

@@ -1587,3 +1587,19 @@ td{
 .unranked-label{color:#9aa4b2;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.05em}
 .sample-rankings-note{color:var(--muted,#9aa4b2);font-size:13px;margin-top:8px}
 .rank-estimate-label{color:var(--accent,#b9ff31)}
+
+/* Oct 14: danger confirm, report reasons, error toast, relative times */
+.app-confirm-overlay--danger .app-confirm{border-color:rgba(255,77,94,.55)}
+.app-confirm-overlay--danger .eyebrow.accent{color:#ff4d5e}
+.app-confirm .danger-btn{background:#ff4d5e;color:#fff;border:1px solid #ff4d5e;border-radius:10px;padding:9px 16px;font-weight:700;cursor:pointer}
+.app-confirm .danger-btn:hover{background:#ff6573}
+.report-reason-list{display:grid;gap:8px;margin:10px 0 14px}
+.report-reason{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid rgba(255,255,255,.1);border-radius:10px;cursor:pointer;background:#141a21}
+.report-reason:has(input:checked){border-color:#c6ff00;background:rgba(198,255,0,.07)}
+.report-reason input{accent-color:#c6ff00;margin-top:3px}
+.report-reason span{display:grid;gap:2px}.report-reason small{color:var(--muted,#9aa4b2)}
+.report-note{display:grid;gap:6px;font-size:13px;color:var(--muted,#9aa4b2);margin-bottom:14px}
+.report-note textarea{background:#0a0d11;border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e9eef3;padding:8px;resize:vertical}
+.notification-toast--error{border-color:rgba(255,77,94,.7)!important}
+.notification-toast .toast-retry{margin-top:8px;justify-self:start;background:#c6ff00;color:#0a0d11;border:0;border-radius:8px;padding:5px 12px;font-weight:700;cursor:pointer}
+time.rel-time{color:inherit}
