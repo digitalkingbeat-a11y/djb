@@ -1615,3 +1615,32 @@ time.rel-time{color:inherit}
     scroll-behavior: auto !important;
   }
 }
+
+/* DJ tools: tap tempo, hot cues, mixes well next, filter chips */
+.bpm-tap-row{display:flex;gap:8px;align-items:center}
+.bpm-tap-row input{flex:1;min-width:0}
+.tap-tempo-btn{white-space:nowrap;border-color:#c6ff00 !important;color:#c6ff00 !important}
+.tap-tempo-btn:active{background:#c6ff00 !important;color:#0b0f14 !important}
+.tap-tempo-hint{color:var(--muted,#8b97a8);font-size:11px}
+.track-tempo-editor{margin-top:14px;padding:12px;border:1px solid #232c38;border-radius:10px;background:#10151c}
+.track-tempo-editor .form-grid{margin:8px 0}
+.hotcue-pads{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:8px 0}
+.hotcue-pad{display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 4px;border-radius:8px;border:1px solid var(--pad);background:#0f141b;color:var(--pad);cursor:pointer;font:inherit}
+.hotcue-pad b{font-size:14px}
+.hotcue-pad small{font-size:10px;color:#8b97a8}
+.hotcue-pad.set{background:var(--pad);color:#0b0f14}
+.hotcue-pad.set small{color:#0b0f14}
+.hotcue-pad.empty{opacity:.75;border-style:dashed}
+.wave .hotcue{position:absolute;top:0;bottom:0;width:3px;border-radius:2px}
+.mixes-next{margin-top:8px}
+.mixes-next-list{display:grid;gap:6px;margin-top:6px}
+.mixes-next-item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid #232c38;background:#10151c;color:#e8eef6;cursor:pointer;text-align:left;font:inherit}
+.mixes-next-item:hover{border-color:#c6ff00}
+.mixes-next-item small{display:block;color:#8b97a8;font-size:11px}
+.mixes-next-item em{font-style:normal;color:#c6ff00;font-weight:700;font-size:12px}
+.mixes-next-empty{display:block;color:#8b97a8;margin-top:4px}
+.crossfader output,.deck-lower output{color:#c6ff00;font-size:11px;margin-left:6px}
+.library-filter-chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.library-filter-chips[hidden]{display:none}
+.library-filter-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;border:1px solid #c6ff00;background:rgba(198,255,0,.1);color:#c6ff00;font:inherit;font-size:12px;cursor:pointer}
+.library-filter-chip span{font-size:14px;line-height:1}

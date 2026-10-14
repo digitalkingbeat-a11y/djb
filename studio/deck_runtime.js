@@ -39,9 +39,51 @@
       const x = xf ? Number(xf.value) : 0;
       const va = vaEl ? Number(vaEl.value) : 1;
       const vb = vbEl ? Number(vbEl.value) : 1;
-      try{ if(gains.a && gains.a.gain) gains.a.gain.value = va * Math.cos((x + 1) * Math.PI / 4); }catch(e){}
-      try{ if(gains.b && gains.b.gain) gains.b.gain.value = vb * Math.sin((x + 1) * Math.PI / 4); }catch(e){}
-      return { a:gains.a && gains.a.gain ? gains.a.gain.value : null, b:gains.b && gains.b.gain ? gains.b.gain.value : null };
+      const curve = crossfadeCurve(x);
+      const levels = { a:Math.max(0, Math.min(1, va * curve.a)), b:Math.max(0, Math.min(1, vb * curve.b)) };
+      ['a','b'].forEach(deck => {
+        const audio = deckAudio(deck);
+        if(gains[deck] && gains[deck].gain){
+          try{ gains[deck].gain.value = levels[deck]; }catch(e){}
+          if(audio) try{ audio.volume = 1; }catch(e){}
+        }else if(audio){
+          // No Web Audio graph yet (before first Play): blend with element volume.
+          try{ audio.volume = levels[deck]; }catch(e){}
+        }
+      });
+      const out = doc.getElementById('xfader-out');
+      if(out) out.textContent = `A ${Math.round(curve.a * 100)}% / B ${Math.round(curve.b * 100)}%`;
+      return levels;
+    }
+
+    // Equal-power crossfade: x=-1 full A, 0 both ~71%, +1 full B.
+    function crossfadeCurve(x){
+      const v = Math.max(-1, Math.min(1, Number(x) || 0));
+      const a = Math.cos((v + 1) * Math.PI / 4);
+      const b = Math.sin((v + 1) * Math.PI / 4);
+      return { a:Math.abs(a) < 1e-9 ? 0 : a, b:Math.abs(b) < 1e-9 ? 0 : b };
+    }
+
+    function pitchRate(deck){
+      const el = doc.getElementById(`pitch-${validDeck(deck)}`);
+      const rate = el ? Number(el.value) : 1;
+      return isFinite(rate) && rate > 0 ? rate : 1;
+    }
+
+    function applyPitch(deckInput){
+      const deck = validDeck(deckInput);
+      const rate = pitchRate(deck);
+      const audio = deckAudio(deck);
+      if(audio){
+        // Vinyl-style pitch: speed and pitch move together.
+        try{ audio.preservesPitch = false; audio.mozPreservesPitch = false; audio.webkitPreservesPitch = false; }catch(e){}
+        audio.defaultPlaybackRate = rate;
+        audio.playbackRate = rate;
+      }
+      const out = doc.getElementById(`pitch-out-${deck}`);
+      const pct = (rate - 1) * 100;
+      if(out) out.textContent = `${pct > 0 ? '+' : ''}${pct.toFixed(1)}%`;
+      return rate;
     }
 
     function ensureAudioGraph(){
@@ -136,10 +178,13 @@
         el.style.left = `${left}%`;
         w.appendChild(el);
       });
-      deckState.hotcues.forEach(hotcue => {
+      hotcueSlots(deck).forEach((hotcue, slot) => {
+        if(!hotcue) return;
         const el = doc.createElement('div');
-        el.className = 'hotcue';
-        el.style.left = `${Math.max(1, Math.min(99, (hotcue.pct || 0.05) * 100))}%`;
+        el.className = `hotcue hotcue-${slot + 1}`;
+        el.style.background = HOTCUE_COLORS[slot];
+        el.title = `Hot cue ${slot + 1}`;
+        el.style.left = `${Math.max(1, Math.min(99, hotcuePct(deck, hotcue) * 100))}%`;
         w.appendChild(el);
       });
       const loop = doc.createElement('div');
@@ -234,15 +279,124 @@
       return { ok:true, deck, time };
     }
 
+    const HOTCUE_COLORS = ['#c6ff00', '#00d1ff', '#ff4fa3', '#ffb020'];
+
+    // Normalises saved hotcues into 4 slots. Older entries without a slot fill free slots in order.
+    function hotcueSlots(deckInput){
+      const deck = validDeck(deckInput);
+      state.decks[deck] = state.decks[deck] || { cues:[], hotcues:[] };
+      const list = Array.isArray(state.decks[deck].hotcues) ? state.decks[deck].hotcues : [];
+      const slots = [null, null, null, null];
+      list.filter(h => h && Number.isInteger(h.slot) && h.slot >= 0 && h.slot < 4).forEach(h => { if(!slots[h.slot]) slots[h.slot] = h; });
+      list.filter(h => h && !Number.isInteger(h.slot)).forEach(h => {
+        const free = slots.indexOf(null);
+        if(free >= 0){ h.slot = free; slots[free] = h; }
+      });
+      state.decks[deck].hotcues = slots.filter(Boolean);
+      return slots;
+    }
+
+    function hotcuePct(deck, hotcue){
+      const audio = deckAudio(deck);
+      if(hotcue && isFinite(hotcue.time) && audio && audio.duration > 0) return Math.max(0, Math.min(1, hotcue.time / audio.duration));
+      return hotcue && isFinite(hotcue.pct) ? hotcue.pct : 0.05;
+    }
+
+    function setHotcueSlot(deckInput, slot){
+      const deck = validDeck(deckInput);
+      const audio = deckAudio(deck);
+      const time = audio ? Math.round((audio.currentTime || 0) * 1000) / 1000 : 0;
+      const pct = audio && audio.duration > 0 ? Math.max(0, Math.min(1, time / audio.duration)) : 0;
+      hotcueSlots(deck);
+      state.decks[deck].hotcues = state.decks[deck].hotcues.filter(h => h.slot !== slot).concat([{ slot, time, pct, created:now() }]);
+      persistDecks();
+      renderHotcuePads(deck);
+      renderWaveformForDeck(deck, {});
+      return { ok:true, deck, slot, time };
+    }
+
+    function clearHotcueSlot(deckInput, slot){
+      const deck = validDeck(deckInput);
+      hotcueSlots(deck);
+      state.decks[deck].hotcues = state.decks[deck].hotcues.filter(h => h.slot !== slot);
+      persistDecks();
+      renderHotcuePads(deck);
+      renderWaveformForDeck(deck, {});
+      return { ok:true, deck, slot };
+    }
+
+    function triggerHotcue(deckInput, slot){
+      const deck = validDeck(deckInput);
+      const hotcue = hotcueSlots(deck)[slot];
+      if(!hotcue) return setHotcueSlot(deck, slot);
+      const audio = deckAudio(deck);
+      let time = isFinite(hotcue.time) ? hotcue.time : null;
+      if(time == null && audio && audio.duration > 0) time = (hotcue.pct || 0) * audio.duration;
+      if(audio && time != null){
+        try{ audio.currentTime = time; }catch(e){}
+        try{ const p = audio.play && audio.play(); if(p && p.catch) p.catch(()=>{}); }catch(e){}
+      }
+      return { ok:true, deck, slot, jumped:true, time };
+    }
+
+    function formatCueTime(seconds){
+      const s = Math.max(0, Math.floor(Number(seconds) || 0));
+      return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    }
+
+    function renderHotcuePads(deckInput){
+      const deck = validDeck(deckInput);
+      const wrap = doc.getElementById(`hotcue-pads-${deck}`);
+      if(!wrap) return;
+      const slots = hotcueSlots(deck);
+      wrap.innerHTML = slots.map((hotcue, slot) => `<button type="button" class="hotcue-pad ${hotcue ? 'set' : 'empty'}" data-hotcue-pad="${slot}" style="--pad:${HOTCUE_COLORS[slot]}" title="${hotcue ? 'Tap to jump. Right-click or hold to clear.' : 'Tap to set at the current position.'}"><b>${slot + 1}</b><small>${hotcue ? (isFinite(hotcue.time) ? formatCueTime(hotcue.time) : 'Set') : 'Empty'}</small></button>`).join('');
+      wrap.querySelectorAll('[data-hotcue-pad]').forEach(button => {
+        const slot = Number(button.dataset.hotcuePad);
+        let holdTimer = null;
+        let held = false;
+        button.onclick = () => { if(held){ held = false; return; } triggerHotcue(deck, slot); };
+        button.oncontextmenu = event => { event.preventDefault(); clearHotcueSlot(deck, slot); };
+        button.onpointerdown = () => { held = false; holdTimer = setTimeout(() => { held = true; clearHotcueSlot(deck, slot); }, 600); };
+        button.onpointerup = button.onpointerleave = () => { if(holdTimer) clearTimeout(holdTimer); holdTimer = null; };
+      });
+    }
+
+    function renderMixesWellNext(deckInput){
+      const deck = validDeck(deckInput);
+      const wrap = doc.getElementById(`mixes-next-${deck}`);
+      if(!wrap) return { matches:[] };
+      const loaded = state.studioDecks && state.studioDecks[deck];
+      if(!loaded || !loaded.trackId){ wrap.innerHTML = ''; return { matches:[] }; }
+      const base = deps.getLibraryTrackById(loaded.trackId);
+      const otherDeck = deck === 'a' ? 'b' : 'a';
+      const hasBpm = base && deps.parseBpm && deps.parseBpm(base);
+      const hasKey = base && base.key && !['--', '—', ''].includes(String(base.key));
+      if(!base || !hasBpm || !hasKey){
+        wrap.innerHTML = `<span class="eyebrow">MIXES WELL NEXT</span><small class="mixes-next-empty">Add BPM and key to this track in the Library to see matches.</small>`;
+        return { matches:[], empty:'no-data' };
+      }
+      const matches = deps.compatibleTracksFor(base).filter(t => t.libraryId !== base.libraryId).slice(0, 5);
+      if(!matches.length){
+        wrap.innerHTML = `<span class="eyebrow">MIXES WELL NEXT</span><small class="mixes-next-empty">No tracks in your library match this BPM and key yet.</small>`;
+        return { matches:[], empty:'no-matches' };
+      }
+      wrap.innerHTML = `<span class="eyebrow">MIXES WELL NEXT</span><div class="mixes-next-list">${matches.map(t => `<button type="button" class="mixes-next-item" data-mix-next="${esc(t.libraryId)}" title="Load onto Deck ${otherDeck.toUpperCase()}"><span><strong>${esc(deps.trackTitle(t))}</strong><small>${esc(deps.parseBpm(t) || '--')} BPM / ${esc(t.key || '--')}</small></span><em>&rarr; ${otherDeck.toUpperCase()}</em></button>`).join('')}</div>`;
+      wrap.querySelectorAll('[data-mix-next]').forEach(button => button.onclick = () => loadLibraryTrackToDeck(button.dataset.mixNext, otherDeck));
+      return { matches };
+    }
+
     function addHotcue(deckInput){
       const deck = validDeck(deckInput);
       const audio = deckAudio(deck);
       let pct = 0.05;
       if(audio && audio.duration > 0) pct = Math.max(0, Math.min(1, (audio.currentTime || 0) / audio.duration));
       state.decks[deck] = state.decks[deck] || { cues:[], hotcues:[] };
-      state.decks[deck].hotcues.push({ pct, created:now() });
+      const free = hotcueSlots(deck).indexOf(null);
+      if(free < 0) return { ok:false, deck, error:'All 4 hot cues are set. Clear one first.' };
+      state.decks[deck].hotcues.push({ slot:free, pct, time:audio ? Math.round((audio.currentTime || 0) * 1000) / 1000 : 0, created:now() });
       persistDecks();
       renderDeckCues(deck);
+      renderHotcuePads(deck);
       renderWaveformForDeck(deck, {});
       return { ok:true, deck, pct };
     }
@@ -284,6 +438,8 @@
         renderWaveformForDeck(deck, rec);
         startMeterAnimation(deck);
         renderDeckCues(deck);
+        renderHotcuePads(deck);
+        applyPitch(deck);
         return { ok:true, deck, track:rec };
       }catch(error){
         if(win.console && win.console.warn) win.console.warn('loadTrackToDeck error', error);
@@ -316,6 +472,7 @@
         linkedSubmissionId:record.linkedSubmissionId,
         loadedAt:new Date(now()).toISOString()
       };
+      renderMixesWellNext(deck);
       const session = deps.activeStudioBattleSession();
       const snapshot = deps.battlePrepSnapshotForUser(session);
       if(snapshot && Array.isArray(snapshot.tracks)){
@@ -478,17 +635,19 @@
         const hotcueBtn = doc.querySelector(`[data-hotcue="${deck}"]`);
         if(hotcueBtn) hotcueBtn.onclick = () => addHotcue(deck);
         const pitch = doc.getElementById(`pitch-${deck}`);
-        if(pitch) pitch.oninput = event => {
-          const audio = deckAudio(deck);
-          if(audio) audio.playbackRate = Number(event.target.value);
-          const out = doc.getElementById(`pitch-out-${deck}`);
-          if(out) out.textContent = `${((Number(event.target.value) - 1) * 100).toFixed(1)}%`;
-        };
+        if(pitch) pitch.oninput = () => applyPitch(deck);
+        if(pitch) pitch.ondblclick = () => { pitch.value = '1'; applyPitch(deck); };
         const vol = doc.getElementById(`vol-${deck}`);
         if(vol) vol.oninput = applyMix;
         const audio = deckAudio(deck);
-        if(audio) audio.ontimeupdate = () => updateDeckTime(deck);
+        if(audio){
+          audio.ontimeupdate = () => updateDeckTime(deck);
+          // Loading a new src resets playbackRate, so re-apply pitch.
+          audio.addEventListener('loadedmetadata', () => { applyPitch(deck); renderHotcuePads(deck); });
+        }
+        renderHotcuePads(deck);
       });
+      applyMix();
       const xfader = doc.getElementById('xfader');
       if(xfader) xfader.oninput = applyMix;
       setTimeout(() => {
@@ -535,6 +694,14 @@
       renderDeckCues,
       setCue,
       addHotcue,
+      hotcueSlots,
+      setHotcueSlot,
+      clearHotcueSlot,
+      triggerHotcue,
+      renderHotcuePads,
+      renderMixesWellNext,
+      applyPitch,
+      crossfadeCurve,
       persistDecks,
       loadLocalFileToDeck,
       playDeck,

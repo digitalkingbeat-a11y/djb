@@ -88,7 +88,7 @@ const state = {
 state.battleProgress = { xp: 0, rating: 0, rankingRating: 0, wins: 0, losses: 0, belt: 'White', ...state.battleProgress };
 state.publicRankings.filters = { country:'all', belt:'all', relationship:'all', ...(state.publicRankings.filters || {}) };
 state.librarySort = safeParse('djBattleLibrarySort', null) || { field:'title', direction:'asc' };
-state.libraryFilters = { crate:'all', search:'', compatibleOnly:false };
+state.libraryFilters = Object.assign({ crate:'all', search:'', compatibleOnly:false }, (function(){ const saved = safeParse('djBattleLibraryFilters', null); return saved && typeof saved === 'object' ? { crate:typeof saved.crate === 'string' ? saved.crate : 'all', search:typeof saved.search === 'string' ? saved.search.slice(0,120) : '', compatibleOnly:Boolean(saved.compatibleOnly) } : {}; })());
 state.battleFormatFilter = 'all';
 state.battleViewTab = localStorage.getItem('djBattleBattleViewTab') || 'open';
 state.battleLayout = localStorage.getItem('djBattleBattleLayout') || 'list';
@@ -971,7 +971,9 @@ function deckShellHtml(deck, label){
             <div class="meter" id="meter-${deck}"><i></i></div>
             <div class="lcd-screen small deck-time" id="time-${deck}">0:00</div>
           </div>
+          <div class="hotcue-pads" id="hotcue-pads-${deck}" aria-label="Deck ${label} hot cues"></div>
           <div class="deck-cues" id="cues-${deck}"></div>
+          <div class="mixes-next" id="mixes-next-${deck}" aria-live="polite"></div>
         </div>
       </div>
       <button class="ghost small deck-file-load" data-load="${deck}" type="button">Load Local File</button>
@@ -1063,7 +1065,7 @@ function installProfessionalShell(){
               <button class="ghost small" type="button">Cue</button>
             </div>
           </div>
-          <label class="crossfader">Crossfader<input id="xfader" type="range" min="-1" max="1" step="0.01" value="0"></label>
+          <label class="crossfader">Crossfader<input id="xfader" type="range" min="-1" max="1" step="0.01" value="0"><output id="xfader-out">A 71% / B 71%</output></label>
           <label class="master-level">Master<input id="master-level" type="range" min="0" max="1.2" step="0.01" value="1"></label>
           <div class="fx-row"><button class="ghost small" type="button" disabled>FX 1</button><button class="ghost small" type="button" disabled>FX 2</button><span>FX disabled until mapped by provider/device support.</span></div>
         </section>
@@ -4321,8 +4323,38 @@ const KEY_TO_CAMELOT = {
 };
 const LIBRARY_SORT_LABELS = { title:'Title', artist:'Artist', bpm:'BPM', key:'Key', genre:'Genre', source:'Source', uploaded:'Uploaded' };
 
+function persistLibraryFilters(){
+  try{ localStorage.setItem('djBattleLibraryFilters', JSON.stringify({ crate:state.libraryFilters.crate || 'all', search:String(state.libraryFilters.search || ''), compatibleOnly:Boolean(state.libraryFilters.compatibleOnly) })); }catch(e){}
+}
+function libraryFilterChips(){
+  const chips = [];
+  const f = state.libraryFilters;
+  if(f.crate && f.crate !== 'all'){
+    const crate = getLibraryCrateById(f.crate);
+    chips.push({ kind:'crate', label:`Crate: ${crate ? (crate.name || crate.title || f.crate) : f.crate}` });
+  }
+  if(String(f.search || '').trim()) chips.push({ kind:'search', label:`Search: ${String(f.search).trim()}` });
+  if(f.compatibleOnly) chips.push({ kind:'compatible', label:'Compatible only' });
+  return chips;
+}
+function clearLibraryFilter(kind){
+  if(kind === 'crate') state.libraryFilters.crate = 'all';
+  if(kind === 'search') state.libraryFilters.search = '';
+  if(kind === 'compatible') state.libraryFilters.compatibleOnly = false;
+  persistLibraryFilters();
+  renderLibrary();
+}
+function renderLibraryFilterChips(){
+  const target = document.getElementById('library-filter-chips');
+  if(!target) return;
+  const chips = libraryFilterChips();
+  target.hidden = !chips.length;
+  target.innerHTML = chips.map(chip => `<button type="button" class="library-filter-chip" data-clear-filter="${esc(chip.kind)}" aria-label="Remove filter ${esc(chip.label)}">${esc(chip.label)} <span aria-hidden="true">&times;</span></button>`).join('');
+  target.querySelectorAll('[data-clear-filter]').forEach(button => button.onclick = () => clearLibraryFilter(button.dataset.clearFilter));
+}
 function persistLibraryUiState(){
   localStorage.setItem('djBattleLibrarySort', JSON.stringify(state.librarySort));
+  persistLibraryFilters();
   localStorage.setItem('djBattleSelectedLibraryTrackId', state.selectedLibraryTrackId || '');
   localStorage.setItem('djBattleLibraryPlayer', JSON.stringify(state.libraryPlayer));
 }
@@ -6652,8 +6684,22 @@ function renderLibraryDetail(track){
     </div>
     ${editable ? `<label class="artwork-control">Track artwork<input type="file" accept="image/*" data-artwork-track="${esc(track.libraryId)}"></label>` : '<small style="color:var(--muted)">Platform artwork is controlled by the approved source catalog.</small>'}
     ${editable && !track.serverBacked ? `<div class="library-audio-status ${track.audioMissing ? 'missing' : ''}" id="library-audio-status"><strong>${esc(libraryAudioStatusLabel(track))}</strong>${track.audioMissing || (!securePlaybackSource(track) && track.localAudioPersisted) ? '<p style="color:var(--muted);margin:4px 0 0">Local audio was not found after refresh. Re-attach the file to restore playback.</p><label class="artwork-control">Re-attach audio<input type="file" accept="audio/*" data-reattach-audio="' + esc(track.id || track.libraryId) + '"></label>' : ''}</div>` : ''}
+    ${editable ? `<div class="track-tempo-editor"><span class="eyebrow">EDIT BPM / KEY</span><div class="form-grid">${bpmKeyFieldsHtml('edit', track)}</div><button class="primary small" id="edit-bpmkey-save" type="button" data-edit-track="${esc(track.libraryId)}">Save BPM / Key</button></div>` : ''}
     ${renderCrateEditorPanel()}
   `;
+  if(editable){
+    wireTapTempo('edit');
+    const save = document.getElementById('edit-bpmkey-save');
+    if(save) save.onclick = async () => {
+      const bpmKey = readBpmKeyFields('edit');
+      const patch = {};
+      if(bpmKey.bpm) patch.bpm = bpmKey.bpm;
+      if(bpmKey.key) patch.key = bpmKey.key;
+      if(!Object.keys(patch).length){ showAppToast('Nothing to save', 'Enter a BPM between 40 and 220 or a key.'); return; }
+      const result = await updateLibraryTrackMetadataOptimistic(save.dataset.editTrack, patch);
+      if(result && result.ok) showAppToast('Saved', 'BPM and key updated.');
+    };
+  }
   renderCompatibleList(track);
 }
 function renderLibraryPlayer(){
@@ -7002,6 +7048,47 @@ async function attachArtworkToTrack(trackId, file){
   return { ok:true, src:dataUrl };
 }
 
+function createTapTempo(options={}){
+  const resetMs = options.resetMs || 2000;
+  const maxTaps = options.maxTaps || 8;
+  let taps = [];
+  return {
+    tap(at = Date.now()){
+      if(taps.length && at - taps[taps.length - 1] > resetMs) taps = [];
+      taps.push(at);
+      if(taps.length > maxTaps) taps = taps.slice(-maxTaps);
+      if(taps.length < 2) return null;
+      const gaps = taps.slice(1).map((t, i) => t - taps[i]);
+      const avg = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+      return avg > 0 ? Math.round(60000 / avg * 10) / 10 : null;
+    },
+    reset(){ taps = []; },
+    count(){ return taps.length; }
+  };
+}
+function bpmKeyFieldsHtml(prefix, track={}){
+  const bpm = parseBpm(track) || '';
+  const key = track.key && track.key !== '--' && track.key !== '—' ? track.key : '';
+  return `<label>BPM<span class="bpm-tap-row"><input id="${prefix}-bpm" type="number" min="40" max="220" step="0.1" inputmode="decimal" placeholder="e.g. 128" value="${esc(bpm)}"><button class="ghost small tap-tempo-btn" id="${prefix}-tap" type="button">Tap Tempo</button></span><small class="tap-tempo-hint" id="${prefix}-tap-hint">Tap along to the beat</small></label><label>Key<input id="${prefix}-key" maxlength="12" placeholder="e.g. 8A or A minor" value="${esc(key)}"></label>`;
+}
+function wireTapTempo(prefix){
+  const button = document.getElementById(`${prefix}-tap`);
+  const input = document.getElementById(`${prefix}-bpm`);
+  const hint = document.getElementById(`${prefix}-tap-hint`);
+  if(!button || !input) return null;
+  const tempo = createTapTempo();
+  button.onclick = () => {
+    const bpm = tempo.tap(Date.now());
+    if(bpm){ input.value = String(bpm); if(hint) hint.textContent = `${bpm} BPM from ${tempo.count()} taps`; }
+    else if(hint) hint.textContent = 'Keep tapping...';
+  };
+  return tempo;
+}
+function readBpmKeyFields(prefix){
+  const bpmRaw = Number(document.getElementById(`${prefix}-bpm`)?.value);
+  const keyRaw = String(document.getElementById(`${prefix}-key`)?.value || '').trim().slice(0,12);
+  return { bpm: bpmRaw >= 40 && bpmRaw <= 220 ? Math.round(bpmRaw * 10) / 10 : null, key: keyRaw || null };
+}
 function handleLibraryFilesWithMeta(files){
   const incoming = Array.from(files || []);
   const list = [];
@@ -7014,15 +7101,17 @@ function handleLibraryFilesWithMeta(files){
   function next(){
     if(list.length===0){ persist(); persistPlatform(); renderLibrary(); renderPlatformLibrary(); renderStreamingServices(); return; }
     const f = list.shift();
-    openModal(`<span class="eyebrow accent">UPLOAD TRACK</span><h3>Upload ${esc(f.name)}</h3><div class="form-grid"><label>Title<input id="meta-title" value="${esc(f.name.replace(/\.[^/.]+$/, ''))}"></label><label>Artist<input id="meta-artist" placeholder="Artist"></label><label>Genre<input id="meta-genre" placeholder="Genre"></label><label>Rights Category<select id="meta-rights"><option>Original / I Own the Rights</option><option>Licensed / I Have Permission</option><option>Royalty-Free / Cleared</option><option>Commercial / Copyrighted Music</option><option>Unsure</option></select></label><label class="toggle-row">I confirm that I own the necessary rights to this music or have permission to upload and use it on this platform.<input type="checkbox" id="meta-declare"></label></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" id="meta-save">Upload</button></div>`);
+    openModal(`<span class="eyebrow accent">UPLOAD TRACK</span><h3>Upload ${esc(f.name)}</h3><div class="form-grid"><label>Title<input id="meta-title" value="${esc(f.name.replace(/\.[^/.]+$/, ''))}"></label><label>Artist<input id="meta-artist" placeholder="Artist"></label><label>Genre<input id="meta-genre" placeholder="Genre"></label>${bpmKeyFieldsHtml('meta')}<label>Rights Category<select id="meta-rights"><option>Original / I Own the Rights</option><option>Licensed / I Have Permission</option><option>Royalty-Free / Cleared</option><option>Commercial / Copyrighted Music</option><option>Unsure</option></select></label><label class="toggle-row">I confirm that I own the necessary rights to this music or have permission to upload and use it on this platform.<input type="checkbox" id="meta-declare"></label></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" id="meta-save">Upload</button></div>`);
     setTimeout(()=>{
+      wireTapTempo('meta');
       document.getElementById('meta-save').onclick = async ()=>{
+        const bpmKey = readBpmKeyFields('meta');
         const title = document.getElementById('meta-title').value || f.name;
         const artist = document.getElementById('meta-artist').value || 'Unknown';
         const genre = document.getElementById('meta-genre').value || 'Unsorted';
         const rights = document.getElementById('meta-rights').value;
         const declared = !!document.getElementById('meta-declare').checked;
-        const serverUpload = await createServerBackedLibraryTrackFromFile(f, { title, artist, genre, rightsClassification:rightsCategoryToClassification(rights) }).catch(error => ({ error:String(error && error.message || error) }));
+        const serverUpload = await createServerBackedLibraryTrackFromFile(f, { title, artist, genre, ...(bpmKey.bpm ? { bpm:bpmKey.bpm } : {}), ...(bpmKey.key ? { key:bpmKey.key } : {}), rightsClassification:rightsCategoryToClassification(rights) }).catch(error => ({ error:String(error && error.message || error) }));
         if(serverUpload && serverUpload.data && serverUpload.data.track){
           await attachLibraryAudioBlob(serverUpload.data.track.id, f);
           document.getElementById('modal').close();
@@ -7031,6 +7120,7 @@ function handleLibraryFilesWithMeta(files){
         }
         const realDuration = await readAudioDuration(f);
         const track = { id: 'u-'+Date.now(), title, name: title, artist, uploader: (document.getElementById('profile-name')?.textContent||'You'), album:null, artwork:null, artworkDataUrl:null, genre, bpm:'--', key:'--', duration: realDuration || '--', uploadDate: new Date().toISOString(), size: f.size||0, fileName: f.name, source:'MY_LIBRARY', rightsCategory: rights, rightsDeclared: declared, copyrightCheck: 'Not Checked', battleEligible: rights !== 'Commercial / Copyrighted Music', permissions: defaultPermissions(), stems:false, localAudioPersisted:false, audioMissing:false };
+        applyTrackPatchLocal(track, { ...(bpmKey.bpm ? { bpm:bpmKey.bpm } : {}), ...(bpmKey.key ? { key:bpmKey.key } : {}) });
         state.library.push(track);
         await attachLibraryAudioBlob(track.id, f);
         persist();
@@ -7078,6 +7168,8 @@ function renderLibrary(){
   const searchTerm = String(state.libraryFilters.search || '').trim();
   const totalTracks = libraryTotalBeforeSearch();
   updateLibrarySearchUi(rows.length, totalTracks);
+  persistLibraryFilters();
+  renderLibraryFilterChips();
   if(!rows.length && searchTerm){
     body.innerHTML=`<tr class="library-empty-row"><td colspan="9"><div class="library-empty-state"><strong>Nothing matches “${esc(searchTerm)}”</strong><small>Try a different title, artist, genre, BPM or key.</small><button type="button" class="text-btn library-empty-reset" data-library-search-reset>Clear search</button></div></td></tr>`;
     const reset = body.querySelector('[data-library-search-reset]');
