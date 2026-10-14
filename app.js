@@ -15,7 +15,7 @@ const state = {
     {user:'Turntablist T', initials:'TT', room:'Scratching', time:'22m', title:'Ahh/Fresh 60-second practice', body:'Working on cleaner rhythm and faster chirps. What should I tighten up?', media:'Scratch Practice #14', likes:31, comments:12},
     {user:'Juno', initials:'JU', room:'Promo Feed', time:'1h', title:'Friday rooftop set', body:'Uploading the full mix after the event. Tech House → UKG.', media:null, likes:12, comments:4}
   ],
-  practiceHistory: JSON.parse(localStorage.getItem('djBattlePracticeHistory') || '[]'),
+  practiceHistory: safeParse('djBattlePracticeHistory', []),
   battleResults: safeParse('djBattleBattleResults', []),
   battleProgress: safeParse('djBattleBattleProgress', null) || { xp: 0, rating: 0, rankingRating: 0, wins: 0, losses: 0, belt: 'White' },
   operatorUser: false,
@@ -10905,10 +10905,29 @@ async function recoverAcceptedChallengeBattle(battleId){
   return routeAcceptedChallengeToBattleRoom({ room:response.data && response.data.room });
 }
 
+function pollDjAlertsNow(){
+  if(!state.musicLibrarySync || !state.musicLibrarySync.accountId) return;
+  if(djChallengeApiAvailable()) loadDjChallengeCount().catch(()=>{});
+  if(djNotificationApiAvailable()) loadDjNotificationCount().catch(()=>{});
+}
+function handleDjPollingVisibility(){
+  if(typeof document === 'undefined') return;
+  if(document.hidden){
+    if(state.djChallenges.pollTimer){ clearInterval(state.djChallenges.pollTimer); state.djChallenges.pollTimer = null; }
+    if(state.djNotifications.pollTimer){ clearTimeout(state.djNotifications.pollTimer); state.djNotifications.pollTimer = null; }
+    return;
+  }
+  pollDjAlertsNow();
+  scheduleDjChallengePolling();
+  scheduleDjNotificationPolling();
+}
+if(typeof document !== 'undefined' && document.addEventListener) document.addEventListener('visibilitychange', handleDjPollingVisibility);
+
 function scheduleDjChallengePolling(intervalMs = 30000){
   if(state.djChallenges.pollTimer) clearInterval(state.djChallenges.pollTimer);
   state.djChallenges.pollTimer = null;
   if(!djChallengeApiAvailable() || !state.musicLibrarySync.accountId || livePollingDisabledForTest()) return 0;
+  if(typeof document !== 'undefined' && document.hidden) return 0;
   state.djChallenges.pollTimer = setInterval(() => {
     loadDjChallengeCount().catch(()=>{});
     if(activeProfileTab === 'challenges' && document.getElementById('profile')?.classList.contains('active')){
@@ -10923,6 +10942,7 @@ function scheduleDjNotificationPolling(intervalMs = 30000){
   if(state.djNotifications.pollTimer) clearTimeout(state.djNotifications.pollTimer);
   state.djNotifications.pollTimer = null;
   if(!djNotificationApiAvailable() || !state.musicLibrarySync.accountId || livePollingDisabledForTest()) return 0;
+  if(typeof document !== 'undefined' && document.hidden) return 0;
   const tick = async () => {
     const hidden = document.visibilityState === 'hidden';
     if(!hidden){

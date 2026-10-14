@@ -1603,3 +1603,15 @@ td{
 .notification-toast--error{border-color:rgba(255,77,94,.7)!important}
 .notification-toast .toast-retry{margin-top:8px;justify-self:start;background:#c6ff00;color:#0a0d11;border:0;border-radius:8px;padding:5px 12px;font-weight:700;cursor:pointer}
 time.rel-time{color:inherit}
+
+/* Respect the OS "reduce motion" setting. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}

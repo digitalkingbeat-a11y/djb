@@ -89,3 +89,8 @@ The Playwright smoke test expects the static app to be served at `http://127.0.0
 - subscriptions/entitlements
 
 Keep AI, community, and expert scores separate. Calculate final hybrid scores from stored components so weighting can change later without destroying historical judging data.
+
+## Server security settings
+
+- `ALLOWED_ORIGINS` — comma-separated list of front-end addresses allowed to call the API from a browser (e.g. `https://djbattle.example.com`). Set this on your deployed server. In development, `localhost`/`127.0.0.1` on any port are always allowed. If it is unset in production the server logs a warning and only same-origin (bundled front end) and non-browser requests work.
+- The server sends standard security headers (Content-Security-Policy, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`). If you load scripts from a new CDN, add it to `server/security.js`.
