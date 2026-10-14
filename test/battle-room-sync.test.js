@@ -186,8 +186,13 @@ test('duplicate server-backed submissions are blocked before creating another dr
   await settle();
   window.document.getElementById('br-upload-btn').click();
   await settle();
+  const ok = window.document.querySelector('[data-app-confirm-ok]');
+  assert.ok(ok, 'in-app confirm shown before submitting');
+  ok.click();
+  await settle();
   assert.equal(submitCalls, 0);
-  assert.match(window.alertMessages.join(' '), /already has a submission/i);
+  const rack = window.document.getElementById('notification-toast-rack');
+  assert.match(rack ? rack.textContent : '', /already has a submission/i);
 });
 
 test('uploaded mix and Battle Studio takes are recorded with the correct standardized submission source', async () => {
@@ -209,10 +214,14 @@ test('uploaded mix and Battle Studio takes are recorded with the correct standar
   fileInput.dispatchEvent(new window.Event('change', { bubbles:true }));
   window.document.getElementById('br-upload-btn').click();
   await settle();
+  window.document.querySelector('[data-app-confirm-ok]').click();
+  await settle();
 
   window.lastRecordedMixFile = new window.File(['audio'], 'studio-take.webm', { type:'audio/webm' });
   window.pendingBattleSubmissionSource = 'battle_studio';
   window.document.getElementById('br-upload-btn').click();
+  await settle();
+  window.document.querySelector('[data-app-confirm-ok]').click();
   await settle();
 
   assert.deepEqual(sources, ['uploaded_mix', 'battle_studio']);
