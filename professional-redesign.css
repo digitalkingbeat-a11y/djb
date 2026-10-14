@@ -1565,3 +1565,15 @@ td{
 .rating-history-delta[data-tone="flat"]{color:var(--muted)}
 .rating-history-svg{width:100% !important;max-width:none !important;height:90px;margin-top:8px;display:block}
 .rating-history-empty{color:var(--muted);margin:6px 0 0}
+
+/* Oct 14: in-app confirm, char counters, warn toasts */
+.app-confirm-overlay{position:fixed;inset:0;z-index:2000;display:grid;place-items:center;background:rgba(5,7,10,.72);backdrop-filter:blur(3px)}
+.app-confirm{width:min(420px,92vw);background:#0f1318;border:1px solid rgba(198,255,0,.35);border-radius:14px;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.6);color:#e9eef3}
+.app-confirm h3{margin:6px 0 8px}
+.app-confirm p{color:var(--muted,#9aa4b2);line-height:1.5;margin:0 0 16px}
+.app-confirm .modal-actions{display:flex;gap:8px;justify-content:flex-end}
+.char-counter{display:block;text-align:right;font-size:11px;color:var(--muted,#9aa4b2);margin-top:3px;font-variant-numeric:tabular-nums}
+.char-counter.near-limit{color:var(--accent,#c6ff00)}
+.notification-toast--warn{border-color:rgba(255,184,0,.6)!important}
+.badge-coming-soon{display:inline-block;padding:1px 8px;border-radius:999px;background:rgba(198,255,0,.14);color:var(--accent,#c6ff00);font-size:12px;font-weight:700}
+.preview-label{border-style:dashed}

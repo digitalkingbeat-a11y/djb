@@ -551,6 +551,108 @@ function showAppToast(title, summary){
   return toast;
 }
 
+
+// In-app replacement for window.alert: shows a toast instead of a browser pop-up.
+function appAlert(message, title){
+  const text = String(message && message.message || message || '');
+  const isError = /fail|error|unable|could not|unavailable|required|invalid|denied|choose|sign in/i.test(text);
+  const toast = showAppToast(title || (isError ? 'Heads up' : 'Notice'), text);
+  if(toast && isError) toast.classList.add('notification-toast--warn');
+  return toast;
+}
+if(typeof window !== 'undefined') window.appAlert = appAlert;
+
+// In-app confirm dialog (never window.confirm). Resolves true/false.
+function appConfirm({ title='Are you sure?', body='', confirmLabel='Confirm', cancelLabel='Cancel' } = {}){
+  return new Promise(resolve => {
+    document.querySelectorAll('.app-confirm-overlay').forEach(el => el.remove());
+    const overlay = document.createElement('div');
+    overlay.className = 'app-confirm-overlay';
+    overlay.innerHTML = `<div class="app-confirm" role="alertdialog" aria-modal="true" aria-labelledby="app-confirm-title"><span class="eyebrow accent">CONFIRM</span><h3 id="app-confirm-title">${esc(title)}</h3><p>${esc(body)}</p><div class="modal-actions"><button class="ghost" type="button" data-app-confirm-cancel>${esc(cancelLabel)}</button><button class="primary" type="button" data-app-confirm-ok>${esc(confirmLabel)}</button></div></div>`;
+    const done = value => { overlay.remove(); resolve(value); };
+    overlay.querySelector('[data-app-confirm-ok]').onclick = () => done(true);
+    overlay.querySelector('[data-app-confirm-cancel]').onclick = () => done(false);
+    overlay.addEventListener('keydown', e => { if(e.key === 'Escape') done(false); });
+    document.body.appendChild(overlay);
+    const ok = overlay.querySelector('[data-app-confirm-ok]'); if(ok && ok.focus) ok.focus();
+  });
+}
+if(typeof window !== 'undefined') window.appConfirm = appConfirm;
+
+// Wrap a button's click handler: ask first, then lock the button while it runs (blocks double taps).
+function guardActionButton(button, dialog){
+  if(!button) return;
+  const original = button.onclick;
+  if(typeof original !== 'function' || original.__guarded) return;
+  const guarded = async event => {
+    if(button.disabled || button.dataset.busy === '1') return;
+    button.dataset.busy = '1';
+    button.disabled = true;
+    try {
+      const ok = await appConfirm(dialog);
+      if(!ok) return;
+      await original.call(button, event);
+    } finally {
+      button.dataset.busy = '';
+      button.disabled = false;
+    }
+  };
+  guarded.__guarded = true;
+  button.onclick = guarded;
+}
+function guardBattleRoomButtons(){
+  const g = (id, dialog) => guardActionButton(document.getElementById(id), dialog);
+  g('br-start', { title:'Start the battle?', body:'The battle clock starts now for this room.', confirmLabel:'Start battle' });
+  g('br-server-start', { title:'Start the battle?', body:'This starts the battle for every DJ in the room.', confirmLabel:'Start battle' });
+  g('br-end', { title:'End the battle now?', body:'Your set is locked and the room moves to submission.', confirmLabel:'End & lock set' });
+  g('br-upload-btn', { title:'Submit this mix?', body:'Once submitted, your mix goes to judging and cannot be swapped.', confirmLabel:'Submit mix' });
+  g('br-submit-btn', { title:'Submit this mix again?', body:'This retries the upload and sends it to judging.', confirmLabel:'Retry & submit' });
+}
+if(typeof window !== 'undefined') window.guardBattleRoomButtons = guardBattleRoomButtons;
+
+// Text limits: maxlength + live "N/max" counters for text boxes, including forms built later.
+function textLimitFor(el){
+  const key = `${el.id || ''} ${el.name || ''} ${el.getAttribute('placeholder') || ''}`.toLowerCase();
+  if(/bio|about/.test(key)) return 280;
+  if(/comment|reply/.test(key)) return 500;
+  if(/post|body|content|desc|message|notes?\b/.test(key) || el.tagName === 'TEXTAREA') return el.tagName === 'TEXTAREA' && /post|body|content/.test(key) ? 2000 : (el.tagName === 'TEXTAREA' ? 1000 : 500);
+  if(/crate/.test(key)) return 60;
+  if(/title|playlist|battle/.test(key)) return 120;
+  if(/name|handle|dj|artist|genre|city|location|tag/.test(key)) return 60;
+  return 0;
+}
+function applyTextLimits(root){
+  const scope = root && root.querySelectorAll ? root : document;
+  scope.querySelectorAll('input:not([type]), input[type="text"], textarea').forEach(el => {
+    if(el.dataset.limitApplied === '1') return;
+    let max = Number(el.getAttribute('maxlength')) || 0;
+    if(!max){ max = textLimitFor(el); if(!max) return; el.setAttribute('maxlength', String(max)); }
+    el.dataset.limitApplied = '1';
+    const counter = document.createElement('small');
+    counter.className = 'char-counter';
+    counter.setAttribute('aria-live', 'polite');
+    const update = () => {
+      const n = String(el.value || '').length;
+      counter.textContent = `${n}/${max}`;
+      counter.classList.toggle('near-limit', n >= max * 0.9);
+    };
+    el.addEventListener('input', update);
+    update();
+    el.insertAdjacentElement('afterend', counter);
+  });
+}
+if(typeof window !== 'undefined'){
+  window.applyTextLimits = applyTextLimits;
+  const startLimits = () => {
+    applyTextLimits(document);
+    if(typeof MutationObserver === 'function' && document.body){
+      let pending = false;
+      new MutationObserver(() => { if(pending) return; pending = true; setTimeout(() => { pending = false; applyTextLimits(document); }, 0); }).observe(document.body, { childList:true, subtree:true });
+    }
+  };
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startLimits); else setTimeout(startLimits, 0);
+}
+
 async function shareCurrentProfile(){
   const profileId = currentPublicProfileShareId();
   if(!profileId){
@@ -770,6 +872,9 @@ function persistCrateEditorState(){
 }
 function persist(){localStorage.setItem('djBattleLibrary',JSON.stringify(sanitizedLibraryForStorage(state.library.filter(track => !track.serverBacked))));localStorage.setItem('djBattlePlaylists',JSON.stringify(sanitizedCratesForStorage(state.playlists.filter(crate => !crate.serverBacked))));localStorage.setItem('djBattlePosts',JSON.stringify(state.posts));persistCrateEditorState();if(state.musicLibrarySync && state.musicLibrarySync.accountId){ persistLibraryCacheForAccount(state.musicLibrarySync.accountId); persistCrateCacheForAccount(state.musicLibrarySync.accountId); }}
 function esc(s=''){return String(s ?? '').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+// escapeHtml: use for every user-typed string that goes into innerHTML.
+function escapeHtml(s=''){ return esc(s); }
+if(typeof window !== 'undefined') window.escapeHtml = escapeHtml;
 
 function deckShellHtml(deck, label){
   return `
@@ -949,7 +1054,7 @@ function installProfessionalShell(){
         <div class="modal-actions"><button class="ghost" id="restart-recording" type="button">Restart Recording</button><button class="ghost" id="save-recording-draft" type="button">Save Draft</button><button class="primary" id="submit-recording" type="button">Submit Battle</button></div>
       </section>
       <div class="studio-analysis-row">
-        <div class="panel ai-panel"><div><span class="eyebrow">JUDGE PANEL</span><h3>Battle Judging</h3><p>Timing / beatmatching / phrase mixing / transitions / technical evidence.</p></div><div class="judge-actions"><button class="primary" id="judge-score-preview" type="button">Generate Practice Score</button><div id="score-breakdown" class="score-breakdown"></div></div></div>
+        <div class="panel ai-panel"><div><span class="eyebrow">JUDGE PANEL</span><h3>Battle Judging</h3><p>Timing / beatmatching / phrase mixing / transitions / technical evidence.</p></div><div class="judge-actions"><button class="primary" id="judge-score-preview" type="button">Preview Scoring</button><div id="score-breakdown" class="score-breakdown"></div></div></div>
         <div class="panel" id="how-close-wrap"><div><span class="eyebrow">HOW CLOSE WAS I?</span><h3>Timing Accuracy Inspector</h3><p>Compare target landings with measured timing markers.</p></div><div class="judge-actions"><button class="ghost" id="hc-run-timing" type="button">Analyze Timing</button><button class="ghost" id="run-judge-analysis" type="button">Run Judge Analysis</button></div></div>
       </div>`;
   }
@@ -1537,14 +1642,14 @@ function renderAiLeaderboard(filter='Global'){
       const rows = resp.rows;
       const tableBody = rows.length ? rows.map(row => `
         <tr>
-          <td>#${row.rank}</td>
+          <td>#${esc(row.rank)}</td>
           <td><strong>${esc(row.dj)}</strong></td>
-          <td>${row.best}</td>
-          <td>${row.average}</td>
-          <td>${row.attempts}</td>
-          <td>${row.last}</td>
-          <td>${row.best}</td>
-          <td>${row.genre || filter || 'Global'}</td>
+          <td>${esc(row.best)}</td>
+          <td>${esc(row.average)}</td>
+          <td>${esc(row.attempts)}</td>
+          <td>${esc(row.last)}</td>
+          <td>${esc(row.best)}</td>
+          <td>${esc(row.genre || filter || 'Global')}</td>
         </tr>
       `).join('') : '<tr><td colspan="8">No solo scores yet.</td></tr>';
       aiTarget.innerHTML = tableBody;
@@ -1563,14 +1668,14 @@ function renderAiLeaderboard(filter='Global'){
 
   const tableBody = filtered.length ? filtered.map(row => `
     <tr>
-      <td>#${row.rank}</td>
+      <td>#${esc(row.rank)}</td>
       <td><strong>${esc(row.dj)}</strong></td>
-      <td>${row.best}</td>
-      <td>${row.average}</td>
-      <td>${row.attempts}</td>
-      <td>${row.last}</td>
-      <td>${row.personalBest}</td>
-      <td>${row.genre || 'Global'}</td>
+      <td>${esc(row.best)}</td>
+      <td>${esc(row.average)}</td>
+      <td>${esc(row.attempts)}</td>
+      <td>${esc(row.last)}</td>
+      <td>${esc(row.personalBest)}</td>
+      <td>${esc(row.genre || 'Global')}</td>
     </tr>
   `).join('') : '<tr><td colspan="8">No solo scores yet.</td></tr>';
 
@@ -2362,15 +2467,15 @@ async function savePracticeResult(entry){
       if(resp && !resp.error){
         if(resp.newHigh || resp.newPB){
           const noteParts = [];
-          if(resp.newHigh) noteParts.push(`NEW HIGH SCORE — #${resp.rank} GLOBAL`);
-          if(resp.newPB) noteParts.push(`NEW PERSONAL BEST — ${resp.best}`);
+          if(resp.newHigh) noteParts.push(`NEW HIGH SCORE — #${esc(resp.rank)} GLOBAL`);
+          if(resp.newPB) noteParts.push(`NEW PERSONAL BEST — ${esc(resp.best)}`);
           openModal(`<span class="eyebrow accent">SAVED</span><h3>Practice result saved</h3><p style="color:var(--muted)">${noteParts.join('<br>')}</p><div class="notice"><strong>AI Score</strong><span>${payload.score}/180</span></div><div class="modal-actions"><button class="primary" value="cancel">Continue</button></div>`);
         }
         // refresh leaderboard
         renderAiLeaderboard();
       } else {
         console.warn('submitScoreLive failed', resp && resp.error);
-        alert(resp && resp.error ? resp.error : 'Unable to save your score.');
+        appAlert(resp && resp.error ? resp.error : 'Unable to save your score.');
       }
     }catch(err){ console.warn('savePracticeResult live submit failed', err); }
   }
@@ -2600,7 +2705,7 @@ async function joinBattleFromModal(b){
     return;
   }
   let joined = BattleModes.joinBattle(updated, { userId: currentProfileUserId(), name: currentUser().displayName }, { now: new Date().toISOString() });
-  if(joined.error && joined.code !== 'duplicate_entry') return alert(joined.error);
+  if(joined.error && joined.code !== 'duplicate_entry') return appAlert(joined.error);
   let joinedBattle = joined.battle || updated;
   let opponent = realOpponentFromBattle(joinedBattle);
   const needsOpponent = joinedBattle.opponentRequirement === 'required';
@@ -2611,7 +2716,7 @@ async function joinBattleFromModal(b){
   let preparedBattle = joinedBattle;
   if(!needsOpponent || opponent){
     const prepared = BattleModes.prepareBattle(joinedBattle, { userId: currentProfileUserId(), assignedTracks: assigned, now: new Date().toISOString() });
-    if(prepared.error) return alert(prepared.error);
+    if(prepared.error) return appAlert(prepared.error);
     preparedBattle = prepared.battle;
   }
   if(selectedCrate && validation.ready){
@@ -2648,7 +2753,7 @@ function startAiPracticeFromModal(b){
   const chosenGenre = document.getElementById('enter-genre')?.value || b.genre;
   const chosenLength = Number(document.getElementById('enter-length')?.value||10);
   const practice = BattleModes.createBattleRecord({ modeId:'ai_only_practice', genre: chosenGenre, durationMinutes: chosenLength, title:`${chosenGenre} AI Practice`, createdBy:currentProfileUserId(), status:'ready', visibility:'private' });
-  if(practice.error) return alert(practice.error.map(item=>item.message).join(' '));
+  if(practice.error) return appAlert(practice.error.map(item=>item.message).join(' '));
   const joined = BattleModes.joinBattle(practice.battle, { userId: currentProfileUserId(), name: currentUser().displayName }, { now: new Date().toISOString() });
   const selectedCrate = document.getElementById('enter-prep-crate')?.value || '';
   let battle = joined.battle || practice.battle;
@@ -3210,7 +3315,7 @@ function openCommunityPostComposer(existingPost){
     <div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="publish-post">${post.id ? 'Save' : 'Publish'}</button></div>`);
   setTimeout(() => {
     const publish = document.getElementById('publish-post');
-    if(publish) publish.onclick = () => publishCommunityPostFromModal(post.id).catch(err=>alert(String(err && err.message || err)));
+    if(publish) publish.onclick = () => publishCommunityPostFromModal(post.id).catch(err=>appAlert(String(err && err.message || err)));
   }, 0);
 }
 
@@ -3235,7 +3340,7 @@ function communityPostPayloadFromModal(postId){
 async function publishCommunityPostFromModal(postId){
   const payload = communityPostPayloadFromModal(postId);
   if(!payload.title.trim() || !payload.bodyText.trim()){
-    alert('Title and post body are required.');
+    appAlert('Title and post body are required.');
     return { error:'missing_fields' };
   }
   if(communityServerMode()){
@@ -3244,7 +3349,7 @@ async function publishCommunityPostFromModal(postId){
       body:payload
     });
     if(response.error){
-      alert(response.error);
+      appAlert(response.error);
       return response;
     }
     const post = response.data && response.data.post;
@@ -3280,11 +3385,11 @@ async function publishCommunityPostFromModal(postId){
 
 async function toggleCommunityReaction(postId, type){
   if(!communityServerMode()){
-    alert('Sign in with server Community access to react.');
+    appAlert('Sign in with server Community access to react.');
     return { skipped:true };
   }
   const response = await window.DJBattleApi.apiRequest('/api/community/reactions/toggle', { method:'POST', body:{ targetType:'post', targetId:postId, type, idempotencyKey:stableClientIdempotencyKey('community-reaction', { accountId:communityAccountId(), postId, type }) } });
-  if(response.error){ alert(response.error); return response; }
+  if(response.error){ appAlert(response.error); return response; }
   const post = state.community.posts.find(row => String(row.id) === String(postId));
   if(post && response.data){
     post.reactionCounts = response.data.counts || post.reactionCounts;
@@ -3356,12 +3461,12 @@ async function openCommunityComments(postId){
   else state.community.comments[postId] = [];
   renderCommunityCommentsModal(postId);
   const submit = document.getElementById('community-comment-submit');
-  if(submit) submit.onclick = () => publishCommunityComment(postId).catch(err=>alert(String(err && err.message || err)));
+  if(submit) submit.onclick = () => publishCommunityComment(postId).catch(err=>appAlert(String(err && err.message || err)));
 }
 
 async function publishCommunityComment(postId){
   if(!communityServerMode()){
-    alert('Sign in with server Community access to comment.');
+    appAlert('Sign in with server Community access to comment.');
     return { skipped:true };
   }
   const bodyText = document.getElementById('community-comment-body')?.value || '';
@@ -3370,7 +3475,7 @@ async function publishCommunityComment(postId){
     method:'POST',
     body:{ postId, bodyText, parentCommentId:parentCommentId || null, idempotencyKey:stableClientIdempotencyKey('community-comment', { accountId:communityAccountId(), postId, parentCommentId, bodyText }) }
   });
-  if(response.error){ alert(response.error); return response; }
+  if(response.error){ appAlert(response.error); return response; }
   const comment = response.data && response.data.comment;
   if(comment){
     state.community.comments[postId] = dedupeCommunityPosts([...(state.community.comments[postId] || []), comment]);
@@ -3389,7 +3494,7 @@ async function publishCommunityComment(postId){
 async function deleteCommunityComment(commentId, postId){
   if(!communityServerMode()) return { skipped:true };
   const response = await window.DJBattleApi.apiRequest(`/api/community/comments/${encodeURIComponent(commentId)}`, { method:'DELETE' });
-  if(response.error){ alert(response.error); return response; }
+  if(response.error){ appAlert(response.error); return response; }
   state.community.comments[postId] = (state.community.comments[postId] || []).map(comment => String(comment.id) === String(commentId) ? { ...comment, tombstone:true, bodyText:'', status:'deleted' } : comment);
   renderCommunityCommentsModal(postId);
   return response;
@@ -3397,13 +3502,13 @@ async function deleteCommunityComment(commentId, postId){
 
 async function reportCommunityPost(postId){
   if(!communityServerMode()){
-    alert('Sign in with server Community access to report posts.');
+    appAlert('Sign in with server Community access to report posts.');
     return { skipped:true };
   }
   const reason = 'unsafe_content';
   const response = await window.DJBattleApi.apiRequest('/api/community/reports', { method:'POST', body:{ targetType:'post', targetId:postId, reason, context:'Reported from Community panel' } });
-  if(response.error) alert(response.error);
-  else alert(response.data && response.data.duplicate ? 'Report already queued for review.' : 'Report queued for operator review.');
+  if(response.error) appAlert(response.error);
+  else appAlert(response.data && response.data.duplicate ? 'Report already queued for review.' : 'Report queued for operator review.');
   return response;
 }
 
@@ -3411,7 +3516,7 @@ async function deleteCommunityPost(postId){
   if(!communityServerMode()) return { skipped:true };
   if(!confirm('Delete this post from the community feed? Comments remain as a thread record.')) return { cancelled:true };
   const response = await window.DJBattleApi.apiRequest(`/api/community/posts/${encodeURIComponent(postId)}`, { method:'DELETE' });
-  if(response.error){ alert(response.error); return response; }
+  if(response.error){ appAlert(response.error); return response; }
   state.community.posts = state.community.posts.filter(post => String(post.id) !== String(postId));
   renderPosts();
   if(activeProfileTab === 'posts') renderProfileCommunityPosts();
@@ -6319,7 +6424,7 @@ function attachCrateEditorHandlers(){
   }));
   document.querySelectorAll('[data-crate-duplicate-editor]').forEach(button=>button.onclick=()=>duplicateLibraryCrateOptimistic(button.dataset.crateDuplicateEditor));
   document.querySelectorAll('[data-crate-archive-editor]').forEach(button=>button.onclick=()=>{ if(typeof confirm === 'function' && !confirm('Archive this crate? Audio files will not be deleted.')) return; archiveCrateWithUndo(button.dataset.crateArchiveEditor); });
-  document.querySelectorAll('[data-crate-artwork]').forEach(input=>input.onchange=async e=>{ const result = await attachArtworkToCrate(e.currentTarget.dataset.crateArtwork, e.currentTarget.files && e.currentTarget.files[0]); if(!result.ok) alert(result.error); });
+  document.querySelectorAll('[data-crate-artwork]').forEach(input=>input.onchange=async e=>{ const result = await attachArtworkToCrate(e.currentTarget.dataset.crateArtwork, e.currentTarget.files && e.currentTarget.files[0]); if(!result.ok) appAlert(result.error); });
   document.querySelectorAll('[data-crate-select-all]').forEach(button=>button.onclick=selectAllCrateTracks);
   document.querySelectorAll('[data-crate-clear-selection]').forEach(button=>button.onclick=clearCrateSelection);
   document.querySelectorAll('[data-crate-bulk-remove]').forEach(button=>button.onclick=()=>removeTracksFromCrate(button.dataset.crateBulkRemove, state.crateEditor.selectedTrackIds || []));
@@ -6831,7 +6936,7 @@ function renderLibrary(){
   document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{const editable=getEditableLibraryTrack(b.dataset.remove); if(editable){const removedId=editable.track && editable.track.id; state.library.splice(editable.index,1); if(removedId && !editable.track.serverBacked){ const url=librarySessionAudioUrls.get(String(removedId)); if(url && window.URL && window.URL.revokeObjectURL){ try{ window.URL.revokeObjectURL(url); }catch(e){} } librarySessionAudioUrls.delete(String(removedId)); deleteLibraryAudioBlob(removedId).catch(()=>{}); } persist();renderLibrary();renderStudioLibrary();}});
   document.querySelectorAll('[data-rights-check]').forEach(b=>b.onclick=async(e)=>{const editable=getEditableLibraryTrack(e.currentTarget.dataset.rightsCheck); if(editable){ await runCopyrightCheck(editable.track); renderLibrary(); }});
   document.querySelectorAll('[data-add-playlist]').forEach(b=>b.onclick=()=>{ const editable=getEditableLibraryTrack(b.dataset.addPlaylist); if(editable) addTrackToPlaylist(editable.track); });
-  document.querySelectorAll('[data-artwork-track]').forEach(input=>input.onchange=async(e)=>{ const result = await attachArtworkToTrack(e.currentTarget.dataset.artworkTrack, e.currentTarget.files && e.currentTarget.files[0]); if(!result.ok) alert(result.error); });
+  document.querySelectorAll('[data-artwork-track]').forEach(input=>input.onchange=async(e)=>{ const result = await attachArtworkToTrack(e.currentTarget.dataset.artworkTrack, e.currentTarget.files && e.currentTarget.files[0]); if(!result.ok) appAlert(result.error); });
   document.querySelectorAll('[data-crate-select-track]').forEach(input=>input.onchange=e=>selectCrateTrack(e.currentTarget.dataset.crateSelectTrack, { shift:e.shiftKey, ctrl:e.ctrlKey, meta:e.metaKey, toggle:true }));
   document.querySelectorAll('[data-crate-move]').forEach(button=>button.onclick=()=>reorderCrateTrack(state.libraryFilters.crate, button.dataset.crateTrack, button.dataset.crateMove));
   document.querySelectorAll('tr[data-library-row]').forEach(row=>{
@@ -10881,7 +10986,14 @@ async function addTrackToPlaylist(track){
 }
 
 // Copyright check simulator
-async function runCopyrightCheck(track){ if(!track) return; track.copyrightCheck='Checking'; persist(); renderLibrary(); await new Promise(r=>setTimeout(r,800)); const rand=Math.random(); if(rand<0.6) track.copyrightCheck='No Match Found'; else if(rand<0.85) track.copyrightCheck='Possible Copyright Match'; else track.copyrightCheck='Cleared'; persist(); }
+async function runCopyrightCheck(track){
+  if(!track) return { status:'Not Checked' };
+  // No real copyright service yet: never invent a result.
+  track.copyrightCheck = 'Not Checked';
+  persist();
+  openModal(`<span class="eyebrow accent">COPYRIGHT CHECK</span><h3>Not checked</h3><p style="color:var(--muted)" id="copyright-check-note"><strong>${esc(track.title || track.name || 'This track')}</strong> has not been checked. Automatic copyright checking is <span class="badge-coming-soon">Coming soon</span> — until then, only upload music you own or have rights to battle with.</p><div class="modal-actions"><button class="primary" value="cancel">OK</button></div>`);
+  return { status:'Not Checked', comingSoon:true };
+}
 
 async function renderOfficialRankings(){
   renderRankingsPage();
@@ -10983,7 +11095,7 @@ deckRuntimeManager = StudioModules.deckRuntime.create({
   securePlaybackSource,
   loadNextFromBattlePrepCrate
 });
-function openPremium(msg='Premium unlocks stems, higher storage limits, own-selection battles and advanced analysis.') {openModal(`<span class="eyebrow accent">DJ BATTLE PREMIUM</span><h3>More tools. Same fair rules.</h3><p style="color:var(--muted);line-height:1.6">${msg}</p><div class="panel" style="margin:16px 0"><strong>Premium benefits</strong><p>AI stem separation<br>Stem-enabled battles<br>More cloud-library storage<br>Own-selection battles<br>Advanced analysis</p></div><div class="modal-actions"><button class="ghost" value="cancel">Not now</button><button class="primary" type="button" id="enable-premium">Enable Premium</button></div>`);setTimeout(()=>document.getElementById('enable-premium').onclick=()=>{state.premium=true;document.getElementById('modal').close();renderLibrary();alert('Premium enabled for this session.');},0)}
+function openPremium(msg='Premium unlocks stems, higher storage limits, own-selection battles and advanced analysis.') {openModal(`<span class="eyebrow accent">DJ BATTLE PREMIUM</span><h3>More tools. Same fair rules.</h3><p style="color:var(--muted);line-height:1.6">${esc(msg)}</p><div class="panel" style="margin:16px 0"><strong>Premium benefits</strong><p>AI stem separation<br>Stem-enabled battles<br>More cloud-library storage<br>Own-selection battles<br>Advanced analysis</p></div><div class="modal-actions"><button class="ghost" value="cancel">Not now</button><button class="primary" type="button" id="enable-premium">Enable Premium</button></div>`);setTimeout(()=>document.getElementById('enable-premium').onclick=()=>{state.premium=true;document.getElementById('modal').close();renderLibrary();appAlert('Premium enabled for this session.');},0)}
 document.querySelector('[data-action="premium"]').onclick=()=>openPremium();
 
 // Create Battle: the single rules-based modal behind every Create Battle entry point.
@@ -11180,11 +11292,11 @@ function renderBattleRoom(session){
   // upload handlers
   const uploadFile = document.getElementById('br-upload-file'); const uploadStatus = document.getElementById('br-upload-status'); const uploadProgress = document.querySelector('#br-upload-progress i');
   const setUploadStatus = status=>{ uploadStatus.textContent=status; uploadProgress.style.width=({Draft:'0%', 'Preparing upload':'20%', Uploading:'60%', Verifying:'85%', Uploaded:'90%', Judging:'95%', Completed:'100%', Failed:'100%'}[status]||'0%'); if(['Uploaded','Judging','Completed','Failed'].includes(status)) renderBattleResultProgress(session, status.toLowerCase(), { submissionId:session.submissionId }); };
-  uploadFile.onchange = e=>{ const file=e.target.files[0]; const error=window.DJBattleSubmission?.validateFile(file); if(error){ setUploadStatus('Failed'); alert(error); return; } if(file){ setUploadStatus('Draft'); uploadStatus.textContent=`Draft: ${file.name}`; uploadStatus.title=file.name; } };
+  uploadFile.onchange = e=>{ const file=e.target.files[0]; const error=window.DJBattleSubmission?.validateFile(file); if(error){ setUploadStatus('Failed'); appAlert(error); return; } if(file){ setUploadStatus('Draft'); uploadStatus.textContent=`Draft: ${file.name}`; uploadStatus.title=file.name; } };
   const submitSecureMix = async ()=>{
-    const file=uploadFile.files[0] || window.lastRecordedMixFile; if(!file){ alert('Choose a mix file first.'); return; }
+    const file=uploadFile.files[0] || window.lastRecordedMixFile; if(!file){ appAlert('Choose a mix file first.'); return; }
     const result=await window.DJBattleSubmission.submitMix({ apiRequest:window.DJBattleApi.apiRequest, supabase:window.supabase, battleId:session.id, file, onStatus:setUploadStatus, battleContext:buildBattleSubmissionContext(session) });
-    if(result.error){ setUploadStatus('Failed'); alert(result.error); return; }
+    if(result.error){ setUploadStatus('Failed'); appAlert(result.error); return; }
     const completedFromPoll = await completeFromJudgingEndpoint(session, result.submissionId, setUploadStatus, { attempts: 2, intervalMs: 1500 });
     if(completedFromPoll && completedFromPoll.battle) return;
     document.getElementById('br-judge-placeholder').innerHTML='<div class="panel"><strong>Mix uploaded securely.</strong><p style="color:var(--muted)">Waiting for processing.</p></div>';
@@ -11204,27 +11316,27 @@ function wireLifecycleBattleRoom(session){
   const readyBtn = document.getElementById('br-ready');
   if(readyBtn) readyBtn.onclick = async () => {
     const result = await setServerBattleReady(session, true);
-    if(result.error) alert(result.error);
+    if(result.error) appAlert(result.error);
   };
   const notReadyBtn = document.getElementById('br-not-ready');
   if(notReadyBtn) notReadyBtn.onclick = async () => {
     const result = await setServerBattleReady(session, false);
-    if(result.error) alert(result.error);
+    if(result.error) appAlert(result.error);
   };
   const serverStartBtn = document.getElementById('br-server-start');
   if(serverStartBtn) serverStartBtn.onclick = async () => {
     const result = await startServerBattleFromRoom(session);
-    if(result.error) alert(result.error);
+    if(result.error) appAlert(result.error);
   };
   const cancelBtn = document.getElementById('br-cancel');
   if(cancelBtn) cancelBtn.onclick = async () => {
     const result = await cancelServerBattleFromRoom(session);
-    if(result.error) alert(result.error);
+    if(result.error) appAlert(result.error);
   };
   const withdrawBtn = document.getElementById('br-withdraw');
   if(withdrawBtn) withdrawBtn.onclick = async () => {
     const result = await withdrawServerBattleEntryFromRoom(session);
-    if(result.error) alert(result.error);
+    if(result.error) appAlert(result.error);
   };
   const uploadFile = document.getElementById('br-upload-file');
   const uploadStatus = document.getElementById('br-upload-status');
@@ -11236,7 +11348,7 @@ function wireLifecycleBattleRoom(session){
   };
   document.getElementById('br-start').onclick = ()=>{
     if(session.battleEntryId && session.battlePrepSyncStatus === 'server'){
-      startServerBattleFromRoom(session).then(result => { if(result.error) alert(result.error); });
+      startServerBattleFromRoom(session).then(result => { if(result.error) appAlert(result.error); });
       return;
     }
     if(session.status === 'completed') return;
@@ -11273,7 +11385,7 @@ function wireLifecycleBattleRoom(session){
       window.pendingBattleSubmissionSource = 'uploaded_mix';
       const file=e.target.files[0];
       const error=window.DJBattleSubmission?.validateFile(file);
-      if(error){ setUploadStatus('Failed'); alert(error); return; }
+      if(error){ setUploadStatus('Failed'); appAlert(error); return; }
       if(file){ mixUploadState.file = file; setUploadStatus('Draft'); uploadStatus.textContent=`Draft: ${file.name}`; uploadStatus.title=file.name; }
     };
   }
@@ -11281,18 +11393,18 @@ function wireLifecycleBattleRoom(session){
   if(cancelUploadBtn) cancelUploadBtn.onclick = () => cancelMixUpload();
   const submitSecureMix = async ()=>{
     if(session.submissionId && !['failed','retryable_failed'].includes(String(session.submissionStatus || '').toLowerCase())){
-      alert('This battle entry already has a submission in progress.');
+      appAlert('This battle entry already has a submission in progress.');
       return;
     }
     const file=(uploadFile && uploadFile.files && uploadFile.files[0]) || mixUploadState.file || window.lastRecordedMixFile;
-    if(!file){ alert('Choose a mix file first.'); return; }
+    if(!file){ appAlert('Choose a mix file first.'); return; }
     mixUploadState.file = file;
-    if(!window.DJBattleSubmission || !window.DJBattleApi){ alert('Authenticated upload is unavailable.'); return; }
+    if(!window.DJBattleSubmission || !window.DJBattleApi){ appAlert('Authenticated upload is unavailable.'); return; }
     const submissionSource = window.pendingBattleSubmissionSource === 'battle_studio' ? 'battle_studio' : 'uploaded_mix';
     window.pendingBattleSubmissionSource = 'uploaded_mix';
     const upload = beginMixUploadUi(file);
     const result=await window.DJBattleSubmission.submitMix({ apiRequest:window.DJBattleApi.apiRequest, supabase:window.supabase, battleId:session.battleId || session.id, file, onStatus:setUploadStatus, onProgress:upload.onProgress, signal:upload.signal, battleContext:buildBattleSubmissionContext(session), submissionSource });
-    if(result.error){ finishMixUploadUi(result); if(!result.cancelled){ setUploadStatus('Failed'); alert(result.error); } return; }
+    if(result.error){ finishMixUploadUi(result); if(!result.cancelled){ setUploadStatus('Failed'); appAlert(result.error); } return; }
     finishMixUploadUi(result);
     session.submissionId = result.submissionId;
     session.submissionStatus = 'uploaded';
@@ -11332,6 +11444,7 @@ function wireLifecycleBattleRoom(session){
   });
   document.getElementById('br-leave').onclick = ()=>{ if(timerInt){ clearInterval(timerInt); timerInt=null; } stopBattleRoomLiveSync(); persistActiveBattleSession(session); switchView('battles'); };
   if(session.battleEntryId && session.battlePrepSyncStatus === 'server') scheduleBattleRoomLiveSync(session);
+  guardBattleRoomButtons();
 }
 
 function renderBattleStudioContext(session){
@@ -11429,7 +11542,7 @@ function timerText(){
 function resetTimer(m=10){clearInterval(timerInt);timerInt=null;timerSeconds=m*60;timerText();const tbtn=document.getElementById('timer-toggle'); if(tbtn) tbtn.textContent='Start'; const brnote=document.getElementById('br-timer-note'); if(brnote) brnote.textContent='Ready';}
 document.getElementById('timer-toggle').onclick=()=>{if(timerInt){clearInterval(timerInt);timerInt=null;document.getElementById('timer-toggle').textContent='Start';return;}document.getElementById('timer-toggle').textContent='Pause';timerInt=setInterval(()=>{timerSeconds--;timerText();if(timerSeconds<=0){clearInterval(timerInt);timerInt=null;document.getElementById('timer-toggle').textContent='Done';}},1000)};
 
-document.getElementById('judge-score-preview').onclick=()=>{const cats=[['Timing',20],['Phrasing',20],['Transition',20],['EQ / Frequency',15],['Energy',10],['Creativity',10],['Audio',5]];let total=0;const scores=cats.map(([n,m])=>{const s=Math.max(Math.floor(m*.7),Math.floor(m*(.78+Math.random()*.2)));total+=s;return [n,s,m]});document.getElementById('score-breakdown').innerHTML=scores.map(x=>`<div class="score-chip">${x[0]} <strong>${x[1]}/${x[2]}</strong></div>`).join('')+`<div class="score-chip" style="grid-column:1/-1;color:var(--accent)">PRACTICE SCORE <strong style="color:var(--accent)">${total}/100</strong></div>`;};
+document.getElementById('judge-score-preview').onclick=()=>{const cats=[['Timing',20],['Phrasing',20],['Transition',20],['EQ / Frequency',15],['Energy',10],['Creativity',10],['Audio',5]];document.getElementById('score-breakdown').innerHTML=`<div class="score-chip preview-label" style="grid-column:1/-1"><strong>PREVIEW</strong> — how a battle is scored. Real scores appear after a judged battle.</div>`+cats.map(x=>`<div class="score-chip">${esc(x[0])} <strong>— / ${x[1]}</strong></div>`).join('')+`<div class="score-chip" style="grid-column:1/-1;color:var(--accent)">TOTAL <strong style="color:var(--accent)">— / 100</strong></div>`;};
 
 function recoverActiveBattleSession(){
   const saved = safeParse('djBattleActiveSession', null);
@@ -11496,7 +11609,7 @@ document.addEventListener('change', event => {
   if(!file || !trackId) return;
   attachLibraryAudioBlob(trackId, file).then(result => {
     if(!result.ok){
-      alert(result.error || 'Could not re-attach audio');
+      appAlert(result.error || 'Could not re-attach audio');
       return;
     }
     persist();
