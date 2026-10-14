@@ -6092,6 +6092,29 @@ function filterLibraryTracks(){
   }
   return sortLibraryTracks(rows);
 }
+function libraryTotalBeforeSearch(){
+  const saved = state.libraryFilters.search;
+  state.libraryFilters.search = '';
+  try { return filterLibraryTracks().length; } finally { state.libraryFilters.search = saved; }
+}
+function librarySearchCountText(shown, total){
+  const noun = total === 1 ? 'track' : 'tracks';
+  return String(state.libraryFilters.search || '').trim() ? `${shown} of ${total} ${noun}` : `${total} ${noun}`;
+}
+function updateLibrarySearchUi(shown, total){
+  const count = document.getElementById('library-search-count');
+  if(count) count.textContent = librarySearchCountText(shown, total);
+  const clear = document.getElementById('library-search-clear');
+  if(clear) clear.hidden = !String(state.libraryFilters.search || '');
+}
+function clearLibrarySearch(){
+  state.libraryFilters.search = '';
+  const search = document.getElementById('global-search');
+  if(search) search.value = '';
+  renderLibrary();
+  if(typeof renderStreamBrowser === 'function') renderStreamBrowser('');
+  if(search) search.focus();
+}
 function updateLibraryCrateCounts(){
   const rows = allLibraryTracks();
   const counts = {
@@ -6693,6 +6716,9 @@ function renderLibrary(){
   if(sortField) sortField.onchange = e => { state.librarySort.field = e.target.value || 'title'; persistLibraryUiState(); renderLibrary(); };
   if(sortDirection) sortDirection.onclick = () => { state.librarySort.direction = state.librarySort.direction === 'desc' ? 'asc' : 'desc'; persistLibraryUiState(); renderLibrary(); };
   if(search) search.oninput = e => { state.libraryFilters.search = e.target.value || ''; renderLibrary(); renderStreamBrowser(state.libraryFilters.search); };
+  if(search) search.onkeydown = e => { if(e.key === 'Escape' && search.value){ e.preventDefault(); clearLibrarySearch(); } };
+  const searchClear = document.getElementById('library-search-clear');
+  if(searchClear) searchClear.onclick = () => clearLibrarySearch();
   if(compatibleOnly) compatibleOnly.onchange = e => { state.libraryFilters.compatibleOnly = Boolean(e.target.checked); renderLibrary(); };
   const playerToggle = document.getElementById('library-player-toggle');
   if(playerToggle) playerToggle.onclick = toggleLibraryPlayer;
@@ -6708,7 +6734,14 @@ function renderLibrary(){
   const selectedCrateIds = new Set(state.crateEditor.selectedTrackIds || []);
   const selected = getLibraryTrackById(state.selectedLibraryTrackId) || getLibraryTrackById(state.libraryPlayer.trackId) || rows[0] || null;
   if(selected) state.selectedLibraryTrackId = selected.libraryId;
-  if(!rows.length){
+  const searchTerm = String(state.libraryFilters.search || '').trim();
+  const totalTracks = libraryTotalBeforeSearch();
+  updateLibrarySearchUi(rows.length, totalTracks);
+  if(!rows.length && searchTerm){
+    body.innerHTML=`<tr class="library-empty-row"><td colspan="9"><div class="library-empty-state"><strong>Nothing matches “${esc(searchTerm)}”</strong><small>Try a different title, artist, genre, BPM or key.</small><button type="button" class="text-btn library-empty-reset" data-library-search-reset>Clear search</button></div></td></tr>`;
+    const reset = body.querySelector('[data-library-search-reset]');
+    if(reset) reset.onclick = () => clearLibrarySearch();
+  } else if(!rows.length){
     body.innerHTML='<tr><td colspan="9"><small>No tracks match this crate, search or compatibility filter.</small></td></tr>';
   } else {
     body.innerHTML=rows.map((t)=>`

@@ -291,7 +291,11 @@
           </aside>
           <section class="library-panel library-browser" id="library-browser">
             <div class="library-console">
-              <input id="global-search" placeholder="Search title, artist, genre, BPM or key" />
+              <div class="library-search-wrap">
+                <input id="global-search" type="search" aria-label="Search library" aria-describedby="library-search-count" placeholder="Search title, artist, genre, BPM or key" />
+                <button type="button" id="library-search-clear" class="library-search-clear" aria-label="Clear search" title="Clear search (Esc)" hidden>&times;</button>
+              </div>
+              <span id="library-search-count" class="library-search-count" aria-live="polite"></span>
               <select id="library-sort-field" aria-label="Sort music library">
                 <option value="title">Title</option>
                 <option value="artist">Artist</option>
