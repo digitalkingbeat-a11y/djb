@@ -1590,15 +1590,57 @@ function showNeedMoreTracks(b, missing){
   setTimeout(()=>{ const btn=document.getElementById('need-tracks-library'); if(btn) btn.onclick=()=>{ document.getElementById('modal').close(); if(typeof switchView==='function') switchView('library'); }; },0);
 }
 
-function generatePracticeScore(){
-  const categories=[['Timing',18+Math.random()*8],['Beatmatching',16+Math.random()*8],['Phrasing',15+Math.random()*8],['Transition Quality',15+Math.random()*8],['Creativity',14+Math.random()*8],['Scratching',10+Math.random()*12],['Musicality',17+Math.random()*8],['Energy Flow',15+Math.random()*8],['Rule Compliance',18+Math.random()*8]];
-  let total=0;
-  const scored = categories.map(([label, raw]) => {
-    const fixed = Math.min(20, Math.max(8, Number(raw.toFixed(1))));
-    total += fixed;
-    return {label, score: fixed};
+const PRACTICE_SCORE_NOTE = 'How this is scored: each category comes from things the app can measure in your mix — length, number of tracks, transitions, and BPM/key data when tracks have it. If that data is missing, a fixed fingerprint of the mix name is used, so the same mix always gets the same breakdown. This is a preview, not a judged result.';
+function stableHash(str){
+  let h = 2166136261;
+  const s = String(str || '');
+  for(let i=0;i<s.length;i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h >>> 0;
+}
+function practiceDurationSeconds(v){
+  if(typeof v === 'number' && isFinite(v)) return v;
+  const m = String(v || '').match(/^(\d+):(\d{1,2})$/);
+  return m ? Number(m[1])*60 + Number(m[2]) : 0;
+}
+function buildPracticeMixInput(name){
+  const tracks = (state && Array.isArray(state.library) ? state.library : []).filter(t => t && t.battleEligible).slice(0, 12);
+  return { id: name, name, tracks: tracks.map(t => ({ name: t.name || t.title || '', durationSec: practiceDurationSeconds(t.durationSec || t.duration), bpm: Number(t.bpm) || 0, key: t.key || '' })) };
+}
+function generatePracticeScore(mix){
+  const input = (mix && typeof mix === 'object') ? mix : { name: String(mix || 'Practice Session') };
+  const tracks = Array.isArray(input.tracks) ? input.tracks : [];
+  const seed = stableHash(`${input.id || ''}|${input.name || ''}|${tracks.map(t => t.name).join(',')}`);
+  // seeded jitter in [0,1) per category (no randomness)
+  const jit = i => (((seed >>> (i % 24)) ^ Math.imul(seed, i + 7)) >>> 0) % 1000 / 1000;
+  const n = tracks.length;
+  const durations = tracks.map(t => Number(t.durationSec) || 0).filter(d => d > 0);
+  const total = Number(input.durationSec) || durations.reduce((a,b)=>a+b,0);
+  const bpms = tracks.map(t => Number(t.bpm) || 0).filter(b => b > 0);
+  const keys = tracks.map(t => t.key).filter(Boolean);
+  const transitions = Number.isFinite(Number(input.transitions)) && input.transitions !== undefined ? Number(input.transitions) : Math.max(0, n - 1);
+  const clamp01 = x => Math.max(0, Math.min(1, x));
+  // measurable factors in 0..1; null when data is missing
+  let bpmSmooth = null;
+  if(bpms.length > 1){ let d=0; for(let i=1;i<bpms.length;i++) d += Math.abs(bpms[i]-bpms[i-1]); bpmSmooth = clamp01(1 - (d/(bpms.length-1))/20); }
+  let keyFlow = null;
+  if(keys.length > 1){ let same=0; for(let i=1;i<keys.length;i++) if(keys[i]===keys[i-1] || String(keys[i]).slice(0,-1)===String(keys[i-1]).slice(0,-1)) same++; keyFlow = clamp01(0.4 + 0.6*same/(keys.length-1)); }
+  const lengthFit = total > 0 ? clamp01(1 - Math.abs(total - 600)/900) : null;
+  const variety = n > 0 ? clamp01(new Set(tracks.map(t=>t.name)).size / 8) : null;
+  const transRate = total > 0 && transitions > 0 ? clamp01((transitions / (total/60)) / 0.6) : (transitions > 0 ? clamp01(transitions/8) : null);
+  const f = (v, i) => v === null ? jit(i) : 0.75*v + 0.25*jit(i);
+  const spec = [
+    ['Timing', 12, 8, bpmSmooth], ['Beatmatching', 11, 9, bpmSmooth], ['Phrasing', 11, 8, lengthFit],
+    ['Transition Quality', 10, 10, transRate], ['Creativity', 10, 10, variety], ['Scratching', 8, 12, null],
+    ['Musicality', 11, 9, keyFlow], ['Energy Flow', 10, 10, bpms.length ? clamp01((Math.max(...bpms)-Math.min(...bpms))/30) : null],
+    ['Rule Compliance', 14, 6, n > 0 ? 1 : null]
+  ];
+  let sum = 0;
+  const breakdown = spec.map(([label, base, range, v], i) => {
+    const score = Math.min(20, Math.max(8, Number((base + range * f(v, i+1)).toFixed(1))));
+    sum += score;
+    return { label, score };
   });
-  return {total: Math.round(total), breakdown: scored};
+  return { total: Math.round(sum), breakdown, basis: (bpmSmooth!==null||keyFlow!==null||lengthFit!==null||n>0) ? 'mix' : 'fingerprint' };
 }
 
 function getAiHighScoreRows(){
@@ -2528,8 +2570,8 @@ function openPracticeMode(battleName='Practice Session', battleType='Practice', 
   setTimeout(()=>{
     const getBtn=document.getElementById('get-ai-rating'); if(!getBtn) return;
     getBtn.onclick=()=>{
-      const score = generatePracticeScore();
-      const result = `<span class="eyebrow accent">AI RATING</span><h3>${esc(battleName)}</h3><div class="score-breakdown">${score.breakdown.map(item=>`<div class="score-chip">${esc(item.label)} <strong>${item.score.toFixed(1)}/20</strong></div>`).join('')}<div class="score-chip" style="grid-column:1/-1;color:var(--accent)">TOTAL <strong style="color:var(--accent)">${score.total}/180</strong></div></div><div class="modal-actions"><button class="ghost" value="cancel">Close</button><button class="primary" type="button" id="save-practice-rating">Save Session</button></div>`;
+      const score = generatePracticeScore(buildPracticeMixInput(battleName));
+      const result = `<span class="eyebrow accent">AI RATING · PREVIEW</span><h3>${esc(battleName)}</h3><p class="how-scored-note" id="how-scored-note" style="color:var(--muted);font-size:.85em">${esc(PRACTICE_SCORE_NOTE)}</p><div class="score-breakdown">${score.breakdown.map(item=>`<div class="score-chip">${esc(item.label)} <strong>${item.score.toFixed(1)}/20</strong></div>`).join('')}<div class="score-chip" style="grid-column:1/-1;color:var(--accent)">TOTAL <strong style="color:var(--accent)">${score.total}/180</strong></div></div><div class="modal-actions"><button class="ghost" value="cancel">Close</button><button class="primary" type="button" id="save-practice-rating">Save Session</button></div>`;
       openModal(result);
       setTimeout(()=>{
         const saveBtn=document.getElementById('save-practice-rating'); if(!saveBtn) return; saveBtn.onclick=()=>{
