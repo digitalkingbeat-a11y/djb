@@ -63,12 +63,20 @@
         if(right) right.style.width = '8%';
         return;
       }
+      // Real master levels (AnalyserNode RMS) from the deck runtime; 0 when nothing is playing.
       meterTimer = setInterval(()=>{
-        const l = 18 + Math.round(Math.random() * 76);
-        const r = 18 + Math.round(Math.random() * 76);
-        if(left) left.style.width = `${l}%`;
-        if(right) right.style.width = `${r}%`;
-      }, 160);
+        const levels = deps.getMasterLevels ? deps.getMasterLevels() : null;
+        const toPct = lv => {
+          if(!lv || !(lv.rms > 0)) return 0;
+          const db = 20 * Math.log10(lv.rms * 1.41);
+          return Math.round(Math.max(0, Math.min(1, (db + 48) / 48)) * 100);
+        };
+        [[left, levels && levels.left], [right, levels && levels.right]].forEach(([el, lv]) => {
+          if(!el) return;
+          el.style.width = `${toPct(lv)}%`;
+          el.classList.toggle('clip', Boolean(lv && lv.clip));
+        });
+      }, 100);
       if(meterTimer && typeof meterTimer.unref === 'function') meterTimer.unref();
     }
 
@@ -79,8 +87,44 @@
       return { ok:true };
     }
 
+    function tracklistLines(list){
+      const fmt = deps.formatTracklistTime || (ms => { const t = Math.floor(ms / 1000); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2,'0')}`; });
+      return (list || []).map(t => ({ time:fmt(t.ms), title:t.title, artist:t.artist || '', text:`${fmt(t.ms)} ${t.title}${t.artist ? ` - ${t.artist}` : ''}` }));
+    }
+
+    function renderTracklist(){
+      const target = doc.getElementById('recording-tracklist');
+      if(!target) return;
+      const lines = tracklistLines(state.studioRecording && state.studioRecording.tracklist);
+      if(!lines.length){
+        target.innerHTML = `<div class="tracklist-head"><span class="eyebrow">TRACKLIST</span></div><small class="tracklist-empty">No tracks were played on the decks during this take.</small>`;
+        return;
+      }
+      target.innerHTML = `<div class="tracklist-head"><span class="eyebrow">TRACKLIST</span><button class="ghost small" id="copy-tracklist" type="button">Copy</button></div><ol class="tracklist-lines">${lines.map(l => `<li><time>${esc(l.time)}</time><span>${esc(l.title)}${l.artist ? ` <small>${esc(l.artist)}</small>` : ''}</span></li>`).join('')}</ol>`;
+      const copy = doc.getElementById('copy-tracklist');
+      if(copy) copy.onclick = () => copyTracklist().then(r => { copy.textContent = r.ok ? 'Copied' : 'Copy failed'; setTimeout(() => { copy.textContent = 'Copy'; }, 1500); });
+    }
+
+    async function copyTracklist(){
+      const text = tracklistLines(state.studioRecording && state.studioRecording.tracklist).map(l => l.text).join('\n');
+      if(!text) return { ok:false, text };
+      try{
+        const nav = win.navigator;
+        if(nav && nav.clipboard && nav.clipboard.writeText){ await nav.clipboard.writeText(text); return { ok:true, text }; }
+      }catch(e){}
+      try{
+        const ta = doc.createElement('textarea');
+        ta.value = text; doc.body.appendChild(ta); ta.select();
+        const ok = doc.execCommand ? doc.execCommand('copy') : false;
+        ta.remove();
+        return { ok:Boolean(ok), text };
+      }catch(e){ return { ok:false, text }; }
+    }
+
     function finishRecording(){
       clearInterval(recordingTimer);
+      const startedAtMs = state.studioRecording.startedAt;
+      const tracklist = deps.getTracklist && startedAtMs ? deps.getTracklist(startedAtMs, now()) : [];
       animateMeters(false);
       const elapsedMs = state.studioRecording.elapsedMs || (state.studioRecording.startedAt ? now() - state.studioRecording.startedAt : 0);
       const name = `dj-battle-take-${now()}.webm`;
@@ -90,9 +134,10 @@
       win.lastRecordedMixFile = FileCtor && blob ? new FileCtor([blob], name, { type:'audio/webm' }) : blob;
       if(objectUrl && win.URL && win.URL.revokeObjectURL) win.URL.revokeObjectURL(objectUrl);
       objectUrl = blob && win.URL && win.URL.createObjectURL ? win.URL.createObjectURL(blob) : '';
-      state.studioRecording = { ...state.studioRecording, state:'review', armed:false, startedAt:null, elapsedMs, fileName:name, duration:elapsedText(elapsedMs), error:'', submitted:false };
+      state.studioRecording = { ...state.studioRecording, state:'review', armed:false, startedAt:null, elapsedMs, fileName:name, duration:elapsedText(elapsedMs), error:'', submitted:false, tracklist };
       persist();
       renderWaveform();
+      renderTracklist();
       updateUi();
     }
 
@@ -216,9 +261,14 @@
       if(saveButton) saveButton.onclick = saveDraft;
       if(submitButton) submitButton.onclick = submit;
       updateUi();
+      renderTracklist();
     }
 
     return {
+      renderTracklist,
+      copyTracklist,
+      tracklistLines,
+      finishRecording,
       isActive,
       elapsedText,
       persist,

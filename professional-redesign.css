@@ -1644,3 +1644,34 @@ time.rel-time{color:inherit}
 .library-filter-chips[hidden]{display:none}
 .library-filter-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;border:1px solid #c6ff00;background:rgba(198,255,0,.1);color:#c6ff00;font:inherit;font-size:12px;cursor:pointer}
 .library-filter-chip span{font-size:14px;line-height:1}
+
+/* Studio audio: sync/key/loop, EQ values, real meters, real waveform, tracklist */
+.deck-control-grid button.active{background:#1d2511;border-color:var(--accent,#b9ff31);color:var(--accent,#b9ff31)}
+.deck-control-grid button:disabled{opacity:.45;cursor:not-allowed}
+.loop-size{background:#0d1117;border:1px solid #2b3441;border-radius:8px;color:#e9edf4;font-size:11px;padding:6px}
+.mixer-channel label output{display:block;font-size:10px;color:var(--accent,#b9ff31);font-variant-numeric:tabular-nums;text-align:center}
+.meter{position:relative;height:8px;background:#1a2029;border-radius:5px;overflow:hidden}
+.meter > i{display:block;height:100%;width:0;background:linear-gradient(90deg,#86d800,#b9ff31 70%,#ffd23f 88%,#ff5b6e);transition:width .06s linear}
+.meter.clipping{box-shadow:0 0 0 1px #ff5b6e}
+.channel-meter.clipping i{box-shadow:0 0 0 1px #ff5b6e}
+.meter.clipping::after,.channel-meter.clipping::after{content:"CLIP";position:absolute;right:3px;top:-1px;font-size:8px;font-weight:900;color:#ff5b6e}
+.channel-meter{position:relative}
+.channel-meter i{display:block;position:relative;height:60px;width:10px;margin:4px auto 0;background:#1a2029;border-radius:4px;overflow:hidden}
+.channel-meter i::before{content:"";position:absolute;left:0;right:0;bottom:0;height:calc(var(--level,0) * 100%);background:linear-gradient(0deg,#86d800,#b9ff31 70%,#ffd23f 88%,#ff5b6e)}
+.record-meters i{transition:width .08s linear}
+.record-meters i.clip{background:#ff5b6e!important}
+.wave{cursor:pointer;background:linear-gradient(180deg,#121820,#171e28)!important}
+.wave:after{display:none}
+.wave .wave-overview{position:absolute;inset:4px 0;display:flex;align-items:center;gap:1px;padding:0 2px}
+.wave .wave-overview .wave-seg{flex:1;min-width:1px;background:#4f6b2a;border-radius:1px}
+.wave .wave-overview.real .wave-seg{background:linear-gradient(180deg,#b9ff31,#6c9e14)}
+.wave .wave-pending{margin:auto;font-size:10px;color:var(--muted,#929bab)}
+.wave .position-marker{position:absolute;top:0;bottom:0;left:0;width:2px;background:#fff;box-shadow:0 0 6px rgba(255,255,255,.7);pointer-events:none;z-index:3}
+.wave .loop-region{position:absolute;top:0;bottom:0;background:rgba(185,255,49,.18);border-left:2px solid #b9ff31;border-right:2px solid #b9ff31;pointer-events:none;z-index:2}
+.recording-tracklist{margin:12px 0;padding:12px;border:1px solid var(--line,#252c38);border-radius:12px;background:#0d1117}
+.tracklist-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.tracklist-lines{margin:0;padding:0;list-style:none;display:grid;gap:6px}
+.tracklist-lines li{display:flex;gap:12px;font-size:13px}
+.tracklist-lines time{color:var(--accent,#b9ff31);font-variant-numeric:tabular-nums;min-width:44px}
+.tracklist-lines small{color:var(--muted,#929bab);margin-left:6px}
+.tracklist-empty{color:var(--muted,#929bab)}

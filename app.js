@@ -963,6 +963,7 @@ function deckShellHtml(deck, label){
             <button class="ghost small" data-sync="${deck}" type="button">Sync</button>
             <button class="ghost small" data-keylock="${deck}" type="button">Key</button>
             <button class="ghost small" data-loop="${deck}" type="button">Loop</button>
+            <select class="loop-size" id="loop-size-${deck}" aria-label="Deck ${label} loop size" title="Loop length in beats">${[1,2,4,8,16].map(b => `<option value="${b}" ${b === 4 ? 'selected' : ''}>${b} beat${b === 1 ? '' : 's'}</option>`).join('')}</select>
             <button class="ghost small" data-set-cue="${deck}" type="button">Set Cue</button>
             <button class="ghost small" data-hotcue="${deck}" type="button">Hot Cue</button>
           </div>
@@ -1046,20 +1047,20 @@ function installProfessionalShell(){
           <div class="mixer-channels">
             <div class="mixer-channel">
               <strong>CH A</strong>
-              <label>Gain<input id="gain-a" type="range" min="0" max="1.4" step="0.01" value="1"></label>
-              <label>High<input id="eq-high-a" type="range" min="-12" max="12" step="1" value="0"></label>
-              <label>Mid<input id="eq-mid-a" type="range" min="-12" max="12" step="1" value="0"></label>
-              <label>Low<input id="eq-low-a" type="range" min="-12" max="12" step="1" value="0"></label>
+              <label title="Double-click to reset">Gain<input id="gain-a" type="range" min="0" max="1.4" step="0.01" value="1"><output id="gain-a-out">0.0 dB</output></label>
+              <label title="Double-click to reset">High<input id="eq-high-a" type="range" min="-12" max="12" step="1" value="0"><output id="eq-high-a-out">0 dB</output></label>
+              <label title="Double-click to reset">Mid<input id="eq-mid-a" type="range" min="-12" max="12" step="1" value="0"><output id="eq-mid-a-out">0 dB</output></label>
+              <label title="Double-click to reset">Low<input id="eq-low-a" type="range" min="-12" max="12" step="1" value="0"><output id="eq-low-a-out">0 dB</output></label>
               <label>Filter<input id="filter-a" type="range" min="-1" max="1" step="0.01" value="0"></label>
               <label>Fader<input id="vol-a" type="range" min="0" max="1" step="0.01" value="1"></label>
               <button class="ghost small" type="button">Cue</button>
             </div>
             <div class="mixer-channel">
               <strong>CH B</strong>
-              <label>Gain<input id="gain-b" type="range" min="0" max="1.4" step="0.01" value="1"></label>
-              <label>High<input id="eq-high-b" type="range" min="-12" max="12" step="1" value="0"></label>
-              <label>Mid<input id="eq-mid-b" type="range" min="-12" max="12" step="1" value="0"></label>
-              <label>Low<input id="eq-low-b" type="range" min="-12" max="12" step="1" value="0"></label>
+              <label title="Double-click to reset">Gain<input id="gain-b" type="range" min="0" max="1.4" step="0.01" value="1"><output id="gain-b-out">0.0 dB</output></label>
+              <label title="Double-click to reset">High<input id="eq-high-b" type="range" min="-12" max="12" step="1" value="0"><output id="eq-high-b-out">0 dB</output></label>
+              <label title="Double-click to reset">Mid<input id="eq-mid-b" type="range" min="-12" max="12" step="1" value="0"><output id="eq-mid-b-out">0 dB</output></label>
+              <label title="Double-click to reset">Low<input id="eq-low-b" type="range" min="-12" max="12" step="1" value="0"><output id="eq-low-b-out">0 dB</output></label>
               <label>Filter<input id="filter-b" type="range" min="-1" max="1" step="0.01" value="0"></label>
               <label>Fader<input id="vol-b" type="range" min="0" max="1" step="0.01" value="1"></label>
               <button class="ghost small" type="button">Cue</button>
@@ -1118,6 +1119,7 @@ function installProfessionalShell(){
       <section class="panel recording-review hidden" id="recording-review">
         <div class="section-head compact"><div><span class="eyebrow">BATTLE RECORDING REVIEW</span><h3 id="recording-review-title">Take ready</h3></div><strong id="recording-duration">00:00</strong></div>
         <div class="review-waveform" id="recording-waveform"></div>
+        <div class="recording-tracklist" id="recording-tracklist" aria-live="polite"></div>
         <audio id="recording-review-audio" controls></audio>
         <div class="review-meta" id="recording-metadata"></div>
         <div class="modal-actions"><button class="ghost" id="restart-recording" type="button">Restart Recording</button><button class="ghost" id="save-recording-draft" type="button">Save Draft</button><button class="primary" id="submit-recording" type="button">Submit Battle</button></div>
@@ -11825,6 +11827,9 @@ const studioRecordingManager = StudioModules.recording.create({
   getAudioContext: () => deckRuntimeManager && deckRuntimeManager.getAudioContext(),
   getRecordingDestination: () => deckRuntimeManager && deckRuntimeManager.getRecordingDestination(),
   getMediaRecorder: () => window.MediaRecorder,
+  getMasterLevels: () => deckRuntimeManager && deckRuntimeManager.masterLevels ? deckRuntimeManager.masterLevels() : null,
+  getTracklist: (start, end) => deckRuntimeManager && deckRuntimeManager.tracklistBetween ? deckRuntimeManager.tracklistBetween(start, end) : [],
+  formatTracklistTime: ms => window.DJBattleDeckRuntime && window.DJBattleDeckRuntime.formatTracklistTime ? window.DJBattleDeckRuntime.formatTracklistTime(ms) : String(ms),
   activeStudioBattleSession,
   switchView
 });
