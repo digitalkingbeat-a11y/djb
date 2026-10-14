@@ -15,7 +15,7 @@ const state = {
     {user:'Turntablist T', initials:'TT', room:'Scratching', time:'22m', title:'Ahh/Fresh 60-second practice', body:'Working on cleaner rhythm and faster chirps. What should I tighten up?', media:'Scratch Practice #14', likes:31, comments:12},
     {user:'Juno', initials:'JU', room:'Promo Feed', time:'1h', title:'Friday rooftop set', body:'Uploading the full mix after the event. Tech House → UKG.', media:null, likes:12, comments:4}
   ],
-  practiceHistory: JSON.parse(localStorage.getItem('djBattlePracticeHistory') || '[]'),
+  practiceHistory: safeParse('djBattlePracticeHistory', []),
   battleResults: safeParse('djBattleBattleResults', []),
   battleProgress: safeParse('djBattleBattleProgress', null) || { xp: 0, rating: 0, rankingRating: 0, wins: 0, losses: 0, belt: 'White' },
   operatorUser: false,
@@ -88,7 +88,7 @@ const state = {
 state.battleProgress = { xp: 0, rating: 0, rankingRating: 0, wins: 0, losses: 0, belt: 'White', ...state.battleProgress };
 state.publicRankings.filters = { country:'all', belt:'all', relationship:'all', ...(state.publicRankings.filters || {}) };
 state.librarySort = safeParse('djBattleLibrarySort', null) || { field:'title', direction:'asc' };
-state.libraryFilters = { crate:'all', search:'', compatibleOnly:false };
+state.libraryFilters = Object.assign({ crate:'all', search:'', compatibleOnly:false }, (function(){ const saved = safeParse('djBattleLibraryFilters', null); return saved && typeof saved === 'object' ? { crate:typeof saved.crate === 'string' ? saved.crate : 'all', search:typeof saved.search === 'string' ? saved.search.slice(0,120) : '', compatibleOnly:Boolean(saved.compatibleOnly) } : {}; })());
 state.battleFormatFilter = 'all';
 state.battleViewTab = localStorage.getItem('djBattleBattleViewTab') || 'open';
 state.battleLayout = localStorage.getItem('djBattleBattleLayout') || 'list';
@@ -551,6 +551,175 @@ function showAppToast(title, summary){
   return toast;
 }
 
+
+// In-app replacement for window.alert: shows a toast instead of a browser pop-up.
+function appAlert(message, title){
+  const text = String(message && message.message || message || '');
+  const isError = /fail|error|unable|could not|unavailable|required|invalid|denied|choose|sign in/i.test(text);
+  const toast = showAppToast(title || (isError ? 'Heads up' : 'Notice'), text);
+  if(toast && isError) toast.classList.add('notification-toast--warn');
+  return toast;
+}
+if(typeof window !== 'undefined') window.appAlert = appAlert;
+
+// In-app confirm dialog (never window.confirm). Resolves true/false.
+function appConfirm({ title='Are you sure?', body='', confirmLabel='Confirm', cancelLabel='Cancel', danger=false } = {}){
+  return new Promise(resolve => {
+    document.querySelectorAll('.app-confirm-overlay').forEach(el => el.remove());
+    const overlay = document.createElement('div');
+    overlay.className = 'app-confirm-overlay' + (danger ? ' app-confirm-overlay--danger' : '');
+    overlay.innerHTML = `<div class="app-confirm" role="alertdialog" aria-modal="true" aria-labelledby="app-confirm-title"><span class="eyebrow accent">CONFIRM</span><h3 id="app-confirm-title">${esc(title)}</h3><p>${esc(body)}</p><div class="modal-actions"><button class="ghost" type="button" data-app-confirm-cancel>${esc(cancelLabel)}</button><button class="${danger ? 'danger-btn' : 'primary'}" type="button" data-app-confirm-ok>${esc(confirmLabel)}</button></div></div>`;
+    const done = value => { overlay.remove(); resolve(value); };
+    overlay.querySelector('[data-app-confirm-ok]').onclick = () => done(true);
+    overlay.querySelector('[data-app-confirm-cancel]').onclick = () => done(false);
+    overlay.addEventListener('keydown', e => { if(e.key === 'Escape') done(false); });
+    document.body.appendChild(overlay);
+    const ok = overlay.querySelector('[data-app-confirm-ok]'); if(ok && ok.focus) ok.focus();
+  });
+}
+if(typeof window !== 'undefined') window.appConfirm = appConfirm;
+function appConfirmDanger(title, body, confirmLabel){ return appConfirm({ title, body, confirmLabel, cancelLabel:'Keep it', danger:true }); }
+
+// Error toast with an optional Retry button.
+function showErrorToast(message, retry){
+  const toast = showAppToast('Something went wrong', String(message && message.message || message || 'Please try again.'));
+  if(!toast) return toast;
+  toast.classList.add('notification-toast--error');
+  toast.setAttribute('role', 'alert');
+  if(typeof retry === 'function'){
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'toast-retry'; btn.textContent = 'Retry'; btn.setAttribute('data-toast-retry', '');
+    btn.onclick = () => { toast.remove(); try { const r = retry(); if(r && typeof r.catch === 'function') r.catch(err => showErrorToast(err)); } catch(err){ showErrorToast(err); } };
+    toast.appendChild(btn);
+  }
+  return toast;
+}
+// Run a button action; if it throws or returns { error }, show an error toast (with Retry when safe).
+async function runAction(fn, { label='That action', retry=true } = {}){
+  try {
+    const result = await fn();
+    if(result && result.error && !result.cancelled) showErrorToast(`${label} failed: ${result.error}`, retry ? () => runAction(fn, { label, retry }) : null);
+    return result;
+  } catch(err){
+    showErrorToast(`${label} failed. ${err && err.message ? err.message : ''}`.trim(), retry ? () => runAction(fn, { label, retry }) : null);
+    return { error: err && err.message || String(err) };
+  }
+}
+// Global safety net: friendly toast for uncaught errors, at most one every 8 seconds.
+let lastGlobalErrorToastAt = 0;
+let lastClickedButton = null, lastClickedAt = 0;
+function handleGlobalError(reason){
+  const now = Date.now();
+  if(now - lastGlobalErrorToastAt < 8000) return false;
+  lastGlobalErrorToastAt = now;
+  const btn = lastClickedButton && now - lastClickedAt < 5000 && lastClickedButton.isConnected && !lastClickedButton.classList.contains('danger') && !lastClickedButton.hasAttribute('data-no-retry') ? lastClickedButton : null;
+  showErrorToast('Something didn\'t work. Your work is safe; try again.', btn ? () => btn.click() : null);
+  return true;
+}
+if(typeof window !== 'undefined' && window.addEventListener){
+  document.addEventListener('click', e => { const b = e.target && e.target.closest && e.target.closest('button'); if(b && !b.closest('.notification-toast')){ lastClickedButton = b; lastClickedAt = Date.now(); } }, true);
+  window.addEventListener('error', e => { if(e && e.error) handleGlobalError(e.error); });
+  window.addEventListener('unhandledrejection', e => handleGlobalError(e && e.reason));
+}
+
+// Shared relative time: "Just now", "5 min ago", "3 hr ago", "Yesterday", "4 days ago", then a date after a week.
+function relativeTimeLabel(value, nowMs){
+  if(value === null || value === undefined || value === '') return '';
+  const time = typeof value === 'number' ? value : new Date(value).getTime();
+  if(!Number.isFinite(time)) return String(value);
+  const now = nowMs === undefined ? Date.now() : nowMs;
+  const diff = Math.max(0, Math.round((now - time) / 1000));
+  if(diff < 45) return 'Just now';
+  if(diff < 3600) return `${Math.max(1, Math.round(diff / 60))} min ago`;
+  const startToday = new Date(now); startToday.setHours(0,0,0,0);
+  if(time >= startToday.getTime()) return `${Math.round(diff / 3600)} hr ago`;
+  if(time >= startToday.getTime() - 86400000) return 'Yesterday';
+  const days = Math.ceil((startToday.getTime() - time) / 86400000);
+  if(days < 7) return `${days} days ago`;
+  return new Date(time).toLocaleDateString(undefined, { month:'short', day:'numeric', year:'numeric' });
+}
+function relativeTimeHtml(value){
+  const label = relativeTimeLabel(value);
+  if(!label) return 'not synced';
+  const d = new Date(value);
+  const iso = Number.isFinite(d.getTime()) ? d.toISOString() : '';
+  return `<time class="rel-time" ${iso ? `datetime="${esc(iso)}" title="${esc(d.toLocaleString())}"` : ''}>${esc(label)}</time>`;
+}
+
+// Wrap a button's click handler: ask first, then lock the button while it runs (blocks double taps).
+function guardActionButton(button, dialog){
+  if(!button) return;
+  const original = button.onclick;
+  if(typeof original !== 'function' || original.__guarded) return;
+  const guarded = async event => {
+    if(button.disabled || button.dataset.busy === '1') return;
+    button.dataset.busy = '1';
+    button.disabled = true;
+    try {
+      const ok = await appConfirm(dialog);
+      if(!ok) return;
+      await original.call(button, event);
+    } finally {
+      button.dataset.busy = '';
+      button.disabled = false;
+    }
+  };
+  guarded.__guarded = true;
+  button.onclick = guarded;
+}
+function guardBattleRoomButtons(){
+  const g = (id, dialog) => guardActionButton(document.getElementById(id), dialog);
+  g('br-start', { title:'Start the battle?', body:'The battle clock starts now for this room.', confirmLabel:'Start battle' });
+  g('br-server-start', { title:'Start the battle?', body:'This starts the battle for every DJ in the room.', confirmLabel:'Start battle' });
+  g('br-end', { title:'End the battle now?', body:'Your set is locked and the room moves to submission.', confirmLabel:'End & lock set' });
+  g('br-upload-btn', { title:'Submit this mix?', body:'Once submitted, your mix goes to judging and cannot be swapped.', confirmLabel:'Submit mix' });
+  g('br-submit-btn', { title:'Submit this mix again?', body:'This retries the upload and sends it to judging.', confirmLabel:'Retry & submit' });
+}
+if(typeof window !== 'undefined') window.guardBattleRoomButtons = guardBattleRoomButtons;
+
+// Text limits: maxlength + live "N/max" counters for text boxes, including forms built later.
+function textLimitFor(el){
+  const key = `${el.id || ''} ${el.name || ''} ${el.getAttribute('placeholder') || ''}`.toLowerCase();
+  if(/bio|about/.test(key)) return 280;
+  if(/comment|reply/.test(key)) return 500;
+  if(/post|body|content|desc|message|notes?\b/.test(key) || el.tagName === 'TEXTAREA') return el.tagName === 'TEXTAREA' && /post|body|content/.test(key) ? 2000 : (el.tagName === 'TEXTAREA' ? 1000 : 500);
+  if(/crate/.test(key)) return 60;
+  if(/title|playlist|battle/.test(key)) return 120;
+  if(/name|handle|dj|artist|genre|city|location|tag/.test(key)) return 60;
+  return 0;
+}
+function applyTextLimits(root){
+  const scope = root && root.querySelectorAll ? root : document;
+  scope.querySelectorAll('input:not([type]), input[type="text"], textarea').forEach(el => {
+    if(el.dataset.limitApplied === '1') return;
+    let max = Number(el.getAttribute('maxlength')) || 0;
+    if(!max){ max = textLimitFor(el); if(!max) return; el.setAttribute('maxlength', String(max)); }
+    el.dataset.limitApplied = '1';
+    const counter = document.createElement('small');
+    counter.className = 'char-counter';
+    counter.setAttribute('aria-live', 'polite');
+    const update = () => {
+      const n = String(el.value || '').length;
+      counter.textContent = `${n}/${max}`;
+      counter.classList.toggle('near-limit', n >= max * 0.9);
+    };
+    el.addEventListener('input', update);
+    update();
+    el.insertAdjacentElement('afterend', counter);
+  });
+}
+if(typeof window !== 'undefined'){
+  window.applyTextLimits = applyTextLimits;
+  const startLimits = () => {
+    applyTextLimits(document);
+    if(typeof MutationObserver === 'function' && document.body){
+      let pending = false;
+      new MutationObserver(() => { if(pending) return; pending = true; setTimeout(() => { pending = false; applyTextLimits(document); }, 0); }).observe(document.body, { childList:true, subtree:true });
+    }
+  };
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startLimits); else setTimeout(startLimits, 0);
+}
+
 async function shareCurrentProfile(){
   const profileId = currentPublicProfileShareId();
   if(!profileId){
@@ -770,6 +939,9 @@ function persistCrateEditorState(){
 }
 function persist(){localStorage.setItem('djBattleLibrary',JSON.stringify(sanitizedLibraryForStorage(state.library.filter(track => !track.serverBacked))));localStorage.setItem('djBattlePlaylists',JSON.stringify(sanitizedCratesForStorage(state.playlists.filter(crate => !crate.serverBacked))));localStorage.setItem('djBattlePosts',JSON.stringify(state.posts));persistCrateEditorState();if(state.musicLibrarySync && state.musicLibrarySync.accountId){ persistLibraryCacheForAccount(state.musicLibrarySync.accountId); persistCrateCacheForAccount(state.musicLibrarySync.accountId); }}
 function esc(s=''){return String(s ?? '').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+// escapeHtml: use for every user-typed string that goes into innerHTML.
+function escapeHtml(s=''){ return esc(s); }
+if(typeof window !== 'undefined') window.escapeHtml = escapeHtml;
 
 function deckShellHtml(deck, label){
   return `
@@ -791,6 +963,7 @@ function deckShellHtml(deck, label){
             <button class="ghost small" data-sync="${deck}" type="button">Sync</button>
             <button class="ghost small" data-keylock="${deck}" type="button">Key</button>
             <button class="ghost small" data-loop="${deck}" type="button">Loop</button>
+            <select class="loop-size" id="loop-size-${deck}" aria-label="Deck ${label} loop size" title="Loop length in beats">${[1,2,4,8,16].map(b => `<option value="${b}" ${b === 4 ? 'selected' : ''}>${b} beat${b === 1 ? '' : 's'}</option>`).join('')}</select>
             <button class="ghost small" data-set-cue="${deck}" type="button">Set Cue</button>
             <button class="ghost small" data-hotcue="${deck}" type="button">Hot Cue</button>
           </div>
@@ -799,7 +972,9 @@ function deckShellHtml(deck, label){
             <div class="meter" id="meter-${deck}"><i></i></div>
             <div class="lcd-screen small deck-time" id="time-${deck}">0:00</div>
           </div>
+          <div class="hotcue-pads" id="hotcue-pads-${deck}" aria-label="Deck ${label} hot cues"></div>
           <div class="deck-cues" id="cues-${deck}"></div>
+          <div class="mixes-next" id="mixes-next-${deck}" aria-live="polite"></div>
         </div>
       </div>
       <button class="ghost small deck-file-load" data-load="${deck}" type="button">Load Local File</button>
@@ -812,12 +987,12 @@ function installProfessionalShell(){
   const nav = document.getElementById('nav');
   if(nav){
     const items = [
+      ['dashboard','HM','Home'],
       ['battles','BT','Battles'],
       ['studio','ST','Battle Studio'],
       ['library','ML','Music Library'],
       ['community','CM','Community'],
       ['rankings','RK','Rankings'],
-      ['tour','VT','Virtual Tour'],
       ['activity','AC','Activity'],
       ['profile','PR','Profile'],
       ['settings','SE','Settings']
@@ -861,6 +1036,8 @@ function installProfessionalShell(){
         <button class="ghost small" id="stop-record" type="button" disabled>STOP</button>
         <span class="record-state" id="record-status">Recording idle</span>
         <strong id="record-timer">00:00</strong>
+        <div class="record-countin hidden" id="record-countin" aria-live="assertive"></div>
+        <small class="record-time-left hidden" id="record-time-left"></small>
         <div class="record-meters" aria-label="Recording input meters"><i id="record-meter-l"></i><i id="record-meter-r"></i></div>
       </div>
       <div class="studio-grid professional-studio-grid">
@@ -871,28 +1048,42 @@ function installProfessionalShell(){
           <div class="mixer-channels">
             <div class="mixer-channel">
               <strong>CH A</strong>
-              <label>Gain<input id="gain-a" type="range" min="0" max="1.4" step="0.01" value="1"></label>
-              <label>High<input id="eq-high-a" type="range" min="-12" max="12" step="1" value="0"></label>
-              <label>Mid<input id="eq-mid-a" type="range" min="-12" max="12" step="1" value="0"></label>
-              <label>Low<input id="eq-low-a" type="range" min="-12" max="12" step="1" value="0"></label>
-              <label>Filter<input id="filter-a" type="range" min="-1" max="1" step="0.01" value="0"></label>
+              <label title="Double-click to reset">Gain<input id="gain-a" type="range" min="0" max="1.4" step="0.01" value="1"><output id="gain-a-out">0.0 dB</output></label>
+              <label title="Double-click to reset">High<input id="eq-high-a" type="range" min="-12" max="12" step="1" value="0"><output id="eq-high-a-out">0 dB</output></label>
+              <label title="Double-click to reset">Mid<input id="eq-mid-a" type="range" min="-12" max="12" step="1" value="0"><output id="eq-mid-a-out">0 dB</output></label>
+              <label title="Double-click to reset">Low<input id="eq-low-a" type="range" min="-12" max="12" step="1" value="0"><output id="eq-low-a-out">0 dB</output></label>
+              <label class="filter-knob" title="Left: low-pass. Right: high-pass. Double-click to center (off)">Filter<input id="filter-a" type="range" min="-1" max="1" step="0.01" value="0"><output id="filter-a-out">Off</output></label>
+              <div class="send-fx" aria-label="Channel A effects">
+                <label>Echo<select id="echo-beats-a" aria-label="Echo time, Deck A"><option value="0">Off</option><option value="0.25">1/4</option><option value="0.5">1/2</option><option value="1">1 beat</option></select></label>
+                <label>Echo wet<input id="echo-wet-a" type="range" min="0" max="0.9" step="0.01" value="0.35"><output id="echo-a-out">Off</output></label>
+                <label>Reverb<input id="reverb-wet-a" type="range" min="0" max="1" step="0.01" value="0"><output id="reverb-a-out">Off</output></label>
+              </div>
               <label>Fader<input id="vol-a" type="range" min="0" max="1" step="0.01" value="1"></label>
-              <button class="ghost small" type="button">Cue</button>
+              <button class="ghost small pfl-btn" type="button" data-pfl="a" aria-pressed="false" title="Send Channel A to the headphone cue">&#127911; CUE</button>
             </div>
             <div class="mixer-channel">
               <strong>CH B</strong>
-              <label>Gain<input id="gain-b" type="range" min="0" max="1.4" step="0.01" value="1"></label>
-              <label>High<input id="eq-high-b" type="range" min="-12" max="12" step="1" value="0"></label>
-              <label>Mid<input id="eq-mid-b" type="range" min="-12" max="12" step="1" value="0"></label>
-              <label>Low<input id="eq-low-b" type="range" min="-12" max="12" step="1" value="0"></label>
-              <label>Filter<input id="filter-b" type="range" min="-1" max="1" step="0.01" value="0"></label>
+              <label title="Double-click to reset">Gain<input id="gain-b" type="range" min="0" max="1.4" step="0.01" value="1"><output id="gain-b-out">0.0 dB</output></label>
+              <label title="Double-click to reset">High<input id="eq-high-b" type="range" min="-12" max="12" step="1" value="0"><output id="eq-high-b-out">0 dB</output></label>
+              <label title="Double-click to reset">Mid<input id="eq-mid-b" type="range" min="-12" max="12" step="1" value="0"><output id="eq-mid-b-out">0 dB</output></label>
+              <label title="Double-click to reset">Low<input id="eq-low-b" type="range" min="-12" max="12" step="1" value="0"><output id="eq-low-b-out">0 dB</output></label>
+              <label class="filter-knob" title="Left: low-pass. Right: high-pass. Double-click to center (off)">Filter<input id="filter-b" type="range" min="-1" max="1" step="0.01" value="0"><output id="filter-b-out">Off</output></label>
+              <div class="send-fx" aria-label="Channel B effects">
+                <label>Echo<select id="echo-beats-b" aria-label="Echo time, Deck B"><option value="0">Off</option><option value="0.25">1/4</option><option value="0.5">1/2</option><option value="1">1 beat</option></select></label>
+                <label>Echo wet<input id="echo-wet-b" type="range" min="0" max="0.9" step="0.01" value="0.35"><output id="echo-b-out">Off</output></label>
+                <label>Reverb<input id="reverb-wet-b" type="range" min="0" max="1" step="0.01" value="0"><output id="reverb-b-out">Off</output></label>
+              </div>
               <label>Fader<input id="vol-b" type="range" min="0" max="1" step="0.01" value="1"></label>
-              <button class="ghost small" type="button">Cue</button>
+              <button class="ghost small pfl-btn" type="button" data-pfl="b" aria-pressed="false" title="Send Channel B to the headphone cue">&#127911; CUE</button>
             </div>
           </div>
-          <label class="crossfader">Crossfader<input id="xfader" type="range" min="-1" max="1" step="0.01" value="0"></label>
+          <label class="crossfader">Crossfader<input id="xfader" type="range" min="-1" max="1" step="0.01" value="0"><output id="xfader-out">A 71% / B 71%</output></label>
           <label class="master-level">Master<input id="master-level" type="range" min="0" max="1.2" step="0.01" value="1"></label>
-          <div class="fx-row"><button class="ghost small" type="button" disabled>FX 1</button><button class="ghost small" type="button" disabled>FX 2</button><span>FX disabled until mapped by provider/device support.</span></div>
+          <div class="headphone-panel" aria-label="Headphone cue">
+            <label class="cue-mix">Cue / Master<input id="cue-mix" type="range" min="0" max="1" step="0.01" value="0.5"><output id="cue-mix-out">Cue 71% / Master 71%</output></label>
+            <label class="headphone-output">Headphones<span class="hp-row"><select id="headphone-output" aria-label="Headphone output device"><option value="">Choose headphones…</option></select><button class="ghost small" id="headphone-refresh" type="button">Find</button></span></label>
+            <small id="headphone-note" class="headphone-note"></small>
+          </div>
         </section>
         ${deckShellHtml('b', 'B')}
         <section class="panel studio-browser-panel">
@@ -943,12 +1134,13 @@ function installProfessionalShell(){
       <section class="panel recording-review hidden" id="recording-review">
         <div class="section-head compact"><div><span class="eyebrow">BATTLE RECORDING REVIEW</span><h3 id="recording-review-title">Take ready</h3></div><strong id="recording-duration">00:00</strong></div>
         <div class="review-waveform" id="recording-waveform"></div>
+        <div class="recording-tracklist" id="recording-tracklist" aria-live="polite"></div>
         <audio id="recording-review-audio" controls></audio>
         <div class="review-meta" id="recording-metadata"></div>
         <div class="modal-actions"><button class="ghost" id="restart-recording" type="button">Restart Recording</button><button class="ghost" id="save-recording-draft" type="button">Save Draft</button><button class="primary" id="submit-recording" type="button">Submit Battle</button></div>
       </section>
       <div class="studio-analysis-row">
-        <div class="panel ai-panel"><div><span class="eyebrow">JUDGE PANEL</span><h3>Battle Judging</h3><p>Timing / beatmatching / phrase mixing / transitions / technical evidence.</p></div><div class="judge-actions"><button class="primary" id="judge-score-preview" type="button">Generate Practice Score</button><div id="score-breakdown" class="score-breakdown"></div></div></div>
+        <div class="panel ai-panel"><div><span class="eyebrow">JUDGE PANEL</span><h3>Battle Judging</h3><p>Timing / beatmatching / phrase mixing / transitions / technical evidence.</p></div><div class="judge-actions"><button class="primary" id="judge-score-preview" type="button">Preview Scoring</button><div id="score-breakdown" class="score-breakdown"></div></div></div>
         <div class="panel" id="how-close-wrap"><div><span class="eyebrow">HOW CLOSE WAS I?</span><h3>Timing Accuracy Inspector</h3><p>Compare target landings with measured timing markers.</p></div><div class="judge-actions"><button class="ghost" id="hc-run-timing" type="button">Analyze Timing</button><button class="ghost" id="run-judge-analysis" type="button">Run Judge Analysis</button></div></div>
       </div>`;
   }
@@ -961,7 +1153,7 @@ function installProfessionalShell(){
 function installAuxiliaryViews(){
   const main = document.querySelector('.main');
   if(!main) return;
-  if(!document.getElementById('tour')){
+  if(false && !document.getElementById('tour')){
     const section = document.createElement('section');
     section.id = 'tour';
     section.className = 'view';
@@ -979,20 +1171,28 @@ function installAuxiliaryViews(){
     const section = document.createElement('section');
     section.id = 'settings';
     section.className = 'view';
-    section.innerHTML = `<div class="product-page-head"><div><span class="eyebrow accent">SETTINGS</span><h2>Settings</h2></div></div><div class="settings-grid"><section class="panel"><span class="eyebrow">TOUR</span><h3>Virtual Tour</h3><p>Replay the product walkthrough from the navigation at any time.</p><button class="primary small" data-view-target="tour" type="button">Open Tour</button></section><section class="panel"><span class="eyebrow">STUDIO</span><h3>Device Preferences</h3><p>Controller and audio device choices are browser-scoped and never imply unsupported output routing.</p><button class="ghost small" data-view-target="studio" type="button">Open Studio Setup</button></section><section class="panel"><span class="eyebrow">ACCOUNT</span><h3>Profile Controls</h3><p>Public profile, relationships, battle history, and privacy controls stay in Profile.</p><button class="ghost small" data-view-target="profile" type="button">Open Profile</button></section></div>`;
+    section.innerHTML = `<div class="product-page-head"><div><span class="eyebrow accent">SETTINGS</span><h2>Settings</h2></div></div><div class="settings-grid"><section class="panel" id="settings-data-panel"><span class="eyebrow">YOUR DATA</span><h3>Back up &amp; restore</h3><p>Everything you make here lives in this browser. Save one backup file, restore it on any browser, or start fresh.</p><div class="settings-data-actions"><button class="primary small" id="settings-backup" type="button">Back up my data</button><button class="ghost small" id="settings-restore" type="button">Restore from backup</button><button class="ghost small danger" id="settings-reset" type="button">Reset</button><input id="settings-restore-file" type="file" accept=".json,application/json" hidden></div><small id="settings-data-status" class="settings-data-status"></small></section><section class="panel" id="settings-tour-panel"><span class="eyebrow">TOUR</span><h3>Guided tour</h3><p>Walk through the app again, one step at a time.</p><button class="primary small" id="settings-replay-tour" type="button">Replay tour</button></section><section class="panel"><span class="eyebrow">STUDIO</span><h3>Device Preferences</h3><p>Controller and audio device choices are browser-scoped and never imply unsupported output routing.</p><button class="ghost small" data-view-target="studio" type="button">Open Studio Setup</button></section><section class="panel"><span class="eyebrow">ACCOUNT</span><h3>Profile Controls</h3><p>Public profile, relationships, battle history, and privacy controls stay in Profile.</p><button class="ghost small" data-view-target="profile" type="button">Open Profile</button></section></div>`;
     main.insertBefore(section, document.getElementById('operations') || null);
   }
 }
 
 installProfessionalShell();
 function switchView(view){
+  if(view === 'tour'){
+    // The old Virtual Tour page is gone; any link to it now opens the guided pop-up tour.
+    activeTourStep = 0;
+    return startGuidedTour();
+  }
   if(isStudioRecordingActive() && view !== 'studio'){
-    const proceed = typeof confirm === 'function' ? confirm('A recording is in progress. Leave Battle Studio and risk losing the active take?') : false;
-    if(!proceed) return false;
+    if(!switchView.__force){
+      appConfirmDanger('Leave Battle Studio?', 'A recording is in progress. Leaving now risks losing the active take.', 'Leave Studio').then(ok => { if(ok){ switchView.__force = true; try { switchView(view); } finally { switchView.__force = false; } } });
+      return false;
+    }
   }
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===view));
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
   document.getElementById('page-title').textContent=pageTitles[view]||'DJ Battle';
+  if(state.shareTitle) setShareMeta('', '');
   if(view === 'operations'){
     renderJudgingOperationsAccess();
     if(state.operatorUser) loadJudgingOperationsStatus();
@@ -1009,10 +1209,10 @@ function switchView(view){
     loadDjNotifications({ preserve:true }).catch(err=>console.warn('Notification refresh failed', err));
   }
   if(view === 'activity'){
+    markActivitySeenForTitle();
     renderActivityPage();
     loadDjNotifications({ preserve:true }).catch(err=>console.warn('Activity refresh failed', err));
   }
-  if(view === 'tour') renderVirtualTour();
   if(view === 'settings') renderSettingsPage();
   if(view === 'community') loadCommunityFeed({ preserve:true }).catch(err=>console.warn('Community refresh failed', err));
   if(view === 'battles') loadServerBattleLobby({ render:false }).then(()=>renderBattles()).catch(err=>console.warn('Battle lobby refresh failed', err));
@@ -1026,6 +1226,11 @@ function switchView(view){
 }
 document.querySelectorAll('[data-view-target]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.viewTarget)));
 document.querySelectorAll('.nav-btn').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
+const brandHome = document.getElementById('brand-home');
+if(brandHome){
+  brandHome.addEventListener('click',()=>switchView('dashboard'));
+  brandHome.addEventListener('keydown',event=>{ if(event.key === 'Enter' || event.key === ' '){ event.preventDefault(); switchView('dashboard'); } });
+}
 const sidebarToggle = document.getElementById('sidebar-toggle');
 if(sidebarToggle){
   const collapsed = localStorage.getItem('djBattleSidebarCollapsed') === '1';
@@ -1097,6 +1302,7 @@ function battleCard(b){
     <div class="battle-row-cell"><span>State</span><strong>${esc(status)}</strong></div>
     <div class="battle-row-cell"><span>Start</span><strong>${esc(startCondition)}</strong></div>
     <button class="${b.premiumRequired?'ghost':'primary'} small enter tone-action" data-enter="${esc(b.id)}" ${b.joinable === false || ['full','matched','started','active','submission_pending','judging','completed'].includes(rawStatus) ? 'disabled' : ''}>${b.premiumRequired?'Premium':'Join'}</button>
+    ${crowdVoteCardButtonHtml(b)}
     <p>${esc(b.desc || '')}</p>
     <span class="tag battle-status-tag">${esc(status)}</span>
   </article>`;
@@ -1466,20 +1672,68 @@ function assignTracksForBattle(b,num){
     for(let i=0;i<num;i++){assigned.push(pool[i]);} 
   } else {
     for(let i=0;i<pool.length;i++) assigned.push(pool[i]);
-    for(let i=assigned.length;i<num;i++) assigned.push(`Assignment pending track ${i+1}`);
   }
   return assigned;
 }
+function missingBattleTracks(assigned, num){
+  return Math.max(0, Number(num || 0) - (assigned || []).filter(Boolean).length);
+}
+function showNeedMoreTracks(b, missing){
+  openModal(`<span class="eyebrow accent">NOT ENOUGH TRACKS</span><h3>Need ${missing} more track${missing === 1 ? '' : 's'}</h3><p style="color:var(--muted)" id="need-more-tracks-note">"${esc(b.title || 'This battle')}" needs a real track in every slot before it can start. Upload or mark tracks as battle-eligible in your Music Library.</p><div class="modal-actions"><button class="ghost" value="cancel">Close</button><button class="primary" type="button" id="need-tracks-library">Open Library</button></div>`);
+  setTimeout(()=>{ const btn=document.getElementById('need-tracks-library'); if(btn) btn.onclick=()=>{ document.getElementById('modal').close(); if(typeof switchView==='function') switchView('library'); }; },0);
+}
 
-function generatePracticeScore(){
-  const categories=[['Timing',18+Math.random()*8],['Beatmatching',16+Math.random()*8],['Phrasing',15+Math.random()*8],['Transition Quality',15+Math.random()*8],['Creativity',14+Math.random()*8],['Scratching',10+Math.random()*12],['Musicality',17+Math.random()*8],['Energy Flow',15+Math.random()*8],['Rule Compliance',18+Math.random()*8]];
-  let total=0;
-  const scored = categories.map(([label, raw]) => {
-    const fixed = Math.min(20, Math.max(8, Number(raw.toFixed(1))));
-    total += fixed;
-    return {label, score: fixed};
+const PRACTICE_SCORE_NOTE = 'How this is scored: each category comes from things the app can measure in your mix — length, number of tracks, transitions, and BPM/key data when tracks have it. If that data is missing, a fixed fingerprint of the mix name is used, so the same mix always gets the same breakdown. This is a preview, not a judged result.';
+function stableHash(str){
+  let h = 2166136261;
+  const s = String(str || '');
+  for(let i=0;i<s.length;i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h >>> 0;
+}
+function practiceDurationSeconds(v){
+  if(typeof v === 'number' && isFinite(v)) return v;
+  const m = String(v || '').match(/^(\d+):(\d{1,2})$/);
+  return m ? Number(m[1])*60 + Number(m[2]) : 0;
+}
+function buildPracticeMixInput(name){
+  const tracks = (state && Array.isArray(state.library) ? state.library : []).filter(t => t && t.battleEligible).slice(0, 12);
+  return { id: name, name, tracks: tracks.map(t => ({ name: t.name || t.title || '', durationSec: practiceDurationSeconds(t.durationSec || t.duration), bpm: Number(t.bpm) || 0, key: t.key || '' })) };
+}
+function generatePracticeScore(mix){
+  const input = (mix && typeof mix === 'object') ? mix : { name: String(mix || 'Practice Session') };
+  const tracks = Array.isArray(input.tracks) ? input.tracks : [];
+  const seed = stableHash(`${input.id || ''}|${input.name || ''}|${tracks.map(t => t.name).join(',')}`);
+  // seeded jitter in [0,1) per category (no randomness)
+  const jit = i => (((seed >>> (i % 24)) ^ Math.imul(seed, i + 7)) >>> 0) % 1000 / 1000;
+  const n = tracks.length;
+  const durations = tracks.map(t => Number(t.durationSec) || 0).filter(d => d > 0);
+  const total = Number(input.durationSec) || durations.reduce((a,b)=>a+b,0);
+  const bpms = tracks.map(t => Number(t.bpm) || 0).filter(b => b > 0);
+  const keys = tracks.map(t => t.key).filter(Boolean);
+  const transitions = Number.isFinite(Number(input.transitions)) && input.transitions !== undefined ? Number(input.transitions) : Math.max(0, n - 1);
+  const clamp01 = x => Math.max(0, Math.min(1, x));
+  // measurable factors in 0..1; null when data is missing
+  let bpmSmooth = null;
+  if(bpms.length > 1){ let d=0; for(let i=1;i<bpms.length;i++) d += Math.abs(bpms[i]-bpms[i-1]); bpmSmooth = clamp01(1 - (d/(bpms.length-1))/20); }
+  let keyFlow = null;
+  if(keys.length > 1){ let same=0; for(let i=1;i<keys.length;i++) if(keys[i]===keys[i-1] || String(keys[i]).slice(0,-1)===String(keys[i-1]).slice(0,-1)) same++; keyFlow = clamp01(0.4 + 0.6*same/(keys.length-1)); }
+  const lengthFit = total > 0 ? clamp01(1 - Math.abs(total - 600)/900) : null;
+  const variety = n > 0 ? clamp01(new Set(tracks.map(t=>t.name)).size / 8) : null;
+  const transRate = total > 0 && transitions > 0 ? clamp01((transitions / (total/60)) / 0.6) : (transitions > 0 ? clamp01(transitions/8) : null);
+  const f = (v, i) => v === null ? jit(i) : 0.75*v + 0.25*jit(i);
+  const spec = [
+    ['Timing', 12, 8, bpmSmooth], ['Beatmatching', 11, 9, bpmSmooth], ['Phrasing', 11, 8, lengthFit],
+    ['Transition Quality', 10, 10, transRate], ['Creativity', 10, 10, variety], ['Scratching', 8, 12, null],
+    ['Musicality', 11, 9, keyFlow], ['Energy Flow', 10, 10, bpms.length ? clamp01((Math.max(...bpms)-Math.min(...bpms))/30) : null],
+    ['Rule Compliance', 14, 6, n > 0 ? 1 : null]
+  ];
+  let sum = 0;
+  const breakdown = spec.map(([label, base, range, v], i) => {
+    const score = Math.min(20, Math.max(8, Number((base + range * f(v, i+1)).toFixed(1))));
+    sum += score;
+    return { label, score };
   });
-  return {total: Math.round(total), breakdown: scored};
+  return { total: Math.round(sum), breakdown, basis: (bpmSmooth!==null||keyFlow!==null||lengthFit!==null||n>0) ? 'mix' : 'fingerprint' };
 }
 
 function getAiHighScoreRows(){
@@ -1519,6 +1773,26 @@ function getAiHighScoreRows(){
   return rows.sort((a,b)=>b.best-a.best || b.average-a.average).map((row,index)=>({ ...row, rank:index+1 }));
 }
 
+const SAMPLE_RANKINGS_TAG = 'Sample rankings — not live';
+function setSampleRankingsTag(container, id, show){
+  if(!container || !container.parentNode) return;
+  let tag = document.getElementById(id);
+  if(show && !tag){
+    tag = document.createElement('div');
+    tag.id = id;
+    tag.className = 'sample-rankings-tag';
+    tag.innerHTML = `<i></i>${esc(SAMPLE_RANKINGS_TAG)}`;
+    container.parentNode.insertBefore(tag, container);
+  }else if(!show && tag){ tag.remove(); }
+}
+function sampleRankingsHtml(){
+  const me = currentUser().displayName;
+  const rows = rankings.filter(row => !isCurrentUserName(row[1]));
+  const body = rows.map(row => `<tr><td>#${esc(row[0])}</td><td><strong>${esc(row[1])}</strong></td><td>${esc(row[2])}</td><td>${esc(row[3])}</td><td>${esc(row[6])}</td></tr>`).join('')
+    + `<tr class="sample-you-row"><td><span class="unranked-label">Unranked</span></td><td><strong>${esc(me)} (you)</strong></td><td>—</td><td>—</td><td>—</td></tr>`;
+  return `<div class="sample-rankings-tag" id="rankings-sample-tag"><i></i>${esc(SAMPLE_RANKINGS_TAG)}</div><div class="table-wrap"><table class="sample-rankings-table"><thead><tr><th>Rank</th><th>DJ</th><th>Genre</th><th>Record</th><th>Rating</th></tr></thead><tbody>${body}</tbody></table></div><p class="sample-rankings-note">The server can't be reached, so these are built-in examples. You show as Unranked until real results load.</p>`;
+}
+
 function renderAiLeaderboard(filter='Global'){
   const aiTarget = document.getElementById('ai-ranking-table');
   if(!aiTarget) return;
@@ -1531,17 +1805,18 @@ function renderAiLeaderboard(filter='Global'){
       const rows = resp.rows;
       const tableBody = rows.length ? rows.map(row => `
         <tr>
-          <td>#${row.rank}</td>
+          <td>#${esc(row.rank)}</td>
           <td><strong>${esc(row.dj)}</strong></td>
-          <td>${row.best}</td>
-          <td>${row.average}</td>
-          <td>${row.attempts}</td>
-          <td>${row.last}</td>
-          <td>${row.best}</td>
-          <td>${row.genre || filter || 'Global'}</td>
+          <td>${esc(row.best)}</td>
+          <td>${esc(row.average)}</td>
+          <td>${esc(row.attempts)}</td>
+          <td>${esc(row.last)}</td>
+          <td>${esc(row.best)}</td>
+          <td>${esc(row.genre || filter || 'Global')}</td>
         </tr>
       `).join('') : '<tr><td colspan="8">No solo scores yet.</td></tr>';
       aiTarget.innerHTML = tableBody;
+      setSampleRankingsTag(aiTarget.closest('.table-wrap'), 'ai-sample-tag', false);
     }).catch(err=>{ console.warn('renderAiLeaderboard live error', err); aiTarget.innerHTML = '<tr><td colspan="8">No solo scores yet.</td></tr>'; });
     return;
   }
@@ -1555,16 +1830,17 @@ function renderAiLeaderboard(filter='Global'){
     return rowType.includes(filterKey) || rowGenre.includes(filterKey) || (filterKey === 'scratch' && rowType.includes('scratch')) || (filterKey === 'transition' && rowType.includes('transition')) || (filterKey === '5-song mix' && rowType.includes('5-song')) || (filterKey === '30-minute mix' && rowType.includes('30')) || (filterKey === '60-minute mix' && rowType.includes('60'));
   });
 
+  setSampleRankingsTag(aiTarget.closest('.table-wrap'), 'ai-sample-tag', true);
   const tableBody = filtered.length ? filtered.map(row => `
-    <tr>
-      <td>#${row.rank}</td>
+    <tr class="${isCurrentUserName(row.dj) ? 'sample-you-row' : ''}">
+      <td>${isCurrentUserName(row.dj) ? '<span class="unranked-label">Unranked</span>' : `#${esc(row.rank)}`}</td>
       <td><strong>${esc(row.dj)}</strong></td>
-      <td>${row.best}</td>
-      <td>${row.average}</td>
-      <td>${row.attempts}</td>
-      <td>${row.last}</td>
-      <td>${row.personalBest}</td>
-      <td>${row.genre || 'Global'}</td>
+      <td>${esc(row.best)}</td>
+      <td>${esc(row.average)}</td>
+      <td>${esc(row.attempts)}</td>
+      <td>${esc(row.last)}</td>
+      <td>${esc(row.personalBest)}</td>
+      <td>${esc(row.genre || 'Global')}</td>
     </tr>
   `).join('') : '<tr><td colspan="8">No solo scores yet.</td></tr>';
 
@@ -1596,13 +1872,25 @@ function cloneBattleProgressSnapshot(progress = state.battleProgress){
   };
 }
 
+// Rank only against real, server-confirmed leaderboard rows. The built-in sample
+// table (Nova Cut, Maya Mixx, Juno...) is never used. Returns null when no live data.
+function liveRankingRatings(){
+  const pr = state.publicRankings || {};
+  if(pr.status !== 'synced' && !pr.stale) return null;
+  const rows = (pr.rows || []).filter(row => Number(row.rating) > 0 && !isCurrentUserName(row.displayName || row.dj || row.name));
+  return rows.length ? rows.map(row => Number(row.rating)) : null;
+}
 function localRankForRating(rating){
-  const rows = rankings
-    .filter(row => !isCurrentUserName(row[1]))
-    .map(row => Number(row[6] || 0))
-    .concat(Number(rating || 0))
-    .sort((a,b)=>b-a);
-  return rows.findIndex(value => value === Number(rating || 0)) + 1;
+  const live = liveRankingRatings();
+  if(!live) return null;
+  const value = Number(rating || 0);
+  return live.filter(r => r > value).length + 1;
+}
+function rankMovementModule(before, after){
+  if(before && after){
+    return `<strong>#${esc(before)} -> #${esc(after)}</strong><p>${after < before ? 'Moved up' : after > before ? 'Moved down' : 'No rank change'}</p>`;
+  }
+  return `<strong class="rank-estimate-label">Local estimate</strong><p>No live rankings yet. Your rank appears once the server confirms results.</p>`;
 }
 
 function localVerifiedResultId(resultKey){
@@ -1722,7 +2010,160 @@ function buildBattleResultProfileRecord(result, battle, progressionState){
   };
 }
 
+function latestBattleScore(results = state.battleResults){
+  const list = Array.isArray(results) ? results : [];
+  const scored = list.filter(item => item && item.score !== null && item.score !== undefined && item.score !== '' && Number.isFinite(Number(item.score)));
+  if(!scored.length) return null;
+  const time = item => { const t = Date.parse(item.completedAt || ''); return Number.isFinite(t) ? t : 0; };
+  const latest = scored.reduce((best, item) => time(item) > time(best) ? item : best, scored[0]);
+  return { score: Math.round(Number(latest.score)), title: latest.title || 'Latest battle', date: latest.date || '', outcome: latest.outcome || '', record: latest };
+}
+
+function renderHeroScore(){
+  const wrap = document.getElementById('hero-score'); if(!wrap) return;
+  const latest = latestBattleScore();
+  const set = (id, text) => { const node = document.getElementById(id); if(node) node.textContent = text; };
+  if(!latest){
+    wrap.dataset.state = 'empty';
+    set('hero-score-value', '--'); set('hero-score-unit', 'No battles yet');
+    set('hero-score-title', 'Your latest score shows here'); set('hero-score-date', 'Enter a battle to get judged');
+    renderHeroScoreActions(null);
+    return;
+  }
+  wrap.dataset.state = 'scored';
+  set('hero-score-value', String(latest.score)); set('hero-score-unit', '/100');
+  set('hero-score-title', `Latest: ${latest.title}`);
+  set('hero-score-date', [latest.outcome && latest.outcome !== 'recorded' ? latest.outcome.toUpperCase() : '', latest.date].filter(Boolean).join(' · ') || 'Latest battle');
+  renderHeroScoreActions(latest.record);
+}
+
+function renderHeroScoreActions(record){
+  const wrap = document.getElementById('hero-score-actions'); if(!wrap) return;
+  if(!record){ wrap.hidden = true; wrap.innerHTML = ''; return; }
+  const id = historyResultId(record);
+  const canRematch = Boolean(historyRematchProfileId(record));
+  wrap.hidden = false;
+  wrap.innerHTML = `${canRematch ? `<button class="primary small" type="button" data-result-rematch="${esc(id)}">Rematch</button>` : ''}<button class="ghost small" type="button" data-result-share="${esc(id)}">Share result</button>${headToHeadLineHtml(record)}`;
+  wireResultActionButtons(wrap);
+}
+
+function wireResultActionButtons(scope){
+  (scope || document).querySelectorAll('[data-result-rematch]').forEach(button => {
+    button.onclick = event => openRematchSetupFromHistory(event.currentTarget.dataset.resultRematch);
+  });
+  (scope || document).querySelectorAll('[data-result-share]').forEach(button => {
+    button.onclick = event => {
+      const record = findBattleHistoryResult(event.currentTarget.dataset.resultShare) || state.lastCompletedShareRecord;
+      shareBattleResult(record).catch(err => console.warn('Share result failed', err));
+    };
+  });
+}
+
+// ---- Share result card ----
+function battleShareCardData(record){
+  const r = record || {};
+  const opponent = r.opponent || {};
+  const me = (r.profile && r.profile.displayName) || currentUser().displayName || 'You';
+  const aiOnly = historyOpponentStatus(r) === 'ai_only';
+  const oppName = aiOnly ? 'AI Judge' : (opponent.name || 'Opponent pending');
+  const myScore = Number.isFinite(Number(r.score)) ? Math.round(Number(r.score)) : null;
+  const oppRaw = opponent.score ?? r.opponentScore;
+  const oppScore = oppRaw !== null && oppRaw !== undefined && oppRaw !== '' && Number.isFinite(Number(oppRaw)) ? Math.round(Number(oppRaw)) : null;
+  let winner = '';
+  if(r.outcome === 'win') winner = me;
+  else if(r.outcome === 'loss') winner = oppName;
+  else if(r.outcome === 'tie') winner = 'Tie';
+  else if(myScore !== null && oppScore !== null) winner = myScore > oppScore ? me : oppScore > myScore ? oppName : 'Tie';
+  return {
+    title: historyTitle(r),
+    me, opponent: oppName, myScore, oppScore,
+    winner: winner || (aiOnly ? 'Practice' : 'Pending'),
+    outcome: r.outcome || 'recorded',
+    genre: historyGenre(r),
+    date: historyDateText(r)
+  };
+}
+
+function drawBattleShareCard(canvas, data){
+  const size = 1080;
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext && canvas.getContext('2d');
+  if(!ctx) return false;
+  const lime = '#c6ff3d';
+  ctx.fillStyle = '#0b0d10'; ctx.fillRect(0, 0, size, size);
+  const glow = ctx.createRadialGradient ? ctx.createRadialGradient(size/2, size*0.45, 40, size/2, size*0.45, size*0.7) : null;
+  if(glow){ glow.addColorStop(0, 'rgba(198,255,61,0.16)'); glow.addColorStop(1, 'rgba(198,255,61,0)'); ctx.fillStyle = glow; ctx.fillRect(0, 0, size, size); }
+  ctx.strokeStyle = lime; ctx.lineWidth = 6; ctx.strokeRect(36, 36, size - 72, size - 72);
+  ctx.textAlign = 'left'; ctx.fillStyle = lime; ctx.font = '900 64px Inter, Arial, sans-serif'; ctx.fillText('DB', 84, 140);
+  ctx.fillStyle = '#e9edf2'; ctx.font = '700 30px Inter, Arial, sans-serif'; ctx.fillText('DJ BATTLE', 190, 132);
+  ctx.textAlign = 'right'; ctx.fillStyle = '#8b94a3'; ctx.font = '500 28px Inter, Arial, sans-serif'; ctx.fillText(String(data.date || ''), size - 84, 132);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#e9edf2'; ctx.font = '700 44px Inter, Arial, sans-serif';
+  ctx.fillText(String(data.title || 'Battle').slice(0, 40), size/2, 250);
+  ctx.fillStyle = '#8b94a3'; ctx.font = '500 30px Inter, Arial, sans-serif'; ctx.fillText(String(data.genre || ''), size/2, 300);
+  const col = (x, name, score, isWinner) => {
+    ctx.fillStyle = isWinner ? lime : '#e9edf2'; ctx.font = '800 46px Inter, Arial, sans-serif';
+    ctx.fillText(String(name).slice(0, 18), x, 450);
+    ctx.font = '900 200px Inter, Arial, sans-serif';
+    ctx.fillText(score === null ? '--' : String(score), x, 660);
+  };
+  col(size*0.27, data.me, data.myScore, data.winner === data.me);
+  col(size*0.73, data.opponent, data.oppScore, data.winner === data.opponent);
+  ctx.fillStyle = '#5b6370'; ctx.font = '900 56px Inter, Arial, sans-serif'; ctx.fillText('VS', size/2, 590);
+  ctx.fillStyle = lime; ctx.fillRect(size/2 - 300, 760, 600, 110);
+  ctx.fillStyle = '#0b0d10'; ctx.font = '900 50px Inter, Arial, sans-serif';
+  const label = data.winner === 'Tie' ? 'TIE' : data.winner === 'Pending' || data.winner === 'Practice' ? String(data.winner).toUpperCase() : `WINNER: ${String(data.winner).toUpperCase().slice(0, 16)}`;
+  ctx.fillText(label, size/2, 833);
+  ctx.fillStyle = '#8b94a3'; ctx.font = '500 26px Inter, Arial, sans-serif'; ctx.fillText('Scores out of 100', size/2, 960);
+  return true;
+}
+
+function battleShareFileName(data){
+  const slug = String(data && data.title || 'battle').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'battle';
+  return `djbattle-result-${slug}.png`;
+}
+
+function canvasToPngBlob(canvas){
+  return new Promise(resolve => {
+    try{
+      if(canvas.toBlob) return canvas.toBlob(blob => resolve(blob), 'image/png');
+    }catch(e){}
+    resolve(null);
+  });
+}
+
+async function shareBattleResult(record, options = {}){
+  if(!record){ appAlert('No battle result to share yet.'); return { ok:false }; }
+  const data = battleShareCardData(record);
+  const canvas = options.canvas || document.createElement('canvas');
+  if(!drawBattleShareCard(canvas, data)){ appAlert('This browser cannot draw the share picture.'); return { ok:false, data }; }
+  const blob = await canvasToPngBlob(canvas);
+  const name = battleShareFileName(data);
+  const nav = options.navigator || window.navigator;
+  const FileCtor = window.File;
+  const file = blob && FileCtor ? new FileCtor([blob], name, { type:'image/png' }) : null;
+  const text = `${data.me} ${data.myScore ?? '--'} vs ${data.opponent} ${data.oppScore ?? '--'} — ${data.title}`;
+  if(file && nav && typeof nav.share === 'function' && typeof nav.canShare === 'function' && nav.canShare({ files:[file] })){
+    try{
+      await nav.share({ files:[file], title:'DJ Battle result', text });
+      return { ok:true, shared:true, data, name };
+    }catch(error){
+      if(error && error.name === 'AbortError') return { ok:false, cancelled:true, data, name };
+    }
+  }
+  const url = blob && window.URL && window.URL.createObjectURL ? window.URL.createObjectURL(blob) : (canvas.toDataURL ? canvas.toDataURL('image/png') : '');
+  if(url){
+    const a = document.createElement('a');
+    a.href = url; a.download = name; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+    if(blob && window.URL.revokeObjectURL) setTimeout(() => { try{ window.URL.revokeObjectURL(url); }catch(e){} }, 4000);
+  }
+  showAppToast('Result picture saved', name);
+  return { ok:true, downloaded:true, data, name };
+}
+
 function updateBattleProgressUi(){
+  renderHeroScore();
   const progress = state.battleProgress;
   const belt = progress.belt || beltForXp(progress.xp).name;
   if(window.setCurrentBelt) window.setCurrentBelt(belt);
@@ -1732,6 +2173,7 @@ function updateBattleProgressUi(){
   const xp = Number(progress.xp || 0);
   const rankingRating = Number(progress.rankingRating || 0);
   document.querySelectorAll('.profile-score strong').forEach(el=>{ el.textContent = String(rating); });
+  renderRatingHistory();
   const profileStats = document.querySelectorAll('.profile-stats > div');
   if(profileStats[0]) profileStats[0].querySelector('strong').textContent = String(wins);
   if(profileStats[1]) profileStats[1].querySelector('strong').textContent = String(losses);
@@ -1991,6 +2433,22 @@ function renderBattleResultProgress(session, status, options = {}){
   panel.innerHTML = `<div class="battle-result-surface battle-${level}"><div class="battle-status-strip">${lights.map(([label,on,active])=>`<div class="battle-result-module battle-${on ? (active ? 'warn' : 'ok') : 'muted'}"><div class="battle-lamp-row"><i class="battle-lamp"></i><b>${esc(label)}</b></div></div>`).join('')}</div><div class="battle-progress-shell"><span class="eyebrow">${esc(formatBattleStatus(normalized))}</span><div class="battle-progress-line"><strong>${esc(message)}</strong><span>${esc(options.submissionId || session && session.submissionId || '')}</span></div></div></div>`;
 }
 
+function completedResultRecord(battle, result){
+  const key = result && (result.resultKey || (battle && result.submissionId ? `${battle.id}:${result.submissionId}` : ''));
+  const found = (key && findBattleHistoryResult(key)) || (result && result.submissionId && findBattleHistoryResult(result.submissionId));
+  if(found) return found;
+  const opponent = battleResultOpponentSummary(battle || {}, result || {});
+  return { resultKey:key || `share-${Date.now()}`, title:battle && battle.title, genre:battle && battle.genre, modeId:battle && battle.modeId, score:result && result.score, outcome:battleResultOutcome(result, battle), opponent, completedAt:result && result.completedAt, battle:battle || {}, profile:{ displayName:currentUser().displayName } };
+}
+
+function completedResultActionsHtml(battle, result){
+  const record = completedResultRecord(battle, result);
+  state.lastCompletedShareRecord = record;
+  const id = historyResultId(record);
+  const canRematch = Boolean(findBattleHistoryResult(id) && historyRematchProfileId(record));
+  return `${canRematch ? `<button class="primary" type="button" data-result-rematch="${esc(id)}">Rematch</button>` : ''}<button class="ghost" type="button" data-result-share="${esc(id)}">Share result</button>${headToHeadLineHtml(record)}`;
+}
+
 function renderCompletedBattleResult(battle, result, options = {}){
   const progression = result.progression || {};
   const progress = progressionSnapshotForResult(battle, result, options.progressionState);
@@ -2018,8 +2476,7 @@ function renderCompletedBattleResult(battle, result, options = {}){
     ['Measurable analysis', hasMeasurable ? 'Audio evidence stored' : 'Unavailable'],
     ['Rule-based scoring', scoringModel.ruleBasedScoring || result.evidenceType || 'Deterministic rules'],
     ['AI feedback', result.aiFeedback ? 'Provided' : trained.used ? 'Trained model used' : 'Not used'],
-    ['Human voting', result.humanVoting ? 'Recorded' : 'Not included yet']
-  ].map(([label,value])=>`<div class="battle-result-module"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('');
+  ].map(([label,value])=>`<div class="battle-result-module"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('') + crowdVoteResultModuleHtml(battle, result);
   const audioUrl = result.securePlaybackUrl || result.playbackUrl || null;
   const playback = audioUrl ? `<audio controls src="${esc(audioUrl)}" style="width:100%"></audio>` : '<p style="color:var(--muted);margin:0">Secure playback is unavailable unless the server supplies a temporary playback URL.</p>';
   const duplicateNote = options.progressionState && options.progressionState.duplicate ? '<div class="battle-reward-note">Progression was already recorded for this submission. No duplicate XP, rating or belt award was applied.</div>' : '';
@@ -2027,7 +2484,7 @@ function renderCompletedBattleResult(battle, result, options = {}){
   if(panel){
     panel.innerHTML = `<div class="battle-result-surface">
       <div class="battle-result-top">
-        <div class="battle-score-lcd"><span>Overall score</span><strong>${esc(result.score)}</strong><small>/100</small></div>
+        <div class="battle-score-lcd"><span>Overall score</span><strong>${esc(result.score)}</strong><small>/100</small>${crowdVoteInlineHtml(battle)}</div>
         <div class="battle-result-module battle-${outcome.level}"><div class="battle-lamp-row"><i class="battle-lamp"></i><b>${esc(outcome.label)}</b></div><strong>${esc(opponent.label)}</strong><p>${esc(opponent.detail)}</p></div>
         <div class="battle-result-module"><span>Confidence</span><strong>${esc(confidence)}</strong><p>${esc(result.explanation || 'Measured audio analysis was scored by deterministic rules.')}</p></div>
       </div>
@@ -2040,13 +2497,15 @@ function renderCompletedBattleResult(battle, result, options = {}){
       <div class="battle-progression-grid">
         <div class="battle-result-module"><span>XP earned</span><strong>+${esc(Number(progression.xp || 0))}</strong><p>${esc(progress.before.xp)} -> ${esc(progress.after.xp)}</p></div>
         <div class="battle-result-module"><span>Rating</span><strong>${Number(progression.ratingDelta || 0) >= 0 ? '+' : ''}${esc(Number(progression.ratingDelta || 0))}</strong><p>${esc(progress.before.rankingRating)} -> ${esc(progress.after.rankingRating)}</p></div>
-        <div class="battle-result-module"><span>Ranking movement</span><strong>#${esc(progress.rankBefore)} -> #${esc(progress.rankAfter)}</strong><p>${progress.rankAfter < progress.rankBefore ? 'Moved up' : progress.rankAfter > progress.rankBefore ? 'Moved down' : 'No rank change'}</p></div>
+        <div class="battle-result-module"><span>Ranking movement</span>${rankMovementModule(progress.rankBefore, progress.rankAfter)}</div>
         <div class="battle-result-module"><span>Belt progress</span><strong>${esc(progress.before.belt)} -> ${esc(progress.after.belt)}</strong><p>Next: ${esc(nextBeltForXp(progress.after.xp).name)}</p></div>
       </div>
       <div class="battle-reward-note">${esc(rewardResultText(result))}</div>
       ${duplicateNote}
       <div class="battle-result-module"><span>Submission playback</span>${playback}</div>
+      <div class="battle-result-actions" id="battle-result-actions">${completedResultActionsHtml(battle, result)}</div>
     </div>`;
+    wireResultActionButtons(panel);
   }
   document.getElementById('br-status').textContent = formatBattleStatus(battle.status);
 }
@@ -2329,15 +2788,15 @@ async function savePracticeResult(entry){
       if(resp && !resp.error){
         if(resp.newHigh || resp.newPB){
           const noteParts = [];
-          if(resp.newHigh) noteParts.push(`NEW HIGH SCORE — #${resp.rank} GLOBAL`);
-          if(resp.newPB) noteParts.push(`NEW PERSONAL BEST — ${resp.best}`);
+          if(resp.newHigh) noteParts.push(`NEW HIGH SCORE — #${esc(resp.rank)} GLOBAL`);
+          if(resp.newPB) noteParts.push(`NEW PERSONAL BEST — ${esc(resp.best)}`);
           openModal(`<span class="eyebrow accent">SAVED</span><h3>Practice result saved</h3><p style="color:var(--muted)">${noteParts.join('<br>')}</p><div class="notice"><strong>AI Score</strong><span>${payload.score}/180</span></div><div class="modal-actions"><button class="primary" value="cancel">Continue</button></div>`);
         }
         // refresh leaderboard
         renderAiLeaderboard();
       } else {
         console.warn('submitScoreLive failed', resp && resp.error);
-        alert(resp && resp.error ? resp.error : 'Unable to save your score.');
+        appAlert(resp && resp.error ? resp.error : 'Unable to save your score.');
       }
     }catch(err){ console.warn('savePracticeResult live submit failed', err); }
   }
@@ -2348,8 +2807,8 @@ function openPracticeMode(battleName='Practice Session', battleType='Practice', 
   setTimeout(()=>{
     const getBtn=document.getElementById('get-ai-rating'); if(!getBtn) return;
     getBtn.onclick=()=>{
-      const score = generatePracticeScore();
-      const result = `<span class="eyebrow accent">AI RATING</span><h3>${esc(battleName)}</h3><div class="score-breakdown">${score.breakdown.map(item=>`<div class="score-chip">${esc(item.label)} <strong>${item.score.toFixed(1)}/20</strong></div>`).join('')}<div class="score-chip" style="grid-column:1/-1;color:var(--accent)">TOTAL <strong style="color:var(--accent)">${score.total}/180</strong></div></div><div class="modal-actions"><button class="ghost" value="cancel">Close</button><button class="primary" type="button" id="save-practice-rating">Save Session</button></div>`;
+      const score = generatePracticeScore(buildPracticeMixInput(battleName));
+      const result = `<span class="eyebrow accent">AI RATING · PREVIEW</span><h3>${esc(battleName)}</h3><p class="how-scored-note" id="how-scored-note" style="color:var(--muted);font-size:.85em">${esc(PRACTICE_SCORE_NOTE)}</p><div class="score-breakdown">${score.breakdown.map(item=>`<div class="score-chip">${esc(item.label)} <strong>${item.score.toFixed(1)}/20</strong></div>`).join('')}<div class="score-chip" style="grid-column:1/-1;color:var(--accent)">TOTAL <strong style="color:var(--accent)">${score.total}/180</strong></div></div><div class="modal-actions"><button class="ghost" value="cancel">Close</button><button class="primary" type="button" id="save-practice-rating">Save Session</button></div>`;
       openModal(result);
       setTimeout(()=>{
         const saveBtn=document.getElementById('save-practice-rating'); if(!saveBtn) return; saveBtn.onclick=()=>{
@@ -2454,6 +2913,8 @@ function openBattle(id){
       const numMatch=(String(b.tracks).match(/(\d+)/)||[])[0];
       const num = numMatch? Number(numMatch) : (b.type&&b.type.includes('5')?5:2);
       const assigned = assignTracksForBattle(b,num);
+      const missing = missingBattleTracks(assigned, num);
+      if(missing > 0){ showNeedMoreTracks(b, missing); return; }
       const waitingBattle = { ...b, genre: chosenGenre, durationMinutes: chosenLength, status:'waiting', lobbyStatus:'waiting' };
       showLocalWaitingRoom(waitingBattle, assigned, {
         onSolo: () => startBattleSession({ id: Date.now(), title: b.title, type: b.type }, { mode: 'Solo AI Rating', genre: chosenGenre, duration: chosenLength, opponent: null, assigned: [] })
@@ -2474,9 +2935,10 @@ function openBattleLifecycle(id){
   if(b.premiumRequired && !state.premium){ openPremium(`"${b.title}" requires Premium for this battle mode.`); return; }
   if(b.serverBacked && !['open','waiting'].includes(String(b.lobbyStatus || b.status || 'open')) && !battlePrepSnapshotForUser(b)){
     openModal(`<span class="eyebrow accent">BATTLE ${esc(String(b.lobbyStatus || b.status || '').toUpperCase())}</span><h3>${esc(b.title)}</h3><p style="color:var(--muted)">This server-backed battle is no longer joinable. Refreshing the lobby will show current open slots.</p><div class="modal-actions"><button class="ghost" value="cancel">Close</button><button class="primary" type="button" id="refresh-lobby-now">Refresh Lobby</button></div>`);
-    setTimeout(()=>{ const btn=document.getElementById('refresh-lobby-now'); if(btn) btn.onclick=()=>loadServerBattleLobby().catch(()=>{}); },0);
+    setTimeout(()=>{ const btn=document.getElementById('refresh-lobby-now'); if(btn) btn.onclick=()=>runAction(()=>loadServerBattleLobby(), { label:'Refreshing the lobby' }); },0);
     return;
   }
+  setShareMeta(`${b.title || 'Battle'} — DJ Battle`, `${b.type || 'DJ battle'}${b.genre ? ` · ${b.genre}` : ''}. Join the battle on DJ Battle.`);
   const mode = BattleModes.getBattleMode(b.modeId || b.type);
   const selectedLength = b.durationMinutes || parseMinutes(b.time);
   const lengthOptions = mode ? mode.allowedDurations : [10, 20, 30, 60];
@@ -2567,7 +3029,7 @@ async function joinBattleFromModal(b){
     return;
   }
   let joined = BattleModes.joinBattle(updated, { userId: currentProfileUserId(), name: currentUser().displayName }, { now: new Date().toISOString() });
-  if(joined.error && joined.code !== 'duplicate_entry') return alert(joined.error);
+  if(joined.error && joined.code !== 'duplicate_entry') return appAlert(joined.error);
   let joinedBattle = joined.battle || updated;
   let opponent = realOpponentFromBattle(joinedBattle);
   const needsOpponent = joinedBattle.opponentRequirement === 'required';
@@ -2575,10 +3037,14 @@ async function joinBattleFromModal(b){
     joinedBattle = { ...joinedBattle, status:'waiting', lobbyStatus:'waiting' };
   }
   const assigned = resolveBattleTracks(joinedBattle);
+  if(!['own_selection','ai_practice','open_library'].includes(joinedBattle.trackSelectionMethod)){
+    const missing = missingBattleTracks(assigned, joinedBattle.trackCount || 2);
+    if(missing > 0){ showNeedMoreTracks(joinedBattle, missing); return; }
+  }
   let preparedBattle = joinedBattle;
   if(!needsOpponent || opponent){
     const prepared = BattleModes.prepareBattle(joinedBattle, { userId: currentProfileUserId(), assignedTracks: assigned, now: new Date().toISOString() });
-    if(prepared.error) return alert(prepared.error);
+    if(prepared.error) return appAlert(prepared.error);
     preparedBattle = prepared.battle;
   }
   if(selectedCrate && validation.ready){
@@ -2615,7 +3081,7 @@ function startAiPracticeFromModal(b){
   const chosenGenre = document.getElementById('enter-genre')?.value || b.genre;
   const chosenLength = Number(document.getElementById('enter-length')?.value||10);
   const practice = BattleModes.createBattleRecord({ modeId:'ai_only_practice', genre: chosenGenre, durationMinutes: chosenLength, title:`${chosenGenre} AI Practice`, createdBy:currentProfileUserId(), status:'ready', visibility:'private' });
-  if(practice.error) return alert(practice.error.map(item=>item.message).join(' '));
+  if(practice.error) return appAlert(practice.error.map(item=>item.message).join(' '));
   const joined = BattleModes.joinBattle(practice.battle, { userId: currentProfileUserId(), name: currentUser().displayName }, { now: new Date().toISOString() });
   const selectedCrate = document.getElementById('enter-prep-crate')?.value || '';
   let battle = joined.battle || practice.battle;
@@ -2726,23 +3192,109 @@ function startGuidedTour(){
   return true;
 }
 
+const TOUR_SEEN_KEY = 'djBattleTourSeen';
+function replayGuidedTour(){
+  activeTourStep = 0;
+  return startGuidedTour();
+}
+function shouldShowFirstRunTour(store = localStorage){
+  try{
+    return !store.getItem(TOUR_SEEN_KEY) && !store.getItem('djBattleTourComplete');
+  }catch(e){ return false; }
+}
+function maybeShowFirstRunTour(store = localStorage){
+  if(!shouldShowFirstRunTour(store)) return false;
+  try{ store.setItem(TOUR_SEEN_KEY, '1'); }catch(e){}
+  return replayGuidedTour();
+}
+function scheduleFirstRunTour(){
+  const ua = String(window.navigator && window.navigator.userAgent || '');
+  if(/jsdom/i.test(ua) || (window.navigator && window.navigator.webdriver) || window.__DJB_SKIP_FIRST_RUN_TOUR) return;
+  setTimeout(() => { try{ maybeShowFirstRunTour(); }catch(e){ console.warn('First-run tour skipped', e); } }, 900);
+}
+
 function renderVirtualTour(){
   const replay = document.getElementById('replay-tour');
   if(replay) replay.onclick = () => { activeTourStep = 0; startGuidedTour(); };
   startGuidedTour();
 }
 
-function activityItem(label, title, detail, actionView){
-  return `<article class="activity-row"><span>${esc(label)}</span><div><strong>${esc(title)}</strong><small>${esc(detail)}</small></div>${actionView ? `<button class="ghost small" data-view-target="${esc(actionView)}" type="button">Open</button>` : ''}</article>`;
+const ACTIVITY_FILTERS = [
+  { id:'all', label:'All' },
+  { id:'alert', label:'Alerts' },
+  { id:'battle', label:'Battles' },
+  { id:'community', label:'Community' },
+  { id:'challenge', label:'Challenges' }
+];
+function activityTimestamp(row){
+  if(!row) return null;
+  const raw = row.createdAt || row.created_at || row.updatedAt || row.updated_at || row.startsAt || row.startAt || row.timestamp || row.date || null;
+  const time = raw ? new Date(raw).getTime() : NaN;
+  return Number.isFinite(time) ? time : null;
+}
+function formatRelativeTime(time, nowMs){
+  if(time === null || time === undefined) return 'Time unknown';
+  const now = nowMs === undefined ? Date.now() : nowMs;
+  const diff = Math.round((now - time) / 1000);
+  const future = diff < 0;
+  const abs = Math.abs(diff);
+  let text;
+  if(abs < 45) return 'Just now';
+  if(abs < 3600) text = `${Math.round(abs / 60)} min`;
+  else if(abs < 86400) text = `${Math.round(abs / 3600)} hr`;
+  else if(abs < 86400 * 30) { const d = Math.round(abs / 86400); text = `${d} day${d === 1 ? '' : 's'}`; }
+  else return new Date(time).toLocaleDateString(undefined, { month:'short', day:'numeric', year:'numeric' });
+  return future ? `In ${text}` : `${text} ago`;
+}
+function formatAbsoluteTime(time){
+  if(time === null || time === undefined) return '';
+  return new Date(time).toLocaleString(undefined, { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' });
+}
+function activityItem(label, title, detail, actionView, time, kind){
+  const when = time === undefined ? '' : `<time class="activity-time" ${time ? `datetime="${esc(new Date(time).toISOString())}" title="${esc(formatAbsoluteTime(time))}"` : ''}>${esc(formatRelativeTime(time))}${time ? `<em>${esc(formatAbsoluteTime(time))}</em>` : ''}</time>`;
+  return `<article class="activity-row" data-activity-kind="${esc(kind || String(label).toLowerCase())}"><span>${esc(label)}</span><div><strong>${esc(title)}</strong><small>${esc(detail)}</small></div>${when}${actionView ? `<button class="ghost small" data-view-target="${esc(actionView)}" type="button">Open</button>` : ''}</article>`;
+}
+function collectActivityEntries(){
+  const entries = [];
+  (state.djNotifications.rows || []).slice(0, 20).forEach(row => entries.push({ kind:'alert', label:'Alert', title:row.title || row.type || 'Notification', detail:row.body || 'Platform activity', view:'activity', time:activityTimestamp(row) }));
+  localMentionAlertsForMe().slice(0, 20).forEach(row => entries.push({ kind:'alert', label:'Mention', title:`${row.byName || 'A DJ'} mentioned you`, detail:`In ${row.title || 'a post'}`, view:'community', time:activityTimestamp(row) }));
+  (state.djChallenges.rows || []).slice(0, 20).forEach(row => entries.push({ kind:'challenge', label:'Challenge', title:row.title || 'Battle challenge', detail:row.status || 'Pending', view:'profile', time:activityTimestamp(row) }));
+  battles.slice(0, 20).forEach(battle => entries.push({ kind:'battle', label:'Battle', title:battle.title || 'Battle', detail:`${battleModeDisplayLabel(battle.modeId, battle.type)} / ${battle.genre || 'Open Format'} / ${formatBattleStatus(battle.status || battle.lobbyStatus || 'open')}`, view:'battles', time:activityTimestamp(battle) }));
+  (state.community.posts && state.community.posts.length ? state.community.posts : localCommunityPosts()).slice(0, 20).forEach(post => entries.push({ kind:'community', label:'Community', title:post.title || 'Post', detail:`${post.authorName || post.user || 'DJ'} / ${post.categoryLabel || post.room || 'Feed'}`, view:'community', time:activityTimestamp(post) }));
+  return sortActivityEntries(entries);
+}
+function sortActivityEntries(entries){
+  return entries.map((entry, index) => ({ entry, index })).sort((a, b) => {
+    const at = a.entry.time, bt = b.entry.time;
+    if(at === null && bt === null) return a.index - b.index;
+    if(at === null) return 1;
+    if(bt === null) return -1;
+    return bt - at || a.index - b.index;
+  }).map(item => item.entry);
 }
 function renderActivityPage(){
   const target = document.getElementById('activity-feed');
   if(!target) return;
-  const notifications = (state.djNotifications.rows || []).slice(0,4).map(row => activityItem('Alert', row.title || row.type || 'Notification', row.body || row.createdAt || 'Unread platform activity', 'activity'));
-  const battleRows = battles.slice(0,5).map(battle => activityItem('Battle', battle.title || 'Battle', `${battleModeDisplayLabel(battle.modeId, battle.type)} / ${battle.genre || 'Open Format'} / ${formatBattleStatus(battle.status || battle.lobbyStatus || 'open')}`, 'battles'));
-  const posts = (state.community.posts && state.community.posts.length ? state.community.posts : localCommunityPosts()).slice(0,5).map(post => activityItem('Community', post.title || 'Post', `${post.authorName || post.user || 'DJ'} / ${post.categoryLabel || post.room || 'Feed'}`, 'community'));
-  const challenges = (state.djChallenges.rows || []).slice(0,4).map(row => activityItem('Challenge', row.title || 'Battle challenge', row.status || 'Pending', 'profile'));
-  target.innerHTML = [...notifications, ...challenges, ...battleRows, ...posts].join('') || '<div class="panel"><strong>No activity yet.</strong><p>Battle entries, follows, challenges, results and community interactions will appear here.</p></div>';
+  if(!state.activityFilter) state.activityFilter = 'all';
+  let bar = document.getElementById('activity-filters');
+  if(!bar){
+    bar = document.createElement('div');
+    bar.id = 'activity-filters';
+    bar.className = 'activity-filters';
+    bar.setAttribute('role', 'tablist');
+    bar.setAttribute('aria-label', 'Filter activity');
+    target.parentNode.insertBefore(bar, target);
+  }
+  const all = collectActivityEntries();
+  bar.innerHTML = ACTIVITY_FILTERS.map(filter => {
+    const count = filter.id === 'all' ? all.length : all.filter(entry => entry.kind === filter.id).length;
+    const active = state.activityFilter === filter.id;
+    return `<button class="activity-filter${active ? ' active' : ''}" data-activity-filter="${filter.id}" role="tab" aria-selected="${active}" type="button">${esc(filter.label)}<b>${count}</b></button>`;
+  }).join('');
+  bar.querySelectorAll('[data-activity-filter]').forEach(button => button.onclick = () => { state.activityFilter = button.dataset.activityFilter; renderActivityPage(); });
+  const shown = state.activityFilter === 'all' ? all : all.filter(entry => entry.kind === state.activityFilter);
+  const emptyLabel = (ACTIVITY_FILTERS.find(filter => filter.id === state.activityFilter) || ACTIVITY_FILTERS[0]).label.toLowerCase();
+  target.innerHTML = shown.map(entry => activityItem(entry.label, entry.title, entry.detail, entry.view, entry.time, entry.kind)).join('') || `<div class="panel"><strong>No ${state.activityFilter === 'all' ? 'activity' : esc(emptyLabel)} yet.</strong><p>Battle entries, follows, challenges, results and community interactions will appear here.</p></div>`;
   target.querySelectorAll('[data-view-target]').forEach(button=>button.onclick=()=>switchView(button.dataset.viewTarget));
   const refresh = document.getElementById('activity-refresh');
   if(refresh) refresh.onclick = () => {
@@ -2754,8 +3306,9 @@ function renderActivityPage(){
 }
 
 function renderSettingsPage(){
-  const replay = document.querySelector('#settings [data-view-target="tour"]');
-  if(replay) replay.onclick = () => { activeTourStep = 0; startGuidedTour(); };
+  wireDataBackupControls();
+  const replay = document.getElementById('settings-replay-tour');
+  if(replay) replay.onclick = () => replayGuidedTour();
 }
 
 const aiFilterButtons=document.querySelectorAll('[data-ai-filter]');
@@ -2764,9 +3317,6 @@ aiFilterButtons.forEach(btn=>btn.addEventListener('click',()=>{
   renderAiLeaderboard(btn.dataset.aiFilter);
 }));
 
-function renderPosts(){const html=state.posts.map(p=>`<article class="forum-post"><div class="post-head"><div class="avatar">${esc(p.initials)}</div><div><strong>${esc(p.user)}</strong><span>${esc(p.room)} • ${esc(p.time)}</span></div></div><h4>${esc(p.title)}</h4><p>${esc(p.body)}</p>${p.media?`<div class="audio-embed"><button>▶</button><div><strong>${esc(p.media)}</strong><small style="display:block;color:#7f8997">Attached from profile library</small></div><div class="bars"></div></div>`:''}<div class="post-foot"><span>♡ ${p.likes}</span><span>💬 ${p.comments}</span><span>↗ Share</span></div></article>`).join('');document.getElementById('forum-feed').innerHTML=html;document.getElementById('latest-posts').innerHTML=state.posts.slice(0,3).map(p=>`<div class="feed-item"><div class="mini-art">♫</div><div><strong>${esc(p.title)}</strong><p>${esc(p.user)} • ${esc(p.room)}</p></div></div>`).join('');}
-
-document.getElementById('new-post').onclick=()=>{const options=state.library.map((t,i)=>`<option value="${i}">${esc(t.name)}</option>`).join('');openModal(`<span class="eyebrow accent">COMMUNITY</span><h3>Create Post</h3><div class="form-grid"><label>Room<select id="post-room"><option>General DJ Talk</option><option>Transitions</option><option>Scratching</option><option>Track Feedback</option><option>Production</option><option>Promo Feed</option></select></label><label>Title<input id="post-title" placeholder="What are you sharing?"></label><label>Post<textarea id="post-body" placeholder="Tell the community about it..."></textarea></label><label>Attach from My Music<select id="post-media"><option value="">No attachment</option>${options}</select></label></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="publish-post">Publish</button></div>`);setTimeout(()=>document.getElementById('publish-post').onclick=()=>{const mediaIdx=document.getElementById('post-media').value;state.posts.unshift({user:currentUser().displayName,initials:currentUser().initials,userId:currentUser().id,room:document.getElementById('post-room').value,time:'now',title:document.getElementById('post-title').value||'New post',body:document.getElementById('post-body').value||'',media:mediaIdx!==''?state.library[Number(mediaIdx)]?.name:null,likes:0,comments:0});persist();renderPosts();document.getElementById('modal').close();},0)};
 
 const COMMUNITY_DEFAULT_CATEGORIES = [
   { id:'general', label:'General DJ Discussion' },
@@ -2867,6 +3417,8 @@ function localCommunityPosts(){
     commentCount:Number(post.comments || 0),
     attachments:post.media ? [{ id:`local-media-${index}`, type:'library_track', title:post.media, artist:'Local library', status:'local_saved', playbackPermitted:false, playbackContract:'local_saved_only' }] : [],
     viewer:{ canEdit:isOwnLocalPost(post), canDelete:isOwnLocalPost(post), isOwner:isOwnLocalPost(post) },
+    editedAt:post.editedAt || null,
+    localIndex:index,
     localOnly:true
   }));
 }
@@ -2970,14 +3522,15 @@ function communityPostHtml(post){
   const owner = post.viewer && post.viewer.isOwner;
   const edited = post.editedAt ? ' / edited' : '';
   const locked = post.locked ? ' / comments locked' : '';
-  const body = post.tombstone ? '<p class="community-tombstone">This discussion item is unavailable.</p>' : `<p>${esc(post.bodyText || '')}</p>`;
+  const body = post.tombstone ? '<p class="community-tombstone">This discussion item is unavailable.</p>' : `<p>${mentionifyText(post.bodyText || '')}</p>`;
   const authorProfileId = post.author && post.author.publicProfileId || '';
   const challengeProfile = communityChallengeProfileForPost(post);
   const canChallenge = challengeProfile && publicProfileCanChallenge(challengeProfile);
   return `<article class="forum-post community-post ${post.localOnly ? 'local' : ''}" data-community-post="${esc(post.id)}">
     <div class="post-head">
       <div class="avatar">${esc((post.author && (post.author.displayName || post.author.name) || 'DJ').split(/\s+/).map(part=>part[0]).join('').slice(0,2).toUpperCase())}</div>
-      <div class="post-author-copy"><strong>${esc(post.author && (post.author.displayName || post.author.name) || 'DJ')}</strong><span>${esc(communityCategoryLabel(post.categoryId))} / ${esc(communityDate(post.createdAt))}${esc(edited)}${esc(locked)}</span></div>
+      <div class="post-author-copy"><strong>${esc(post.author && (post.author.displayName || post.author.name) || 'DJ')}</strong><span>${esc(communityCategoryLabel(post.categoryId))} / ${relativeTimeHtml(post.createdAt)}${edited ? ' <em class="edited-tag" title="Edited">edited</em>' : ''}${esc(locked)}</span></div>
+      ${postAuthorFollowButtonHtml(post)}
       ${canChallenge ? `<button class="ghost small request-battle" type="button" data-community-challenge="${esc(authorProfileId)}" data-community-post="${esc(post.id)}">Request Battle</button>` : ''}
     </div>
     <h4>${esc(post.title || 'Community post')}</h4>
@@ -2992,6 +3545,159 @@ function communityPostHtml(post){
       ${owner ? `<button class="ghost small" type="button" data-community-edit="${esc(post.id)}">Edit</button><button class="ghost small" type="button" data-community-delete="${esc(post.id)}">Delete</button>` : ''}
     </div>
   </article>`;
+}
+
+// ---- @mentions ----
+function mentionHandleFor(name){
+  return String(name || '').replace(/[^A-Za-z0-9_]/g, '').slice(0, 32);
+}
+function knownMentionDjs(){
+  const byHandle = new Map();
+  const add = (name, publicProfileId) => {
+    const handle = mentionHandleFor(name);
+    if(handle.length < 2 || /^(guest|dj|localdj|privatedj)$/i.test(handle)) return;
+    const key = handle.toLowerCase();
+    const existing = byHandle.get(key);
+    if(existing && existing.publicProfileId) return;
+    byHandle.set(key, { handle, displayName:String(name), publicProfileId:publicProfileId || (existing && existing.publicProfileId) || null });
+  };
+  (state.community.posts || []).concat(localCommunityPosts()).forEach(post => { const a = post.author || {}; add(a.displayName || a.name, a.publicProfileId); });
+  Object.values(state.community.comments || {}).forEach(list => (list || []).forEach(c => { const a = c.author || {}; add(a.displayName || a.name, a.publicProfileId); }));
+  const rankingRows = state.publicRankings && Array.isArray(state.publicRankings.rows) ? state.publicRankings.rows : [];
+  rankingRows.forEach(row => { const p = row.profile || row; add(p.displayName || p.name, p.publicProfileId); });
+  const rels = state.djRelationships || {};
+  ['following','followers'].forEach(key => { const rows = rels[key] && rels[key].rows || []; rows.forEach(row => { const p = row.profile || row; add(p.displayName || p.name, p.publicProfileId); }); });
+  ((rels.opponents && rels.opponents.rows) || []).forEach(row => { const p = row.opponent || {}; add(p.displayName || p.name, p.publicProfileId); });
+  const mine = mentionHandleFor(currentUser().displayName).toLowerCase();
+  byHandle.delete(mine);
+  return [...byHandle.values()];
+}
+function mentionSuggestions(prefix, limit = 6){
+  const q = String(prefix || '').toLowerCase();
+  return knownMentionDjs().filter(dj => dj.handle.toLowerCase().startsWith(q) || dj.displayName.toLowerCase().includes(q)).slice(0, limit);
+}
+function extractMentionHandles(text){
+  const out = [];
+  String(text || '').replace(/(^|[^A-Za-z0-9_@])@([A-Za-z0-9_]{2,32})/g, (m, lead, handle) => { if(!out.some(h => h.toLowerCase() === handle.toLowerCase())) out.push(handle); return m; });
+  return out;
+}
+function mentionedProfileIdsFor(text){
+  const known = knownMentionDjs();
+  return extractMentionHandles(text).map(h => known.find(dj => dj.handle.toLowerCase() === h.toLowerCase())).filter(dj => dj && dj.publicProfileId).map(dj => dj.publicProfileId).slice(0, 10);
+}
+function mentionifyText(text){
+  const known = knownMentionDjs();
+  const source = String(text || '');
+  const re = /(^|[^A-Za-z0-9_@])@([A-Za-z0-9_]{2,32})/g;
+  let out = '', last = 0, m;
+  while((m = re.exec(source))){
+    const start = m.index + m[1].length;
+    out += esc(source.slice(last, start));
+    const dj = known.find(row => row.handle.toLowerCase() === m[2].toLowerCase());
+    out += dj && dj.publicProfileId
+      ? `<a href="#" class="mention-link" data-mention-profile="${esc(dj.publicProfileId)}">@${esc(m[2])}</a>`
+      : `<span class="mention-link unresolved">@${esc(m[2])}</span>`;
+    last = start + 1 + m[2].length;
+  }
+  return out + esc(source.slice(last));
+}
+function wireMentionLinks(scope){
+  (scope || document).querySelectorAll('[data-mention-profile]').forEach(link => {
+    link.onclick = event => { event.preventDefault(); loadPublicDjProfile(event.currentTarget.dataset.mentionProfile); };
+  });
+}
+function wireMentionAutocomplete(textarea){
+  if(!textarea || textarea.dataset.mentionWired) return;
+  textarea.dataset.mentionWired = '1';
+  const box = document.createElement('div');
+  box.className = 'mention-suggest hidden';
+  box.setAttribute('role', 'listbox');
+  textarea.insertAdjacentElement('afterend', box);
+  const close = () => { box.classList.add('hidden'); box.innerHTML = ''; };
+  const update = () => {
+    const caret = textarea.selectionStart ?? textarea.value.length;
+    const before = textarea.value.slice(0, caret);
+    const match = before.match(/(^|[^A-Za-z0-9_@])@([A-Za-z0-9_]{0,32})$/);
+    if(!match) return close();
+    const items = mentionSuggestions(match[2]);
+    if(!items.length) return close();
+    box.innerHTML = items.map(dj => `<button type="button" class="mention-option" role="option" data-mention-handle="${esc(dj.handle)}"><strong>@${esc(dj.handle)}</strong><span>${esc(dj.displayName)}</span></button>`).join('');
+    box.classList.remove('hidden');
+    box.querySelectorAll('[data-mention-handle]').forEach(button => {
+      button.onmousedown = event => event.preventDefault();
+      button.onclick = event => {
+        const handle = event.currentTarget.dataset.mentionHandle;
+        const pos = textarea.selectionStart ?? textarea.value.length;
+        const head = textarea.value.slice(0, pos).replace(/@([A-Za-z0-9_]{0,32})$/, `@${handle} `);
+        textarea.value = head + textarea.value.slice(pos);
+        try{ textarea.setSelectionRange(head.length, head.length); }catch(e){}
+        textarea.dispatchEvent(new window.Event('input', { bubbles:true }));
+        close();
+        textarea.focus();
+      };
+    });
+  };
+  textarea.addEventListener('input', update);
+  textarea.addEventListener('keyup', event => { if(event.key === 'Escape') close(); });
+  textarea.addEventListener('blur', () => setTimeout(close, 150));
+}
+const LOCAL_MENTION_ALERTS_KEY = 'djBattleMentionAlerts';
+function localMentionAlerts(){
+  const rows = safeParse(LOCAL_MENTION_ALERTS_KEY, []);
+  return Array.isArray(rows) ? rows : [];
+}
+function recordLocalMentionAlerts(text, context = {}){
+  const handles = extractMentionHandles(text);
+  if(!handles.length) return [];
+  const known = knownMentionDjs();
+  const byName = currentUser().displayName;
+  const created = handles.map(h => {
+    const dj = known.find(row => row.handle.toLowerCase() === h.toLowerCase());
+    return { id:`mention-${Date.now()}-${h}`, handle:dj ? dj.handle : h, publicProfileId:dj && dj.publicProfileId || null, byName, title:String(context.title || 'a post').slice(0, 140), postId:context.postId || null, createdAt:new Date().toISOString() };
+  });
+  try{ localStorage.setItem(LOCAL_MENTION_ALERTS_KEY, JSON.stringify([...created, ...localMentionAlerts()].slice(0, 100))); }catch(e){}
+  return created;
+}
+function localMentionAlertsForMe(){
+  const me = mentionHandleFor(currentUser().displayName).toLowerCase();
+  if(!me) return [];
+  return localMentionAlerts().filter(row => String(row.handle || '').toLowerCase() === me && row.byName !== currentUser().displayName);
+}
+
+// ---- Follow from a post ----
+const LOCAL_FOLLOWS_KEY = 'djBattleLocalFollows';
+function localFollowSet(){
+  const rows = safeParse(LOCAL_FOLLOWS_KEY, []);
+  return new Set(Array.isArray(rows) ? rows.map(String) : []);
+}
+function isFollowingProfile(profileIdValue){
+  const summary = state.djRelationships.publicSummaries[profileIdValue];
+  if(summary && typeof summary.following === 'boolean') return summary.following;
+  return localFollowSet().has(String(profileIdValue));
+}
+function postAuthorFollowButtonHtml(post){
+  const author = post && post.author || {};
+  const id = author.publicProfileId || '';
+  if(!id || (post.viewer && post.viewer.isOwner) || author.profileVisibility === 'private') return '';
+  const following = isFollowingProfile(id);
+  return `<button class="ghost small follow-author ${following ? 'active' : ''}" type="button" data-follow-author="${esc(id)}">${following ? 'Following' : 'Follow'}</button>`;
+}
+async function followPostAuthor(profileIdValue, button){
+  const id = String(profileIdValue || '');
+  if(!id) return { skipped:true };
+  const wasFollowing = isFollowingProfile(id);
+  if(djRelationshipApiAvailable()){
+    if(!state.djRelationships.publicSummaries[id]) state.djRelationships.publicSummaries[id] = { following:wasFollowing, canFollow:true };
+    const result = await togglePublicProfileFollow({ publicProfileId:id });
+    if(result && result.error){ appAlert(result.error); return result; }
+  }else{
+    const set = localFollowSet();
+    if(wasFollowing) set.delete(id); else set.add(id);
+    try{ localStorage.setItem(LOCAL_FOLLOWS_KEY, JSON.stringify([...set])); }catch(e){}
+    state.djRelationships.publicSummaries[id] = { ...(state.djRelationships.publicSummaries[id] || {}), following:!wasFollowing };
+  }
+  document.querySelectorAll(`[data-follow-author="${typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id.replace(/"/g, '')}"]`).forEach(b => { b.textContent = wasFollowing ? 'Follow' : 'Following'; b.classList.toggle('active', !wasFollowing); });
+  return { following:!wasFollowing };
 }
 
 function renderPosts(){
@@ -3115,7 +3821,7 @@ function openCommunityPostComposer(existingPost){
     <div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="publish-post">${post.id ? 'Save' : 'Publish'}</button></div>`);
   setTimeout(() => {
     const publish = document.getElementById('publish-post');
-    if(publish) publish.onclick = () => publishCommunityPostFromModal(post.id).catch(err=>alert(String(err && err.message || err)));
+    if(publish) publish.onclick = () => publishCommunityPostFromModal(post.id).catch(err=>appAlert(String(err && err.message || err)));
   }, 0);
 }
 
@@ -3133,6 +3839,7 @@ function communityPostPayloadFromModal(postId){
     categoryId,
     visibility:document.getElementById('post-visibility')?.value || 'public',
     attachments,
+    mentionedProfileIds:mentionedProfileIdsFor(bodyText),
     idempotencyKey:stableClientIdempotencyKey(postId ? 'community-edit' : 'community-post', { accountId:communityAccountId() || currentProfileUserId(), postId, title, bodyText, categoryId, mediaValue })
   };
 }
@@ -3140,7 +3847,7 @@ function communityPostPayloadFromModal(postId){
 async function publishCommunityPostFromModal(postId){
   const payload = communityPostPayloadFromModal(postId);
   if(!payload.title.trim() || !payload.bodyText.trim()){
-    alert('Title and post body are required.');
+    appAlert('Title and post body are required.');
     return { error:'missing_fields' };
   }
   if(communityServerMode()){
@@ -3149,7 +3856,7 @@ async function publishCommunityPostFromModal(postId){
       body:payload
     });
     if(response.error){
-      alert(response.error);
+      appAlert(response.error);
       return response;
     }
     const post = response.data && response.data.post;
@@ -3169,6 +3876,7 @@ async function publishCommunityPostFromModal(postId){
       userId:currentUser().id,
       room:communityCategoryLabel(payload.categoryId),
       time:'local',
+      createdAt:new Date().toISOString(),
       title:payload.title,
       body:payload.bodyText,
       media:mediaTrack && (mediaTrack.title || mediaTrack.name),
@@ -3177,6 +3885,7 @@ async function publishCommunityPostFromModal(postId){
     });
     persist();
   }
+  recordLocalMentionAlerts(payload.bodyText, { title:payload.title });
   document.getElementById('modal')?.close();
   renderPosts();
   if(activeProfileTab === 'posts') renderProfileCommunityPosts();
@@ -3185,11 +3894,11 @@ async function publishCommunityPostFromModal(postId){
 
 async function toggleCommunityReaction(postId, type){
   if(!communityServerMode()){
-    alert('Sign in with server Community access to react.');
+    appAlert('Sign in with server Community access to react.');
     return { skipped:true };
   }
   const response = await window.DJBattleApi.apiRequest('/api/community/reactions/toggle', { method:'POST', body:{ targetType:'post', targetId:postId, type, idempotencyKey:stableClientIdempotencyKey('community-reaction', { accountId:communityAccountId(), postId, type }) } });
-  if(response.error){ alert(response.error); return response; }
+  if(response.error){ appAlert(response.error); return response; }
   const post = state.community.posts.find(row => String(row.id) === String(postId));
   if(post && response.data){
     post.reactionCounts = response.data.counts || post.reactionCounts;
@@ -3222,11 +3931,12 @@ function communityCommentHtml(comment){
   const counts = communityReactionCounts(comment.reactionCounts);
   const owner = comment.viewer && comment.viewer.isOwner;
   return `<div class="community-comment ${comment.parentCommentId ? 'reply' : ''}" data-community-comment="${esc(comment.id)}">
-    <div><strong>${esc(comment.author && (comment.author.displayName || comment.author.name) || 'DJ')}</strong><span>${esc(communityDate(comment.createdAt))}${comment.editedAt ? ' / edited' : ''}</span></div>
-    <p>${esc(comment.tombstone ? 'Comment unavailable.' : comment.bodyText || '')}</p>
+    <div><strong>${esc(comment.author && (comment.author.displayName || comment.author.name) || 'DJ')}</strong><span>${relativeTimeHtml(comment.createdAt)}${comment.editedAt ? ' <em class="edited-tag" title="Edited">edited</em>' : ''}</span></div>
+    <p>${comment.tombstone ? esc('Comment unavailable.') : mentionifyText(comment.bodyText || '')}</p>
     <div class="community-comment-actions">
       <span>Like ${esc(counts.like)}</span>
       ${communityServerMode() ? `<button class="ghost small" type="button" data-community-reply="${esc(comment.id)}">Reply</button>` : ''}
+      ${owner && !comment.tombstone ? `<button class="ghost small" type="button" data-community-comment-edit="${esc(comment.id)}">Edit</button>` : ''}
       ${owner ? `<button class="ghost small" type="button" data-community-comment-delete="${esc(comment.id)}">Remove</button>` : ''}
     </div>
   </div>`;
@@ -3237,6 +3947,7 @@ function renderCommunityCommentsModal(postId){
   if(!list) return;
   const comments = state.community.comments[postId] || [];
   list.innerHTML = comments.length ? comments.map(communityCommentHtml).join('') : `<div class="community-empty"><strong>No comments yet</strong><p>${esc(state.community.commentStatus[postId] || 'Start the thread with a focused reply.')}</p></div>`;
+  wireMentionLinks(list);
   list.querySelectorAll('[data-community-reply]').forEach(button => {
     button.onclick = event => {
       const input = document.getElementById('community-comment-parent');
@@ -3244,6 +3955,9 @@ function renderCommunityCommentsModal(postId){
       const body = document.getElementById('community-comment-body');
       if(body) body.focus();
     };
+  });
+  list.querySelectorAll('[data-community-comment-edit]').forEach(button => {
+    button.onclick = event => startInlineCommentEdit(event.currentTarget.dataset.communityCommentEdit, postId);
   });
   list.querySelectorAll('[data-community-comment-delete]').forEach(button => {
     button.onclick = event => deleteCommunityComment(event.currentTarget.dataset.communityCommentDelete, postId).catch(err=>console.warn('Community comment delete failed', err));
@@ -3261,21 +3975,22 @@ async function openCommunityComments(postId){
   else state.community.comments[postId] = [];
   renderCommunityCommentsModal(postId);
   const submit = document.getElementById('community-comment-submit');
-  if(submit) submit.onclick = () => publishCommunityComment(postId).catch(err=>alert(String(err && err.message || err)));
+  if(submit) submit.onclick = () => publishCommunityComment(postId).catch(err=>appAlert(String(err && err.message || err)));
 }
 
 async function publishCommunityComment(postId){
   if(!communityServerMode()){
-    alert('Sign in with server Community access to comment.');
+    appAlert('Sign in with server Community access to comment.');
     return { skipped:true };
   }
   const bodyText = document.getElementById('community-comment-body')?.value || '';
   const parentCommentId = document.getElementById('community-comment-parent')?.value || '';
   const response = await window.DJBattleApi.apiRequest('/api/community/comments', {
     method:'POST',
-    body:{ postId, bodyText, parentCommentId:parentCommentId || null, idempotencyKey:stableClientIdempotencyKey('community-comment', { accountId:communityAccountId(), postId, parentCommentId, bodyText }) }
+    body:{ postId, bodyText, parentCommentId:parentCommentId || null, mentionedProfileIds:mentionedProfileIdsFor(bodyText), idempotencyKey:stableClientIdempotencyKey('community-comment', { accountId:communityAccountId(), postId, parentCommentId, bodyText }) }
   });
-  if(response.error){ alert(response.error); return response; }
+  if(response.error){ appAlert(response.error); return response; }
+  recordLocalMentionAlerts(bodyText, { title:'a comment', postId });
   const comment = response.data && response.data.comment;
   if(comment){
     state.community.comments[postId] = dedupeCommunityPosts([...(state.community.comments[postId] || []), comment]);
@@ -3294,29 +4009,52 @@ async function publishCommunityComment(postId){
 async function deleteCommunityComment(commentId, postId){
   if(!communityServerMode()) return { skipped:true };
   const response = await window.DJBattleApi.apiRequest(`/api/community/comments/${encodeURIComponent(commentId)}`, { method:'DELETE' });
-  if(response.error){ alert(response.error); return response; }
+  if(response.error){ appAlert(response.error); return response; }
   state.community.comments[postId] = (state.community.comments[postId] || []).map(comment => String(comment.id) === String(commentId) ? { ...comment, tombstone:true, bodyText:'', status:'deleted' } : comment);
   renderCommunityCommentsModal(postId);
   return response;
 }
 
+const REPORT_REASONS = [
+  { value:'spam', label:'Spam', hint:'Ads, scams or repeated posts' },
+  { value:'harassment', label:'Harassment', hint:'Insults, threats or targeting a DJ' },
+  { value:'copyright', label:'Copyright', hint:'Music or media used without rights' },
+  { value:'other', label:'Other', hint:'Something else; tell us in the note' }
+];
+function chooseReportReason(){
+  return new Promise(resolve => {
+    document.querySelectorAll('.app-confirm-overlay').forEach(el => el.remove());
+    const overlay = document.createElement('div');
+    overlay.className = 'app-confirm-overlay';
+    overlay.innerHTML = `<form class="app-confirm report-reasons" role="dialog" aria-modal="true" aria-labelledby="report-title"><span class="eyebrow accent">REPORT</span><h3 id="report-title">Why are you reporting this post?</h3><div class="report-reason-list">${REPORT_REASONS.map((r,i) => `<label class="report-reason"><input type="radio" name="report-reason" value="${r.value}" ${i===0?'checked':''}><span><strong>${esc(r.label)}</strong><small>${esc(r.hint)}</small></span></label>`).join('')}</div><label class="report-note">Note (optional)<textarea name="report-note" id="report-note" maxlength="500" rows="3" placeholder="Anything that helps the reviewer"></textarea></label><div class="modal-actions"><button class="ghost" type="button" data-report-cancel>Cancel</button><button class="primary" type="submit" data-report-send>Send report</button></div></form>`;
+    const done = v => { overlay.remove(); resolve(v); };
+    const form = overlay.querySelector('form');
+    form.onsubmit = e => { e.preventDefault(); const picked = form.querySelector('input[name="report-reason"]:checked'); done({ reason: picked ? picked.value : 'other', note: String(form.querySelector('textarea').value || '').trim().slice(0,500) }); };
+    overlay.querySelector('[data-report-cancel]').onclick = () => done(null);
+    overlay.addEventListener('keydown', e => { if(e.key === 'Escape') done(null); });
+    document.body.appendChild(overlay);
+  });
+}
+
 async function reportCommunityPost(postId){
   if(!communityServerMode()){
-    alert('Sign in with server Community access to report posts.');
+    appAlert('Sign in with server Community access to report posts.');
     return { skipped:true };
   }
-  const reason = 'unsafe_content';
-  const response = await window.DJBattleApi.apiRequest('/api/community/reports', { method:'POST', body:{ targetType:'post', targetId:postId, reason, context:'Reported from Community panel' } });
-  if(response.error) alert(response.error);
-  else alert(response.data && response.data.duplicate ? 'Report already queued for review.' : 'Report queued for operator review.');
+  const choice = await chooseReportReason();
+  if(!choice) return { cancelled:true };
+  const send = () => window.DJBattleApi.apiRequest('/api/community/reports', { method:'POST', body:{ targetType:'post', targetId:postId, reason:choice.reason, context:choice.note ? `Reported from Community panel: ${choice.note}` : 'Reported from Community panel', note:choice.note || undefined } });
+  const response = await send();
+  if(response.error) showErrorToast(`Report not sent: ${response.error}`, () => send().then(r => { if(r.error) showErrorToast(`Report not sent: ${r.error}`); else appAlert('Report queued for operator review.'); }));
+  else appAlert(response.data && response.data.duplicate ? 'Report already queued for review.' : 'Report queued for operator review.');
   return response;
 }
 
 async function deleteCommunityPost(postId){
   if(!communityServerMode()) return { skipped:true };
-  if(!confirm('Delete this post from the community feed? Comments remain as a thread record.')) return { cancelled:true };
+  if(!(await appConfirmDanger('Delete this post?', 'It is removed from the community feed. Comments remain as a thread record.', 'Delete post'))) return { cancelled:true };
   const response = await window.DJBattleApi.apiRequest(`/api/community/posts/${encodeURIComponent(postId)}`, { method:'DELETE' });
-  if(response.error){ alert(response.error); return response; }
+  if(response.error){ showErrorToast(`Couldn't delete the post: ${response.error}`); return response; }
   state.community.posts = state.community.posts.filter(post => String(post.id) !== String(postId));
   renderPosts();
   if(activeProfileTab === 'posts') renderProfileCommunityPosts();
@@ -3346,6 +4084,10 @@ function wireCommunityControls(){
   document.querySelectorAll('[data-community-profile]').forEach(button => {
     button.onclick = event => loadPublicDjProfile(event.currentTarget.dataset.communityProfile);
   });
+  wireMentionLinks(document);
+  document.querySelectorAll('[data-follow-author]').forEach(button => {
+    button.onclick = event => followPostAuthor(event.currentTarget.dataset.followAuthor, event.currentTarget).catch(err => console.warn('Follow failed', err));
+  });
   document.querySelectorAll('[data-community-challenge]').forEach(button => {
     button.onclick = event => {
       const target = event.currentTarget;
@@ -3363,8 +4105,7 @@ function wireCommunityControls(){
   });
   document.querySelectorAll('[data-community-edit]').forEach(button => {
     button.onclick = event => {
-      const post = state.community.posts.find(row => String(row.id) === String(event.currentTarget.dataset.communityEdit));
-      if(post) openCommunityPostComposer(post);
+      startInlinePostEdit(event.currentTarget.dataset.communityEdit);
     };
   });
   document.querySelectorAll('[data-community-delete]').forEach(button => {
@@ -3648,7 +4389,7 @@ function updateAuthUI(user){
   renderJudgingOperationsAccess();
   renderCurrentUserUI();
   if(user){
-    if(authBtn){ authBtn.textContent = 'Sign Out'; authBtn.onclick = async ()=>{ await window.supabase.auth.signOut(); updateAuthUI(null); } }
+    if(authBtn){ authBtn.textContent = 'Sign Out'; authBtn.onclick = () => signOutWithDataPrompt(); }
     handleMusicLibraryAuthChange(user).catch(()=>setMusicLibrarySyncStatus('failed', { error:'Library sync failed after sign-in.' }));
   } else {
     if(authBtn){
@@ -3659,18 +4400,69 @@ function updateAuthUI(user){
   }
 }
 
+const SIGNIN_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const SIGNIN_RESEND_SECONDS = 30;
+function isValidSignInEmail(email){ return SIGNIN_EMAIL_RE.test(String(email || '').trim()); }
+function describeSignInError(err){
+  if(!err) return 'Something went wrong. Please try again.';
+  const status = Number(err.status || err.statusCode || 0);
+  const msg = String(err.message || err.error_description || err.msg || (typeof err === 'string' ? err : '') || '').trim();
+  const lower = msg.toLowerCase();
+  if(status === 429 || /rate limit|too many|for security purposes/.test(lower)) return `Too many sign-in emails were requested. Wait a minute and try again.${msg ? ` (${msg})` : ''}`;
+  if(/failed to fetch|networkerror|network request failed|load failed/.test(lower) || (typeof navigator !== 'undefined' && navigator.onLine === false)) return "Couldn't reach the sign-in service. Check your internet connection and try again.";
+  if(/invalid.*email|email.*invalid|unable to validate email/.test(lower)) return 'That email address was rejected. Check it for typos.';
+  if(/signups? not allowed|not allowed/.test(lower)) return 'New sign-ups are turned off for this app, so this email can\'t sign in.';
+  return msg ? `Sign-in failed: ${msg}` : 'Sign-in failed. Please try again.';
+}
+let signInResendTimer = null;
+function setSignInMessage(text, kind){
+  const el = document.getElementById('auth-email-msg'); if(!el) return;
+  el.textContent = text || '';
+  el.className = 'auth-msg' + (kind ? ` auth-msg-${kind}` : '');
+  el.hidden = !text;
+}
+function startSignInResendCountdown(button, seconds = SIGNIN_RESEND_SECONDS){
+  if(signInResendTimer) clearInterval(signInResendTimer);
+  let left = seconds;
+  const tick = () => {
+    if(!document.body.contains(button)){ clearInterval(signInResendTimer); signInResendTimer = null; return; }
+    if(left <= 0){ clearInterval(signInResendTimer); signInResendTimer = null; button.disabled = false; button.textContent = 'Resend Magic Link'; button.removeAttribute('aria-busy'); return; }
+    button.disabled = true; button.textContent = `Resend in ${left}s`; left -= 1;
+  };
+  tick(); signInResendTimer = setInterval(tick, 1000);
+}
+async function sendMagicLink(){
+  const send = document.getElementById('send-magic');
+  const input = document.getElementById('auth-email');
+  if(!send || !input || send.disabled) return;
+  const email = String(input.value || '').trim();
+  if(!email){ setSignInMessage('Enter your email address.', 'error'); input.setAttribute('aria-invalid','true'); input.focus(); return; }
+  if(!isValidSignInEmail(email)){ setSignInMessage(`"${email}" doesn't look like an email address. Use the format name@example.com.`, 'error'); input.setAttribute('aria-invalid','true'); input.focus(); return; }
+  input.removeAttribute('aria-invalid');
+  send.disabled = true; send.setAttribute('aria-busy','true'); send.textContent = 'Sending…';
+  setSignInMessage('', '');
+  try{
+    const { error } = await window.supabase.auth.signInWithOtp({ email });
+    if(error) throw error;
+    setSignInMessage(`Magic link sent to ${email}. Follow the link in your email to finish signing in.`, 'success');
+    startSignInResendCountdown(send);
+  }catch(err){
+    console.error(err);
+    setSignInMessage(describeSignInError(err), 'error');
+    send.disabled = false; send.removeAttribute('aria-busy'); send.textContent = 'Send Magic Link';
+  }
+}
 function openSignInModal(){
-  openModal(`<span class="eyebrow accent">SIGN IN</span><h3>Sign in with email</h3><p style="color:var(--muted)">We'll send a magic link to your email to authenticate.</p><div class="form-grid"><label>Email<input id="auth-email" placeholder="you@djmail.com" type="email"></label></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="send-magic">Send Magic Link</button></div>`);
+  if(signInResendTimer){ clearInterval(signInResendTimer); signInResendTimer = null; }
+  openModal(`<span class="eyebrow accent">SIGN IN</span><h3>Sign in with email</h3><p style="color:var(--muted)">We'll send a magic link to your email to authenticate.</p><div class="form-grid"><label>Email<input id="auth-email" placeholder="you@djmail.com" type="email" autocomplete="email" aria-describedby="auth-email-msg"></label><p id="auth-email-msg" class="auth-msg" role="status" aria-live="polite" hidden></p></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="send-magic">Send Magic Link</button></div>`);
   setTimeout(()=>{
-    const send = document.getElementById('send-magic'); if(!send) return; send.onclick = async ()=>{
-      const email = document.getElementById('auth-email').value;
-      if(!email) return alert('Enter an email');
-      try{
-        const { error } = await window.supabase.auth.signInWithOtp({ email });
-        if(error) return openModal(`<span class="eyebrow accent">ERROR</span><h3>Sign in failed</h3><p style="color:var(--muted)">${esc(String(error.message||error))}</p><div class="modal-actions"><button class="primary" value="cancel">Close</button></div>`);
-        openModal(`<span class="eyebrow accent">CHECK EMAIL</span><h3>Magic link sent</h3><p style="color:var(--muted)">Follow the link in your email to complete sign-in.</p><div class="modal-actions"><button class="primary" value="cancel">Close</button></div>`);
-      }catch(err){ console.error(err); alert('Sign-in error'); }
-    };
+    const send = document.getElementById('send-magic'); if(!send) return;
+    send.onclick = sendMagicLink;
+    const input = document.getElementById('auth-email');
+    if(input){
+      input.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); sendMagicLink(); } });
+      input.addEventListener('input', () => { if(input.getAttribute('aria-invalid')){ input.removeAttribute('aria-invalid'); setSignInMessage('', ''); } });
+    }
   },0);
 }
 
@@ -3886,8 +4678,38 @@ const KEY_TO_CAMELOT = {
 };
 const LIBRARY_SORT_LABELS = { title:'Title', artist:'Artist', bpm:'BPM', key:'Key', genre:'Genre', source:'Source', uploaded:'Uploaded' };
 
+function persistLibraryFilters(){
+  try{ localStorage.setItem('djBattleLibraryFilters', JSON.stringify({ crate:state.libraryFilters.crate || 'all', search:String(state.libraryFilters.search || ''), compatibleOnly:Boolean(state.libraryFilters.compatibleOnly) })); }catch(e){}
+}
+function libraryFilterChips(){
+  const chips = [];
+  const f = state.libraryFilters;
+  if(f.crate && f.crate !== 'all'){
+    const crate = getLibraryCrateById(f.crate);
+    chips.push({ kind:'crate', label:`Crate: ${crate ? (crate.name || crate.title || f.crate) : f.crate}` });
+  }
+  if(String(f.search || '').trim()) chips.push({ kind:'search', label:`Search: ${String(f.search).trim()}` });
+  if(f.compatibleOnly) chips.push({ kind:'compatible', label:'Compatible only' });
+  return chips;
+}
+function clearLibraryFilter(kind){
+  if(kind === 'crate') state.libraryFilters.crate = 'all';
+  if(kind === 'search') state.libraryFilters.search = '';
+  if(kind === 'compatible') state.libraryFilters.compatibleOnly = false;
+  persistLibraryFilters();
+  renderLibrary();
+}
+function renderLibraryFilterChips(){
+  const target = document.getElementById('library-filter-chips');
+  if(!target) return;
+  const chips = libraryFilterChips();
+  target.hidden = !chips.length;
+  target.innerHTML = chips.map(chip => `<button type="button" class="library-filter-chip" data-clear-filter="${esc(chip.kind)}" aria-label="Remove filter ${esc(chip.label)}">${esc(chip.label)} <span aria-hidden="true">&times;</span></button>`).join('');
+  target.querySelectorAll('[data-clear-filter]').forEach(button => button.onclick = () => clearLibraryFilter(button.dataset.clearFilter));
+}
 function persistLibraryUiState(){
   localStorage.setItem('djBattleLibrarySort', JSON.stringify(state.librarySort));
+  persistLibraryFilters();
   localStorage.setItem('djBattleSelectedLibraryTrackId', state.selectedLibraryTrackId || '');
   localStorage.setItem('djBattleLibraryPlayer', JSON.stringify(state.libraryPlayer));
 }
@@ -3948,12 +4770,12 @@ function secureArtworkSource(track){
 }
 function artworkMarkup(track, className='library-art'){
   const src = secureArtworkSource(track);
-  if(src) return `<div class="${className}"><img src="${esc(src)}" alt="${esc(trackTitle(track))} artwork"></div>`;
+  if(src) return `<div class="${className}"><img src="${esc(src)}" alt="${esc(trackTitle(track))} artwork" loading="lazy" decoding="async"></div>`;
   return `<div class="${className}" aria-label="No secure artwork">${esc(trackInitials(track))}</div>`;
 }
 function artworkInnerMarkup(track){
   const src = secureArtworkSource(track);
-  if(src) return `<img src="${esc(src)}" alt="${esc(trackTitle(track))} artwork">`;
+  if(src) return `<img src="${esc(src)}" alt="${esc(trackTitle(track))} artwork" loading="lazy" decoding="async">`;
   return esc(trackInitials(track));
 }
 function isSafePlaybackSource(src){
@@ -4327,7 +5149,8 @@ function smartCratePresets(){
     { id:'recently-added', builtIn:true, name:'Recently Added', type:'smart_crate', smartRules:{ preset:'recently_added' } },
     { id:'missing-analysis', builtIn:true, name:'Missing Analysis', type:'smart_crate', smartRules:{ analysisStatus:'missing' } },
     { id:'original-music', builtIn:true, name:'Original Music', type:'smart_crate', smartRules:{ rightsClassification:'original' } },
-    { id:'battle-ready', builtIn:true, name:'Battle Ready', type:'smart_crate', smartRules:{ battleReady:true } }
+    { id:'battle-ready', builtIn:true, name:'Battle Ready', type:'smart_crate', smartRules:{ battleReady:true } },
+    { id:'drafts', builtIn:true, name:'Drafts', type:'smart_crate', smartRules:{ mediaType:'draft_take' } }
   ];
 }
 function allLibraryCrates(){
@@ -5169,7 +5992,7 @@ async function sendBattleRoomPresence(session = activeStudioBattleSession(), pre
 
 async function cancelServerBattleFromRoom(session = activeStudioBattleSession()){
   if(!battleRoomServerApiAvailable() || !session) return { skipped:true, error:'Authenticated Battle Room is unavailable.' };
-  if(!confirm('Cancel this battle for all participants?')) return { cancelled:false };
+  if(!(await appConfirmDanger('Cancel this battle?', 'This cancels the battle for every participant.', 'Cancel battle'))) return { cancelled:false };
   const response = await window.DJBattleApi.apiRequest(`/api/battles/${encodeURIComponent(session.battleId || session.id)}/cancel`, {
     method:'POST',
     body:{ idempotencyKey:stableClientIdempotencyKey('battle-cancel', { battleId:session.battleId || session.id, version:session.battleVersion || 0 }) }
@@ -5184,7 +6007,7 @@ async function cancelServerBattleFromRoom(session = activeStudioBattleSession())
 
 async function withdrawServerBattleEntryFromRoom(session = activeStudioBattleSession()){
   if(!battleRoomServerApiAvailable() || !session || !session.battleEntryId) return { skipped:true, error:'Authenticated Battle Room entry is unavailable.' };
-  if(!confirm('Withdraw from this battle? Your prep snapshot will remain in history evidence.')) return { withdrawn:false };
+  if(!(await appConfirmDanger('Withdraw from this battle?', 'Your prep snapshot stays in your battle history.', 'Withdraw'))) return { withdrawn:false };
   const response = await window.DJBattleApi.apiRequest(`/api/battleEntries/${encodeURIComponent(session.battleEntryId)}/withdraw`, {
     method:'POST',
     body:{ idempotencyKey:stableClientIdempotencyKey('battle-withdraw', { entryId:session.battleEntryId, version:session.battleVersion || 0 }) }
@@ -5998,6 +6821,29 @@ function filterLibraryTracks(){
   }
   return sortLibraryTracks(rows);
 }
+function libraryTotalBeforeSearch(){
+  const saved = state.libraryFilters.search;
+  state.libraryFilters.search = '';
+  try { return filterLibraryTracks().length; } finally { state.libraryFilters.search = saved; }
+}
+function librarySearchCountText(shown, total){
+  const noun = total === 1 ? 'track' : 'tracks';
+  return String(state.libraryFilters.search || '').trim() ? `${shown} of ${total} ${noun}` : `${total} ${noun}`;
+}
+function updateLibrarySearchUi(shown, total){
+  const count = document.getElementById('library-search-count');
+  if(count) count.textContent = librarySearchCountText(shown, total);
+  const clear = document.getElementById('library-search-clear');
+  if(clear) clear.hidden = !String(state.libraryFilters.search || '');
+}
+function clearLibrarySearch(){
+  state.libraryFilters.search = '';
+  const search = document.getElementById('global-search');
+  if(search) search.value = '';
+  renderLibrary();
+  if(typeof renderStreamBrowser === 'function') renderStreamBrowser('');
+  if(search) search.focus();
+}
 function updateLibraryCrateCounts(){
   const rows = allLibraryTracks();
   const counts = {
@@ -6149,8 +6995,8 @@ function attachCrateEditorHandlers(){
     type:document.getElementById('crate-edit-type')?.value || 'playlist'
   }));
   document.querySelectorAll('[data-crate-duplicate-editor]').forEach(button=>button.onclick=()=>duplicateLibraryCrateOptimistic(button.dataset.crateDuplicateEditor));
-  document.querySelectorAll('[data-crate-archive-editor]').forEach(button=>button.onclick=()=>{ if(typeof confirm === 'function' && !confirm('Archive this crate? Audio files will not be deleted.')) return; deleteLibraryCrateOptimistic(button.dataset.crateArchiveEditor); });
-  document.querySelectorAll('[data-crate-artwork]').forEach(input=>input.onchange=async e=>{ const result = await attachArtworkToCrate(e.currentTarget.dataset.crateArtwork, e.currentTarget.files && e.currentTarget.files[0]); if(!result.ok) alert(result.error); });
+  document.querySelectorAll('[data-crate-archive-editor]').forEach(button=>button.onclick=async ()=>{ if(!(await appConfirmDanger('Archive this crate?', 'Audio files are not deleted, and you can restore it from Archived Crates.', 'Archive crate'))) return; archiveCrateWithUndo(button.dataset.crateArchiveEditor); });
+  document.querySelectorAll('[data-crate-artwork]').forEach(input=>input.onchange=async e=>{ const result = await attachArtworkToCrate(e.currentTarget.dataset.crateArtwork, e.currentTarget.files && e.currentTarget.files[0]); if(!result.ok) appAlert(result.error); });
   document.querySelectorAll('[data-crate-select-all]').forEach(button=>button.onclick=selectAllCrateTracks);
   document.querySelectorAll('[data-crate-clear-selection]').forEach(button=>button.onclick=clearCrateSelection);
   document.querySelectorAll('[data-crate-bulk-remove]').forEach(button=>button.onclick=()=>removeTracksFromCrate(button.dataset.crateBulkRemove, state.crateEditor.selectedTrackIds || []));
@@ -6187,15 +7033,34 @@ function renderLibraryDetail(track){
     ${artworkMarkup(track, 'library-detail-art')}
     <div style="margin-top:12px"><span class="eyebrow">TRACK DETAIL</span><h3>${esc(trackTitle(track))}</h3><p style="color:var(--muted);margin:4px 0">${esc(trackArtist(track))}</p></div>
     <div class="library-readout-grid">
-      <div class="library-readout"><span>BPM</span><strong>${esc(track.bpm)}</strong></div>
+      <div class="library-readout"><span>BPM</span><strong>${esc(track.bpm)}${bpmSourceTag(track)}</strong></div>
       <div class="library-readout"><span>KEY</span><strong>${keyBadgeHtml(track.key)}</strong></div>
       <div class="library-readout"><span>SOURCE</span><strong>${esc(trackSource(track))}</strong></div>
       <div class="library-readout"><span>RIGHTS</span><strong>${track.battleEligible ? 'READY' : 'LOCKED'}</strong></div>
     </div>
     ${editable ? `<label class="artwork-control">Track artwork<input type="file" accept="image/*" data-artwork-track="${esc(track.libraryId)}"></label>` : '<small style="color:var(--muted)">Platform artwork is controlled by the approved source catalog.</small>'}
     ${editable && !track.serverBacked ? `<div class="library-audio-status ${track.audioMissing ? 'missing' : ''}" id="library-audio-status"><strong>${esc(libraryAudioStatusLabel(track))}</strong>${track.audioMissing || (!securePlaybackSource(track) && track.localAudioPersisted) ? '<p style="color:var(--muted);margin:4px 0 0">Local audio was not found after refresh. Re-attach the file to restore playback.</p><label class="artwork-control">Re-attach audio<input type="file" accept="audio/*" data-reattach-audio="' + esc(track.id || track.libraryId) + '"></label>' : ''}</div>` : ''}
+    ${track.sourceType === 'draft_take' ? `<div class="draft-take-panel"><span class="eyebrow accent">DRAFT TAKE</span><p>Saved from Battle Studio. Submit it to your active battle when you're ready.</p><button class="primary small" type="button" data-submit-draft="${esc(track.id)}">Submit draft</button></div>` : ''}
+    ${editable ? `<div class="track-tempo-editor"><span class="eyebrow">EDIT BPM / KEY</span><div class="form-grid">${bpmKeyFieldsHtml('edit', track)}</div><button class="primary small" id="edit-bpmkey-save" type="button" data-edit-track="${esc(track.libraryId)}">Save BPM / Key</button></div>` : ''}
     ${renderCrateEditorPanel()}
   `;
+  document.querySelectorAll('[data-submit-draft]').forEach(button => {
+    button.onclick = event => submitDraftTake(event.currentTarget.dataset.submitDraft).catch(err => console.warn('Draft submit failed', err));
+  });
+  if(editable){
+    wireTapTempo('edit');
+    const save = document.getElementById('edit-bpmkey-save');
+    if(save) save.onclick = async () => {
+      const bpmKey = readBpmKeyFields('edit');
+      const patch = {};
+      if(bpmKey.bpm) patch.bpm = bpmKey.bpm;
+      if(bpmKey.key) patch.key = bpmKey.key;
+      if(!Object.keys(patch).length){ showAppToast('Nothing to save', 'Enter a BPM between 40 and 220 or a key.'); return; }
+      const result = await updateLibraryTrackMetadataOptimistic(save.dataset.editTrack, patch);
+      if(result && result.ok && patch.bpm){ const ed = getEditableLibraryTrack(save.dataset.editTrack); if(ed){ ed.track.bpmSource = 'manual'; persist(); } }
+      if(result && result.ok) showAppToast('Saved', 'BPM and key updated.');
+    };
+  }
   renderCompatibleList(track);
 }
 function renderLibraryPlayer(){
@@ -6338,6 +7203,7 @@ function normalizedDeckRecord(track){
     name: trackTitle(track),
     artist: trackArtist(track),
     bpm: parseBpm(track) || track.bpm || '--',
+    bpmSource: track.bpmSource || '',
     key: track.key || '--',
     camelotKey: track.camelotKey || parseCamelotKey(track.key),
     genre: track.genre || 'Unsorted',
@@ -6379,6 +7245,7 @@ function applyTrackPatchLocal(track, patch){
   if(patch.title != null){ track.title = patch.title; track.name = patch.title; }
   if(patch.artist != null) track.artist = patch.artist;
   if(patch.bpm != null) track.bpm = patch.bpm;
+  if(patch.bpmSource != null) track.bpmSource = patch.bpmSource;
   if(patch.key != null){ track.key = patch.key; track.camelotKey = parseCamelotKey(patch.key); }
   if(patch.genre != null) track.genre = patch.genre;
   if(patch.duration != null) track.duration = patch.duration;
@@ -6389,6 +7256,30 @@ function applyTrackPatchLocal(track, patch){
   if(patch.usageRelationships != null) track.usageRelationships = patch.usageRelationships;
   track.syncStatus = track.serverBacked ? 'optimistic' : track.syncStatus;
   return track;
+}
+
+// Auto BPM: save a detected tempo through the normal track patch path, only when the track has none.
+async function saveDetectedBpm(trackId, bpm){
+  const editable = getEditableLibraryTrack(trackId);
+  if(!editable || parseBpm(editable.track)) return { ok:false, skipped:true };
+  const result = await updateLibraryTrackMetadataOptimistic(trackId, { bpm });
+  if(result && result.ok){ editable.track.bpmSource = 'detected'; persist(); }
+  return result;
+}
+async function detectBpmFromFile(file){
+  const Pro = window.DJBattleStudioPro;
+  const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if(!Pro || !Offline || !file || typeof file.arrayBuffer !== 'function') return null;
+  try{
+    const data = await file.arrayBuffer();
+    const buffer = await new Offline(1, 1, 44100).decodeAudioData(data);
+    const channels = [];
+    for(let c = 0; c < buffer.numberOfChannels; c += 1) channels.push(buffer.getChannelData(c));
+    return Pro.detectBpm(channels, buffer.sampleRate);
+  }catch(e){ return null; }
+}
+function bpmSourceTag(track){
+  return track && track.bpmSource === 'detected' && parseBpm(track) ? ' <span class="bpm-detected-tag" title="Detected from the audio. Edit or Tap Tempo to override.">Detected</span>' : '';
 }
 
 async function updateLibraryTrackMetadataOptimistic(trackId, patch){
@@ -6544,27 +7435,96 @@ async function attachArtworkToTrack(trackId, file){
   return { ok:true, src:dataUrl };
 }
 
+function createTapTempo(options={}){
+  const resetMs = options.resetMs || 2000;
+  const maxTaps = options.maxTaps || 8;
+  let taps = [];
+  return {
+    tap(at = Date.now()){
+      if(taps.length && at - taps[taps.length - 1] > resetMs) taps = [];
+      taps.push(at);
+      if(taps.length > maxTaps) taps = taps.slice(-maxTaps);
+      if(taps.length < 2) return null;
+      const gaps = taps.slice(1).map((t, i) => t - taps[i]);
+      const avg = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+      return avg > 0 ? Math.round(60000 / avg * 10) / 10 : null;
+    },
+    reset(){ taps = []; },
+    count(){ return taps.length; }
+  };
+}
+function bpmKeyFieldsHtml(prefix, track={}){
+  const bpm = parseBpm(track) || '';
+  const key = track.key && track.key !== '--' && track.key !== '—' ? track.key : '';
+  return `<label>BPM<span class="bpm-tap-row"><input id="${prefix}-bpm" type="number" min="40" max="220" step="0.1" inputmode="decimal" placeholder="e.g. 128" value="${esc(bpm)}"><button class="ghost small tap-tempo-btn" id="${prefix}-tap" type="button">Tap Tempo</button></span><small class="tap-tempo-hint" id="${prefix}-tap-hint">Tap along to the beat</small></label><label>Key<input id="${prefix}-key" maxlength="12" placeholder="e.g. 8A or A minor" value="${esc(key)}"></label>`;
+}
+function wireTapTempo(prefix){
+  const button = document.getElementById(`${prefix}-tap`);
+  const input = document.getElementById(`${prefix}-bpm`);
+  const hint = document.getElementById(`${prefix}-tap-hint`);
+  if(!button || !input) return null;
+  const tempo = createTapTempo();
+  button.onclick = () => {
+    const bpm = tempo.tap(Date.now());
+    if(bpm){ input.value = String(bpm); if(hint) hint.textContent = `${bpm} BPM from ${tempo.count()} taps`; }
+    else if(hint) hint.textContent = 'Keep tapping...';
+  };
+  return tempo;
+}
+function readBpmKeyFields(prefix){
+  const bpmRaw = Number(document.getElementById(`${prefix}-bpm`)?.value);
+  const keyRaw = String(document.getElementById(`${prefix}-key`)?.value || '').trim().slice(0,12);
+  return { bpm: bpmRaw >= 40 && bpmRaw <= 220 ? Math.round(bpmRaw * 10) / 10 : null, key: keyRaw || null };
+}
 function handleLibraryFilesWithMeta(files){
-  const list = Array.from(files || []);
+  const incoming = Array.from(files || []);
+  const list = [];
+  const skipped = [];
+  incoming.forEach(f => {
+    if(findDuplicateUpload(f, list)) skipped.push(f.name);
+    else list.push(f);
+  });
+  if(skipped.length) showAppToast('Already in your library', `Skipped ${skipped.length} duplicate upload(s): ${skipped.join(', ')}`);
   function next(){
     if(list.length===0){ persist(); persistPlatform(); renderLibrary(); renderPlatformLibrary(); renderStreamingServices(); return; }
     const f = list.shift();
-    openModal(`<span class="eyebrow accent">UPLOAD TRACK</span><h3>Upload ${esc(f.name)}</h3><div class="form-grid"><label>Title<input id="meta-title" value="${esc(f.name.replace(/\.[^/.]+$/, ''))}"></label><label>Artist<input id="meta-artist" placeholder="Artist"></label><label>Genre<input id="meta-genre" placeholder="Genre"></label><label>Rights Category<select id="meta-rights"><option>Original / I Own the Rights</option><option>Licensed / I Have Permission</option><option>Royalty-Free / Cleared</option><option>Commercial / Copyrighted Music</option><option>Unsure</option></select></label><label class="toggle-row">I confirm that I own the necessary rights to this music or have permission to upload and use it on this platform.<input type="checkbox" id="meta-declare"></label></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" id="meta-save">Upload</button></div>`);
+    openModal(`<span class="eyebrow accent">UPLOAD TRACK</span><h3>Upload ${esc(f.name)}</h3><div class="form-grid"><label>Title<input id="meta-title" value="${esc(f.name.replace(/\.[^/.]+$/, ''))}"></label><label>Artist<input id="meta-artist" placeholder="Artist"></label><label>Genre<input id="meta-genre" placeholder="Genre"></label>${bpmKeyFieldsHtml('meta')}<label>Rights Category<select id="meta-rights"><option>Original / I Own the Rights</option><option>Licensed / I Have Permission</option><option>Royalty-Free / Cleared</option><option>Commercial / Copyrighted Music</option><option>Unsure</option></select></label><label class="toggle-row">I confirm that I own the necessary rights to this music or have permission to upload and use it on this platform.<input type="checkbox" id="meta-declare"></label></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" id="meta-save">Upload</button></div>`);
     setTimeout(()=>{
+      wireTapTempo('meta');
+      const metaBpm = document.getElementById('meta-bpm');
+      const metaHint = document.getElementById('meta-tap-hint');
+      const metaTap = document.getElementById('meta-tap');
+      let bpmSource = '';
+      const markManual = () => { bpmSource = metaBpm && metaBpm.value ? 'manual' : ''; const tag = document.getElementById('meta-bpm-detected'); if(tag) tag.remove(); };
+      if(metaBpm) metaBpm.addEventListener('input', markManual);
+      if(metaTap) metaTap.addEventListener('click', () => setTimeout(markManual, 0));
+      if(metaHint) metaHint.textContent = 'Detecting BPM from the audio…';
+      detectBpmFromFile(f).then(result => {
+        if(!metaBpm || !document.body.contains(metaBpm)) return;
+        if(!result || metaBpm.value){ if(metaHint && !metaBpm.value) metaHint.textContent = 'Could not detect BPM. Type it or tap along.'; return; }
+        metaBpm.value = String(result.bpm);
+        bpmSource = 'detected';
+        metaBpm.insertAdjacentHTML('afterend', '<span class="bpm-detected-tag" id="meta-bpm-detected" title="Detected from the audio. Type or Tap Tempo to override.">Detected</span>');
+        if(metaHint) metaHint.textContent = `Detected ${result.bpm} BPM. Type or tap to override.`;
+      });
       document.getElementById('meta-save').onclick = async ()=>{
+        const bpmKey = readBpmKeyFields('meta');
         const title = document.getElementById('meta-title').value || f.name;
         const artist = document.getElementById('meta-artist').value || 'Unknown';
         const genre = document.getElementById('meta-genre').value || 'Unsorted';
         const rights = document.getElementById('meta-rights').value;
         const declared = !!document.getElementById('meta-declare').checked;
-        const serverUpload = await createServerBackedLibraryTrackFromFile(f, { title, artist, genre, rightsClassification:rightsCategoryToClassification(rights) }).catch(error => ({ error:String(error && error.message || error) }));
+        const serverUpload = await createServerBackedLibraryTrackFromFile(f, { title, artist, genre, ...(bpmKey.bpm ? { bpm:bpmKey.bpm } : {}), ...(bpmKey.key ? { key:bpmKey.key } : {}), rightsClassification:rightsCategoryToClassification(rights) }).catch(error => ({ error:String(error && error.message || error) }));
         if(serverUpload && serverUpload.data && serverUpload.data.track){
           await attachLibraryAudioBlob(serverUpload.data.track.id, f);
+          if(bpmKey.bpm && bpmSource){ const ed = getEditableLibraryTrack(serverUpload.data.track.id); if(ed){ ed.track.bpmSource = bpmSource; persist(); } }
           document.getElementById('modal').close();
           next();
           return;
         }
-        const track = { id: 'u-'+Date.now(), title, name: title, artist, uploader: (document.getElementById('profile-name')?.textContent||'You'), album:null, artwork:null, artworkDataUrl:null, genre, bpm:'--', key:'--', duration:'--', uploadDate: new Date().toISOString(), size: f.size||0, source:'MY_LIBRARY', rightsCategory: rights, rightsDeclared: declared, copyrightCheck: 'Not Checked', battleEligible: rights !== 'Commercial / Copyrighted Music', permissions: defaultPermissions(), stems:false, localAudioPersisted:false, audioMissing:false };
+        const realDuration = await readAudioDuration(f);
+        const track = { id: 'u-'+Date.now(), title, name: title, artist, uploader: (document.getElementById('profile-name')?.textContent||'You'), album:null, artwork:null, artworkDataUrl:null, genre, bpm:'--', key:'--', duration: realDuration || '--', uploadDate: new Date().toISOString(), size: f.size||0, fileName: f.name, source:'MY_LIBRARY', rightsCategory: rights, rightsDeclared: declared, copyrightCheck: 'Not Checked', battleEligible: rights !== 'Commercial / Copyrighted Music', permissions: defaultPermissions(), stems:false, localAudioPersisted:false, audioMissing:false };
+        applyTrackPatchLocal(track, { ...(bpmKey.bpm ? { bpm:bpmKey.bpm, ...(bpmSource ? { bpmSource } : {}) } : {}), ...(bpmKey.key ? { key:bpmKey.key } : {}) });
         state.library.push(track);
         await attachLibraryAudioBlob(track.id, f);
         persist();
@@ -6580,22 +7540,6 @@ document.getElementById('quick-upload').onclick=()=>{switchView('library');docum
 
 function renderLibrary(){
   const body=document.getElementById('library-table');
-  if(!state.library.length){
-    body.innerHTML='<tr><td colspan="7"><small>No tracks yet. Upload music to build your DJ library.</small></td></tr>';
-  } else {
-    body.innerHTML=state.library.map((t,i)=>`<tr><td><strong>${esc(t.name)}</strong><small>${(t.size/1024/1024||0).toFixed(1)} MB</small></td><td>${t.source||'MY_LIBRARY'}</td><td>${t.genre}</td><td>${t.bpm}</td><td>${t.key}</td><td>${t.rightsCategory?('<span style="color:'+ (t.rightsCategory.includes('Commercial')? '#f66':'var(--accent)') +'">'+esc(t.rightsCategory)+'</span>'):'—'}</td><td class="track-actions"><button data-rights-check="${i}">Check Rights</button> <button data-add-playlist="${i}">＋Pl</button> <button data-remove="${i}">×</button></td></tr>`).join('');
-  }
-  const max=state.premium?50:5;
-  document.getElementById('storage-progress').style.width=`${Math.min(100,state.library.length/max*100)}%`;
-  document.getElementById('storage-label').textContent=`${state.library.length} / ${max} tracks`;
-  document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{state.library.splice(Number(b.dataset.remove),1);persist();renderLibrary();});
-  document.querySelectorAll('[data-rights-check]').forEach(b=>b.onclick=async(e)=>{const idx=Number(e.currentTarget.dataset.rightsCheck); await runCopyrightCheck(state.library[idx]); renderLibrary();});
-  document.querySelectorAll('[data-add-playlist]').forEach(b=>b.onclick=()=>{ const idx=Number(b.dataset.addPlaylist); addTrackToPlaylist(state.library[idx]); });
-  renderProfile();
-}
-
-function renderLibrary(){
-  const body=document.getElementById('library-table');
   if(!body) return;
   renderMusicLibrarySyncStatus();
   updateLibraryCrateCounts();
@@ -6607,6 +7551,9 @@ function renderLibrary(){
   if(sortField) sortField.onchange = e => { state.librarySort.field = e.target.value || 'title'; persistLibraryUiState(); renderLibrary(); };
   if(sortDirection) sortDirection.onclick = () => { state.librarySort.direction = state.librarySort.direction === 'desc' ? 'asc' : 'desc'; persistLibraryUiState(); renderLibrary(); };
   if(search) search.oninput = e => { state.libraryFilters.search = e.target.value || ''; renderLibrary(); renderStreamBrowser(state.libraryFilters.search); };
+  if(search) search.onkeydown = e => { if(e.key === 'Escape' && search.value){ e.preventDefault(); clearLibrarySearch(); } };
+  const searchClear = document.getElementById('library-search-clear');
+  if(searchClear) searchClear.onclick = () => clearLibrarySearch();
   if(compatibleOnly) compatibleOnly.onchange = e => { state.libraryFilters.compatibleOnly = Boolean(e.target.checked); renderLibrary(); };
   const playerToggle = document.getElementById('library-player-toggle');
   if(playerToggle) playerToggle.onclick = toggleLibraryPlayer;
@@ -6622,7 +7569,16 @@ function renderLibrary(){
   const selectedCrateIds = new Set(state.crateEditor.selectedTrackIds || []);
   const selected = getLibraryTrackById(state.selectedLibraryTrackId) || getLibraryTrackById(state.libraryPlayer.trackId) || rows[0] || null;
   if(selected) state.selectedLibraryTrackId = selected.libraryId;
-  if(!rows.length){
+  const searchTerm = String(state.libraryFilters.search || '').trim();
+  const totalTracks = libraryTotalBeforeSearch();
+  updateLibrarySearchUi(rows.length, totalTracks);
+  persistLibraryFilters();
+  renderLibraryFilterChips();
+  if(!rows.length && searchTerm){
+    body.innerHTML=`<tr class="library-empty-row"><td colspan="9"><div class="library-empty-state"><strong>Nothing matches “${esc(searchTerm)}”</strong><small>Try a different title, artist, genre, BPM or key.</small><button type="button" class="text-btn library-empty-reset" data-library-search-reset>Clear search</button></div></td></tr>`;
+    const reset = body.querySelector('[data-library-search-reset]');
+    if(reset) reset.onclick = () => clearLibrarySearch();
+  } else if(!rows.length){
     body.innerHTML='<tr><td colspan="9"><small>No tracks match this crate, search or compatibility filter.</small></td></tr>';
   } else {
     body.innerHTML=rows.map((t)=>`
@@ -6648,8 +7604,9 @@ function renderLibrary(){
   const max=state.premium?50:5;
   const storageProgress = document.getElementById('storage-progress');
   const storageLabel = document.getElementById('storage-label');
-  if(storageProgress) storageProgress.style.width=`${Math.min(100,state.library.length/max*100)}%`;
-  if(storageLabel) storageLabel.textContent=`${state.library.length} / ${max} tracks`;
+  const limitCounts = libraryLimitCounts();
+  if(storageProgress) storageProgress.style.width=`${Math.min(100,limitCounts.tracks/max*100)}%`;
+  if(storageLabel) storageLabel.textContent=`${limitCounts.tracks} / ${max} tracks${limitCounts.drafts ? ` · ${limitCounts.drafts} draft${limitCounts.drafts === 1 ? '' : 's'} (don't count)` : ''}`;
   renderLibraryStatus(rows);
   renderLibraryDetail(selected);
   renderLibraryPlayer();
@@ -6660,7 +7617,7 @@ function renderLibrary(){
   document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{const editable=getEditableLibraryTrack(b.dataset.remove); if(editable){const removedId=editable.track && editable.track.id; state.library.splice(editable.index,1); if(removedId && !editable.track.serverBacked){ const url=librarySessionAudioUrls.get(String(removedId)); if(url && window.URL && window.URL.revokeObjectURL){ try{ window.URL.revokeObjectURL(url); }catch(e){} } librarySessionAudioUrls.delete(String(removedId)); deleteLibraryAudioBlob(removedId).catch(()=>{}); } persist();renderLibrary();renderStudioLibrary();}});
   document.querySelectorAll('[data-rights-check]').forEach(b=>b.onclick=async(e)=>{const editable=getEditableLibraryTrack(e.currentTarget.dataset.rightsCheck); if(editable){ await runCopyrightCheck(editable.track); renderLibrary(); }});
   document.querySelectorAll('[data-add-playlist]').forEach(b=>b.onclick=()=>{ const editable=getEditableLibraryTrack(b.dataset.addPlaylist); if(editable) addTrackToPlaylist(editable.track); });
-  document.querySelectorAll('[data-artwork-track]').forEach(input=>input.onchange=async(e)=>{ const result = await attachArtworkToTrack(e.currentTarget.dataset.artworkTrack, e.currentTarget.files && e.currentTarget.files[0]); if(!result.ok) alert(result.error); });
+  document.querySelectorAll('[data-artwork-track]').forEach(input=>input.onchange=async(e)=>{ const result = await attachArtworkToTrack(e.currentTarget.dataset.artworkTrack, e.currentTarget.files && e.currentTarget.files[0]); if(!result.ok) appAlert(result.error); });
   document.querySelectorAll('[data-crate-select-track]').forEach(input=>input.onchange=e=>selectCrateTrack(e.currentTarget.dataset.crateSelectTrack, { shift:e.shiftKey, ctrl:e.ctrlKey, meta:e.metaKey, toggle:true }));
   document.querySelectorAll('[data-crate-move]').forEach(button=>button.onclick=()=>reorderCrateTrack(state.libraryFilters.crate, button.dataset.crateTrack, button.dataset.crateMove));
   document.querySelectorAll('tr[data-library-row]').forEach(row=>{
@@ -7776,6 +8733,11 @@ function renderRankingRows(){
   const empty = document.getElementById('rankings-empty');
   if(!target || !empty) return;
   const rows = state.publicRankings.rows || [];
+  if(!rows.length && ['failed','configuration_required','offline'].includes(state.publicRankings.status)){
+    empty.classList.add('hidden');
+    target.innerHTML = sampleRankingsHtml();
+    return;
+  }
   if(!rows.length){
     target.innerHTML = '';
     empty.classList.remove('hidden');
@@ -9860,7 +10822,45 @@ function renderChallengeCountPill(){
   }
 }
 
+
+// Tab title + share meta. Social crawlers only read index.html's static tags; these
+// updates help browsers, bookmarks and JS-aware previewers.
+const DEFAULT_TAB_TITLE = 'DJ Battle — Battle Studio';
+const DEFAULT_SHARE_DESCRIPTION = 'Battle other DJs, get AI-judged scores and climb the rankings.';
+function setMetaContent(attr, key, value){
+  let el = document.head && document.head.querySelector(`meta[${attr}="${key}"]`);
+  if(!el && document.head){ el = document.createElement('meta'); el.setAttribute(attr, key); document.head.appendChild(el); }
+  if(el) el.setAttribute('content', value);
+}
+function setShareMeta(title, description){
+  state.shareTitle = title || '';
+  const t = title || DEFAULT_TAB_TITLE;
+  const d = description || DEFAULT_SHARE_DESCRIPTION;
+  setMetaContent('name', 'description', d);
+  setMetaContent('property', 'og:title', t);
+  setMetaContent('property', 'og:description', d);
+  setMetaContent('name', 'twitter:title', t);
+  setMetaContent('name', 'twitter:description', d);
+  updateTabTitle();
+}
+function unreadTitleCount(){
+  const n = state.djNotifications ? state.djNotifications.counts : null;
+  const total = Number(n && n.unreadTotal || 0);
+  if(state.tabUnreadSeen == null || total < state.tabUnreadSeen) state.tabUnreadSeen = Math.min(total, state.tabUnreadSeen || 0);
+  return Math.max(0, total - (state.tabUnreadSeen || 0));
+}
+function updateTabTitle(){
+  const count = unreadTitleCount();
+  document.title = count > 0 ? `(${count}) DJ Battle` : (state.shareTitle || DEFAULT_TAB_TITLE);
+  return document.title;
+}
+function markActivitySeenForTitle(){
+  state.tabUnreadSeen = Number(state.djNotifications && state.djNotifications.counts && state.djNotifications.counts.unreadTotal || 0);
+  updateTabTitle();
+}
+
 function renderNotificationCountPill(){
+  updateTabTitle();
   const pill = document.getElementById('notification-count-pill');
   if(!pill) return;
   const count = Number(state.djNotifications.counts.unreadTotal || 0);
@@ -10158,7 +11158,7 @@ async function muteDjNotificationSource(notificationId){
 async function blockDjNotificationSource(notificationId){
   const notification = (state.djNotifications.rows || []).find(row => String(row.id) === String(notificationId));
   if(!notification || !notification.actor || !notification.actor.publicProfileId) return { skipped:true };
-  if(!confirm('Block this DJ from challenge interactions? Pending challenges may be cancelled, but active battles stay controlled by Battle Room rules.')) return { cancelled:true };
+  if(!(await appConfirmDanger('Block this DJ?', 'They can no longer challenge you. Pending challenges may be cancelled; active battles follow Battle Room rules.', 'Block DJ'))) return { cancelled:true };
   const response = await window.DJBattleApi.apiRequest('/api/blocks', {
     method:'POST',
     body:{
@@ -10402,10 +11402,29 @@ async function recoverAcceptedChallengeBattle(battleId){
   return routeAcceptedChallengeToBattleRoom({ room:response.data && response.data.room });
 }
 
+function pollDjAlertsNow(){
+  if(!state.musicLibrarySync || !state.musicLibrarySync.accountId) return;
+  if(djChallengeApiAvailable()) loadDjChallengeCount().catch(()=>{});
+  if(djNotificationApiAvailable()) loadDjNotificationCount().catch(()=>{});
+}
+function handleDjPollingVisibility(){
+  if(typeof document === 'undefined') return;
+  if(document.hidden){
+    if(state.djChallenges.pollTimer){ clearInterval(state.djChallenges.pollTimer); state.djChallenges.pollTimer = null; }
+    if(state.djNotifications.pollTimer){ clearTimeout(state.djNotifications.pollTimer); state.djNotifications.pollTimer = null; }
+    return;
+  }
+  pollDjAlertsNow();
+  scheduleDjChallengePolling();
+  scheduleDjNotificationPolling();
+}
+if(typeof document !== 'undefined' && document.addEventListener) document.addEventListener('visibilitychange', handleDjPollingVisibility);
+
 function scheduleDjChallengePolling(intervalMs = 30000){
   if(state.djChallenges.pollTimer) clearInterval(state.djChallenges.pollTimer);
   state.djChallenges.pollTimer = null;
   if(!djChallengeApiAvailable() || !state.musicLibrarySync.accountId || livePollingDisabledForTest()) return 0;
+  if(typeof document !== 'undefined' && document.hidden) return 0;
   state.djChallenges.pollTimer = setInterval(() => {
     loadDjChallengeCount().catch(()=>{});
     if(activeProfileTab === 'challenges' && document.getElementById('profile')?.classList.contains('active')){
@@ -10420,6 +11439,7 @@ function scheduleDjNotificationPolling(intervalMs = 30000){
   if(state.djNotifications.pollTimer) clearTimeout(state.djNotifications.pollTimer);
   state.djNotifications.pollTimer = null;
   if(!djNotificationApiAvailable() || !state.musicLibrarySync.accountId || livePollingDisabledForTest()) return 0;
+  if(typeof document !== 'undefined' && document.hidden) return 0;
   const tick = async () => {
     const hidden = document.visibilityState === 'hidden';
     if(!hidden){
@@ -10455,6 +11475,10 @@ function renderPublicDjProfile(profile, status){
   }else{
     state.profileRanking.public.profile = profile;
   }
+  {
+    const shareName = profile.displayName || profile.name || 'DJ';
+    setShareMeta(`${shareName} — DJ Battle profile`, `${shareName}${profile.country ? ` from ${profile.country}` : ''} on DJ Battle. See their battles, belt and rankings.`);
+  }
   const stats = profile.stats || {};
   const country = profile.country || 'Unknown';
   const media = safePublicMediaItems(profile.media);
@@ -10475,6 +11499,7 @@ function renderPublicDjProfile(profile, status){
     ? media.map(item => `<div class="battle-result-row"><b>${esc(item.title || 'Public media')}</b><em>${item.securePlaybackPermitted && item.publicUrl ? `<audio controls src="${esc(item.publicUrl)}" style="max-width:220px"></audio>` : 'On-site playback unavailable'}</em></div>`).join('')
     : '<div class="battle-result-row"><b>Public media</b><em>None approved</em></div>';
   openModal(`<span class="eyebrow accent">PUBLIC DJ PROFILE</span><h3>${esc(profile.displayName || 'DJ')}</h3>
+    ${headToHeadProfileHtml({ publicProfileId:profileIdValue, name:profile.displayName || profile.name })}
     <div class="battle-result-surface">
       <div class="battle-result-top">
         <div class="battle-result-module"><span>Country</span><strong>${esc(countryCode(country))}</strong><p>${esc(country)}</p></div>
@@ -10710,7 +11735,14 @@ async function addTrackToPlaylist(track){
 }
 
 // Copyright check simulator
-async function runCopyrightCheck(track){ if(!track) return; track.copyrightCheck='Checking'; persist(); renderLibrary(); await new Promise(r=>setTimeout(r,800)); const rand=Math.random(); if(rand<0.6) track.copyrightCheck='No Match Found'; else if(rand<0.85) track.copyrightCheck='Possible Copyright Match'; else track.copyrightCheck='Cleared'; persist(); }
+async function runCopyrightCheck(track){
+  if(!track) return { status:'Not Checked' };
+  // No real copyright service yet: never invent a result.
+  track.copyrightCheck = 'Not Checked';
+  persist();
+  openModal(`<span class="eyebrow accent">COPYRIGHT CHECK</span><h3>Not checked</h3><p style="color:var(--muted)" id="copyright-check-note"><strong>${esc(track.title || track.name || 'This track')}</strong> has not been checked. Automatic copyright checking is <span class="badge-coming-soon">Coming soon</span> — until then, only upload music you own or have rights to battle with.</p><div class="modal-actions"><button class="primary" value="cancel">OK</button></div>`);
+  return { status:'Not Checked', comingSoon:true };
+}
 
 async function renderOfficialRankings(){
   renderRankingsPage();
@@ -10718,7 +11750,7 @@ async function renderOfficialRankings(){
 }
 renderOfficialRankings();
 
-function openModal(html){document.getElementById('modal-content').innerHTML=html;document.getElementById('modal').showModal();}
+function openModal(html){document.getElementById('modal-content').innerHTML=html;document.getElementById('modal').showModal();['post-body','community-comment-body'].forEach(id=>{const el=document.getElementById(id);if(el)wireMentionAutocomplete(el);});}
 studioStreamingManager = StudioModules.streaming.create({
   document,
   state,
@@ -10754,7 +11786,9 @@ playlistTransferManager = StudioModules.playlistTransfer.create({
   secureArtworkSource,
   trackSource,
   rawServerTrackIdForMembership,
-  securePlaybackSource
+  securePlaybackSource,
+  addImportedItemsToLibrary: (items, fileName) => addImportedItemsToLibrary(items, fileName),
+  onImported: result => showAppToast('Playlist imported', `${result.items.length} item(s) read${result.added ? `, ${result.added} added to your library` : ''}.`)
 });
 studioBrowserManager = StudioModules.browser.create({
   window,
@@ -10796,6 +11830,7 @@ deckRuntimeManager = StudioModules.deckRuntime.create({
   recordLibraryTrackUsageLocal,
   persistStudioDeckState,
   setStudioRuleStatus,
+  saveDetectedBpm,
   getLibraryCrateById,
   allLibraryCrates,
   resolveCrateTrackIds,
@@ -10810,7 +11845,7 @@ deckRuntimeManager = StudioModules.deckRuntime.create({
   securePlaybackSource,
   loadNextFromBattlePrepCrate
 });
-function openPremium(msg='Premium unlocks stems, higher storage limits, own-selection battles and advanced analysis.') {openModal(`<span class="eyebrow accent">DJ BATTLE PREMIUM</span><h3>More tools. Same fair rules.</h3><p style="color:var(--muted);line-height:1.6">${msg}</p><div class="panel" style="margin:16px 0"><strong>Premium benefits</strong><p>AI stem separation<br>Stem-enabled battles<br>More cloud-library storage<br>Own-selection battles<br>Advanced analysis</p></div><div class="modal-actions"><button class="ghost" value="cancel">Not now</button><button class="primary" type="button" id="enable-premium">Enable Premium</button></div>`);setTimeout(()=>document.getElementById('enable-premium').onclick=()=>{state.premium=true;document.getElementById('modal').close();renderLibrary();alert('Premium enabled for this session.');},0)}
+function openPremium(msg='Premium unlocks stems, higher storage limits, own-selection battles and advanced analysis.') {openModal(`<span class="eyebrow accent">DJ BATTLE PREMIUM</span><h3>More tools. Same fair rules.</h3><p style="color:var(--muted);line-height:1.6">${esc(msg)}</p><div class="panel" style="margin:16px 0"><strong>Premium benefits</strong><p>AI stem separation<br>Stem-enabled battles<br>More cloud-library storage<br>Own-selection battles<br>Advanced analysis</p></div><div class="modal-actions"><button class="ghost" value="cancel">Not now</button><button class="primary" type="button" id="enable-premium">Enable Premium</button></div>`);setTimeout(()=>document.getElementById('enable-premium').onclick=()=>{state.premium=true;document.getElementById('modal').close();renderLibrary();appAlert('Premium enabled for this session.');},0)}
 document.querySelector('[data-action="premium"]').onclick=()=>openPremium();
 
 // Create Battle: the single rules-based modal behind every Create Battle entry point.
@@ -11007,11 +12042,11 @@ function renderBattleRoom(session){
   // upload handlers
   const uploadFile = document.getElementById('br-upload-file'); const uploadStatus = document.getElementById('br-upload-status'); const uploadProgress = document.querySelector('#br-upload-progress i');
   const setUploadStatus = status=>{ uploadStatus.textContent=status; uploadProgress.style.width=({Draft:'0%', 'Preparing upload':'20%', Uploading:'60%', Verifying:'85%', Uploaded:'90%', Judging:'95%', Completed:'100%', Failed:'100%'}[status]||'0%'); if(['Uploaded','Judging','Completed','Failed'].includes(status)) renderBattleResultProgress(session, status.toLowerCase(), { submissionId:session.submissionId }); };
-  uploadFile.onchange = e=>{ const file=e.target.files[0]; const error=window.DJBattleSubmission?.validateFile(file); if(error){ setUploadStatus('Failed'); alert(error); return; } if(file){ setUploadStatus('Draft'); uploadStatus.textContent=`Draft: ${file.name}`; uploadStatus.title=file.name; } };
+  uploadFile.onchange = e=>{ const file=e.target.files[0]; const error=window.DJBattleSubmission?.validateFile(file); if(error){ setUploadStatus('Failed'); appAlert(error); return; } if(file){ setUploadStatus('Draft'); uploadStatus.textContent=`Draft: ${file.name}`; uploadStatus.title=file.name; } };
   const submitSecureMix = async ()=>{
-    const file=uploadFile.files[0] || window.lastRecordedMixFile; if(!file){ alert('Choose a mix file first.'); return; }
+    const file=uploadFile.files[0] || window.lastRecordedMixFile; if(!file){ appAlert('Choose a mix file first.'); return; }
     const result=await window.DJBattleSubmission.submitMix({ apiRequest:window.DJBattleApi.apiRequest, supabase:window.supabase, battleId:session.id, file, onStatus:setUploadStatus, battleContext:buildBattleSubmissionContext(session) });
-    if(result.error){ setUploadStatus('Failed'); alert(result.error); return; }
+    if(result.error){ setUploadStatus('Failed'); appAlert(result.error); return; }
     const completedFromPoll = await completeFromJudgingEndpoint(session, result.submissionId, setUploadStatus, { attempts: 2, intervalMs: 1500 });
     if(completedFromPoll && completedFromPoll.battle) return;
     document.getElementById('br-judge-placeholder').innerHTML='<div class="panel"><strong>Mix uploaded securely.</strong><p style="color:var(--muted)">Waiting for processing.</p></div>';
@@ -11031,27 +12066,27 @@ function wireLifecycleBattleRoom(session){
   const readyBtn = document.getElementById('br-ready');
   if(readyBtn) readyBtn.onclick = async () => {
     const result = await setServerBattleReady(session, true);
-    if(result.error) alert(result.error);
+    if(result.error) appAlert(result.error);
   };
   const notReadyBtn = document.getElementById('br-not-ready');
   if(notReadyBtn) notReadyBtn.onclick = async () => {
     const result = await setServerBattleReady(session, false);
-    if(result.error) alert(result.error);
+    if(result.error) appAlert(result.error);
   };
   const serverStartBtn = document.getElementById('br-server-start');
   if(serverStartBtn) serverStartBtn.onclick = async () => {
     const result = await startServerBattleFromRoom(session);
-    if(result.error) alert(result.error);
+    if(result.error) appAlert(result.error);
   };
   const cancelBtn = document.getElementById('br-cancel');
   if(cancelBtn) cancelBtn.onclick = async () => {
     const result = await cancelServerBattleFromRoom(session);
-    if(result.error) alert(result.error);
+    if(result.error) appAlert(result.error);
   };
   const withdrawBtn = document.getElementById('br-withdraw');
   if(withdrawBtn) withdrawBtn.onclick = async () => {
     const result = await withdrawServerBattleEntryFromRoom(session);
-    if(result.error) alert(result.error);
+    if(result.error) appAlert(result.error);
   };
   const uploadFile = document.getElementById('br-upload-file');
   const uploadStatus = document.getElementById('br-upload-status');
@@ -11063,7 +12098,7 @@ function wireLifecycleBattleRoom(session){
   };
   document.getElementById('br-start').onclick = ()=>{
     if(session.battleEntryId && session.battlePrepSyncStatus === 'server'){
-      startServerBattleFromRoom(session).then(result => { if(result.error) alert(result.error); });
+      startServerBattleFromRoom(session).then(result => { if(result.error) appAlert(result.error); });
       return;
     }
     if(session.status === 'completed') return;
@@ -11100,22 +12135,27 @@ function wireLifecycleBattleRoom(session){
       window.pendingBattleSubmissionSource = 'uploaded_mix';
       const file=e.target.files[0];
       const error=window.DJBattleSubmission?.validateFile(file);
-      if(error){ setUploadStatus('Failed'); alert(error); return; }
-      if(file){ setUploadStatus('Draft'); uploadStatus.textContent=`Draft: ${file.name}`; uploadStatus.title=file.name; }
+      if(error){ setUploadStatus('Failed'); appAlert(error); return; }
+      if(file){ mixUploadState.file = file; setUploadStatus('Draft'); uploadStatus.textContent=`Draft: ${file.name}`; uploadStatus.title=file.name; }
     };
   }
+  const cancelUploadBtn = document.getElementById('br-upload-cancel');
+  if(cancelUploadBtn) cancelUploadBtn.onclick = () => cancelMixUpload();
   const submitSecureMix = async ()=>{
     if(session.submissionId && !['failed','retryable_failed'].includes(String(session.submissionStatus || '').toLowerCase())){
-      alert('This battle entry already has a submission in progress.');
+      appAlert('This battle entry already has a submission in progress.');
       return;
     }
-    const file=(uploadFile && uploadFile.files && uploadFile.files[0]) || window.lastRecordedMixFile;
-    if(!file){ alert('Choose a mix file first.'); return; }
-    if(!window.DJBattleSubmission || !window.DJBattleApi){ alert('Authenticated upload is unavailable.'); return; }
+    const file=(uploadFile && uploadFile.files && uploadFile.files[0]) || mixUploadState.file || window.lastRecordedMixFile;
+    if(!file){ appAlert('Choose a mix file first.'); return; }
+    mixUploadState.file = file;
+    if(!window.DJBattleSubmission || !window.DJBattleApi){ appAlert('Authenticated upload is unavailable.'); return; }
     const submissionSource = window.pendingBattleSubmissionSource === 'battle_studio' ? 'battle_studio' : 'uploaded_mix';
     window.pendingBattleSubmissionSource = 'uploaded_mix';
-    const result=await window.DJBattleSubmission.submitMix({ apiRequest:window.DJBattleApi.apiRequest, supabase:window.supabase, battleId:session.battleId || session.id, file, onStatus:setUploadStatus, battleContext:buildBattleSubmissionContext(session), submissionSource });
-    if(result.error){ setUploadStatus('Failed'); alert(result.error); return; }
+    const upload = beginMixUploadUi(file);
+    const result=await window.DJBattleSubmission.submitMix({ apiRequest:window.DJBattleApi.apiRequest, supabase:window.supabase, battleId:session.battleId || session.id, file, onStatus:setUploadStatus, onProgress:upload.onProgress, signal:upload.signal, battleContext:buildBattleSubmissionContext(session), submissionSource });
+    if(result.error){ finishMixUploadUi(result); if(!result.cancelled){ setUploadStatus('Failed'); appAlert(result.error); } return; }
+    finishMixUploadUi(result);
     session.submissionId = result.submissionId;
     session.submissionStatus = 'uploaded';
     session.status = 'submission_pending';
@@ -11154,6 +12194,7 @@ function wireLifecycleBattleRoom(session){
   });
   document.getElementById('br-leave').onclick = ()=>{ if(timerInt){ clearInterval(timerInt); timerInt=null; } stopBattleRoomLiveSync(); persistActiveBattleSession(session); switchView('battles'); };
   if(session.battleEntryId && session.battlePrepSyncStatus === 'server') scheduleBattleRoomLiveSync(session);
+  guardBattleRoomButtons();
 }
 
 function renderBattleStudioContext(session){
@@ -11180,8 +12221,55 @@ function getDeckRuntimeDiagnostics(){
   return deckRuntimeManager ? deckRuntimeManager.diagnostics() : {};
 }
 
+async function saveRecordingDraftToLibrary(file, meta = {}){
+  if(!file) return { ok:false, error:'No recorded take is available to save.' };
+  const id = `draft-${Date.now()}`;
+  const when = new Date();
+  const track = {
+    id,
+    title: meta.title || `Draft take ${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour:'numeric', minute:'2-digit' })}`,
+    artist: currentUser().displayName,
+    genre: meta.genre || 'Draft',
+    source: 'MY_LIBRARY',
+    sourceType: 'draft_take',
+    rightsCategory: 'Unverified',
+    battleEligible: false,
+    duration: meta.duration || '—',
+    fileName: file.name || `${id}.webm`,
+    mimeType: file.type || 'audio/webm',
+    createdAt: when.toISOString(),
+    uploadDate: when.toISOString(),
+    draftBattleId: meta.battleId || null,
+    draftTracklist: Array.isArray(meta.tracklist) ? meta.tracklist.slice(0, 50) : [],
+    visibility: 'private',
+    userId: currentProfileUserId()
+  };
+  state.library.unshift(track);
+  const saved = await attachLibraryAudioBlob(id, file);
+  if(!saved.ok){
+    state.library = state.library.filter(row => row.id !== id);
+    return { ok:false, error:saved.error || 'Could not store the take in this browser.' };
+  }
+  persist();
+  if(typeof renderLibrary === 'function'){ try{ renderLibrary(); }catch(e){} }
+  showAppToast('Draft saved', 'Find it under Library → Drafts.');
+  return { ok:true, track };
+}
+
+async function submitDraftTake(trackId){
+  const track = (state.library || []).find(row => String(row.id) === String(trackId) || String(row.libraryId || '') === String(trackId));
+  if(!track || track.sourceType !== 'draft_take') return { ok:false, error:'Draft not found.' };
+  const blob = await loadLibraryAudioBlob(track.id);
+  if(!blob){ appAlert('The audio for this draft is missing from this browser.'); return { ok:false, error:'missing_audio' }; }
+  const FileCtor = window.File;
+  window.lastRecordedMixFile = FileCtor ? new FileCtor([blob], track.fileName || `${track.id}.webm`, { type:track.mimeType || 'audio/webm' }) : blob;
+  return studioRecordingManager.submit();
+}
+
 const studioRecordingManager = StudioModules.recording.create({
   window,
+  confirm: (title, body, label) => appConfirmDanger(title, body, label),
+  saveDraftToLibrary: saveRecordingDraftToLibrary,
   document,
   state,
   localStorage,
@@ -11191,6 +12279,12 @@ const studioRecordingManager = StudioModules.recording.create({
   getAudioContext: () => deckRuntimeManager && deckRuntimeManager.getAudioContext(),
   getRecordingDestination: () => deckRuntimeManager && deckRuntimeManager.getRecordingDestination(),
   getMediaRecorder: () => window.MediaRecorder,
+  getMasterLevels: () => deckRuntimeManager && deckRuntimeManager.masterLevels ? deckRuntimeManager.masterLevels() : null,
+  getBattleLimitMs: () => { const s = activeStudioBattleSession(); return window.DJBattleStudioPro ? window.DJBattleStudioPro.battleRecordingLimitMs(s) : null; },
+  studioPro: window.DJBattleStudioPro,
+  computePeaks: (channels, n) => deckRuntimeManager && deckRuntimeManager.computePeaks ? deckRuntimeManager.computePeaks(channels, n) : [],
+  getTracklist: (start, end) => deckRuntimeManager && deckRuntimeManager.tracklistBetween ? deckRuntimeManager.tracklistBetween(start, end) : [],
+  formatTracklistTime: ms => window.DJBattleDeckRuntime && window.DJBattleDeckRuntime.formatTracklistTime ? window.DJBattleDeckRuntime.formatTracklistTime(ms) : String(ms),
   activeStudioBattleSession,
   switchView
 });
@@ -11238,6 +12332,7 @@ function wireControllerAndAudioControls(){ controllerMappingManager.wireControls
 function wireDeckRuntimeControls(){ return deckRuntimeManager ? deckRuntimeManager.wireControls() : undefined; }
 wireDeckRuntimeControls();
 wireStudioRecordingControls();
+scheduleFirstRunTour();
 const stemUnlock = document.getElementById('stem-unlock');
 if(stemUnlock) stemUnlock.onclick=()=>{if(!state.premium){openPremium('Premium unlocks stem-enabled battles and stem controls.');return;}document.getElementById('stem-buttons')?.classList.toggle('hidden');};
 
@@ -11251,7 +12346,7 @@ function timerText(){
 function resetTimer(m=10){clearInterval(timerInt);timerInt=null;timerSeconds=m*60;timerText();const tbtn=document.getElementById('timer-toggle'); if(tbtn) tbtn.textContent='Start'; const brnote=document.getElementById('br-timer-note'); if(brnote) brnote.textContent='Ready';}
 document.getElementById('timer-toggle').onclick=()=>{if(timerInt){clearInterval(timerInt);timerInt=null;document.getElementById('timer-toggle').textContent='Start';return;}document.getElementById('timer-toggle').textContent='Pause';timerInt=setInterval(()=>{timerSeconds--;timerText();if(timerSeconds<=0){clearInterval(timerInt);timerInt=null;document.getElementById('timer-toggle').textContent='Done';}},1000)};
 
-document.getElementById('judge-score-preview').onclick=()=>{const cats=[['Timing',20],['Phrasing',20],['Transition',20],['EQ / Frequency',15],['Energy',10],['Creativity',10],['Audio',5]];let total=0;const scores=cats.map(([n,m])=>{const s=Math.max(Math.floor(m*.7),Math.floor(m*(.78+Math.random()*.2)));total+=s;return [n,s,m]});document.getElementById('score-breakdown').innerHTML=scores.map(x=>`<div class="score-chip">${x[0]} <strong>${x[1]}/${x[2]}</strong></div>`).join('')+`<div class="score-chip" style="grid-column:1/-1;color:var(--accent)">PRACTICE SCORE <strong style="color:var(--accent)">${total}/100</strong></div>`;};
+document.getElementById('judge-score-preview').onclick=()=>{const cats=[['Timing',20],['Phrasing',20],['Transition',20],['EQ / Frequency',15],['Energy',10],['Creativity',10],['Audio',5]];document.getElementById('score-breakdown').innerHTML=`<div class="score-chip preview-label" style="grid-column:1/-1"><strong>PREVIEW</strong> — how a battle is scored. Real scores appear after a judged battle.</div>`+cats.map(x=>`<div class="score-chip">${esc(x[0])} <strong>— / ${x[1]}</strong></div>`).join('')+`<div class="score-chip" style="grid-column:1/-1;color:var(--accent)">TOTAL <strong style="color:var(--accent)">— / 100</strong></div>`;};
 
 function recoverActiveBattleSession(){
   const saved = safeParse('djBattleActiveSession', null);
@@ -11318,7 +12413,7 @@ document.addEventListener('change', event => {
   if(!file || !trackId) return;
   attachLibraryAudioBlob(trackId, file).then(result => {
     if(!result.ok){
-      alert(result.error || 'Could not re-attach audio');
+      appAlert(result.error || 'Could not re-attach audio');
       return;
     }
     persist();
@@ -11328,6 +12423,30 @@ document.addEventListener('change', event => {
 });
 
 window.__DJBattleTestHooks = {
+  shouldShowFirstRunTour,
+  maybeShowFirstRunTour,
+  replayGuidedTour,
+  battleShareCardData,
+  drawBattleShareCard,
+  shareBattleResult,
+  battleShareFileName,
+  completedResultActionsHtml,
+  renderHeroScore,
+  saveRecordingDraftToLibrary,
+  submitDraftTake,
+  getStudioRecordingManager: () => studioRecordingManager,
+  mentionifyText,
+  mentionSuggestions,
+  mentionedProfileIdsFor,
+  extractMentionHandles,
+  knownMentionDjs,
+  recordLocalMentionAlerts,
+  localMentionAlertsForMe,
+  wireMentionAutocomplete,
+  postAuthorFollowButtonHtml,
+  followPostAuthor,
+  collectActivityEntries,
+  appConfirmDanger, showErrorToast, runAction, handleGlobalError, relativeTimeLabel, relativeTimeHtml, chooseReportReason, REPORT_REASONS,
   initAuth,
   currentUser,
   renderCurrentUserUI,
@@ -11486,6 +12605,8 @@ window.__DJBattleTestHooks = {
   getProfileRankingState: () => state.profileRanking,
   setPublicRankingsState: patch => { state.publicRankings = { ...state.publicRankings, ...patch, filters:{ ...state.publicRankings.filters, ...(patch && patch.filters || {}) } }; },
   getBattleResults: () => state.battleResults,
+  latestBattleScore,
+  renderHeroScore,
   getBattleProgress: () => state.battleProgress,
   getPracticeHistory: () => state.practiceHistory,
   getBattleHistoryFilters: () => state.battleHistoryFilters,
@@ -11631,3 +12752,676 @@ wireControllerAndAudioControls();
 // initial render of studio library if present
 renderStudioLibrary();
 renderStudioLibraryDrawer();
+
+
+/* ---- Upload details: real duration + duplicate detection ---- */
+function formatTrackDuration(seconds){
+  const total = Math.round(Number(seconds));
+  if(!Number.isFinite(total) || total <= 0) return '';
+  const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), sec = total % 60;
+  return h ? `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}` : `${m}:${String(sec).padStart(2,'0')}`;
+}
+function readAudioDuration(file, timeoutMs){
+  return new Promise(resolve => {
+    try{
+      if(!file || !window.URL || typeof window.URL.createObjectURL !== 'function') return resolve('');
+      const audio = document.createElement('audio');
+      const url = window.URL.createObjectURL(file);
+      let done = false;
+      const finish = value => { if(done) return; done = true; try{ window.URL.revokeObjectURL(url); }catch(e){} resolve(value); };
+      audio.preload = 'metadata';
+      audio.onloadedmetadata = () => finish(formatTrackDuration(audio.duration));
+      audio.onerror = () => finish('');
+      const timer = setTimeout(() => finish(''), timeoutMs || 4000);
+      if(timer && typeof timer.unref === 'function') timer.unref();
+      audio.src = url;
+    }catch(error){ resolve(''); }
+  });
+}
+function uploadIdentity(item){
+  const name = String(item && (item.fileName || item.name) || '').trim().toLowerCase();
+  const size = Number(item && item.size) || 0;
+  return name && size ? `${name}::${size}` : '';
+}
+function findDuplicateUpload(file, pending){
+  const id = uploadIdentity(file);
+  if(!id) return null;
+  const pool = [...(state.library || []), ...(pending || [])];
+  return pool.find(item => {
+    if(uploadIdentity(item) === id) return true;
+    const title = String(item && (item.title || item.name) || '').trim().toLowerCase();
+    const base = String(file.name || '').replace(/\.[^/.]+$/, '').trim().toLowerCase();
+    return !item.fileName && title && title === base && Number(item.size) === Number(file.size);
+  }) || null;
+}
+function addImportedItemsToLibrary(items, fileName){
+  let added = 0;
+  const key = item => `${String(item.title || item.name || '').trim().toLowerCase()}::${String(item.artist || '').trim().toLowerCase()}`;
+  const known = new Set((state.library || []).map(key));
+  (items || []).forEach((item, index) => {
+    if(!item || !item.title) return;
+    const k = key(item);
+    if(known.has(k)) return;
+    known.add(k);
+    state.library.push({
+      id:`pl-${Date.now()}-${index}`,
+      title:item.title, name:item.title, artist:item.artist || 'Unknown', album:item.album || null,
+      genre:item.genre || 'Unsorted', bpm:item.bpm || '--', key:item.key || '--', duration:item.duration || '--',
+      uploadDate:new Date().toISOString(), size:0, source:'PLAYLIST_IMPORT', importedFrom:fileName || '',
+      metadataOnly:true, audioMissing:true, rightsCategory:null
+    });
+    added += 1;
+  });
+  return added;
+}
+
+/* ---- Settings: back up, restore, reset ---- */
+const APP_STORAGE_PREFIX = 'djBattle';
+const APP_BACKUP_FORMAT = 'djb-backup';
+function appOwnedStorageKeys(){
+  const keys = [];
+  for(let i = 0; i < localStorage.length; i += 1){
+    const k = localStorage.key(i);
+    if(k && k.indexOf(APP_STORAGE_PREFIX) === 0) keys.push(k);
+  }
+  return keys.sort();
+}
+function blobToDataUrl(blob){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+function dataUrlToBlob(dataUrl){
+  const match = String(dataUrl || '').match(/^data:([^;,]*)(;base64)?,(.*)$/);
+  if(!match) return null;
+  const bytes = match[2] ? atob(match[3]) : decodeURIComponent(match[3]);
+  const arr = new Uint8Array(bytes.length);
+  for(let i = 0; i < bytes.length; i += 1) arr[i] = bytes.charCodeAt(i);
+  return new Blob([arr], { type:match[1] || 'application/octet-stream' });
+}
+async function listLibraryAudioKeys(){
+  try{
+    const db = await openLibraryAudioDb();
+    const keys = await idbRequest(db.transaction(LIBRARY_AUDIO_STORE, 'readonly').objectStore(LIBRARY_AUDIO_STORE).getAllKeys());
+    db.close();
+    return (keys || []).map(String);
+  }catch(error){ return []; }
+}
+async function buildAppBackup(){
+  const storage = {};
+  appOwnedStorageKeys().forEach(k => { storage[k] = localStorage.getItem(k); });
+  const audio = {};
+  for(const key of await listLibraryAudioKeys()){
+    const blob = await loadLibraryAudioBlob(key);
+    if(blob) { try{ audio[key] = await blobToDataUrl(blob); }catch(e){} }
+  }
+  return { format:APP_BACKUP_FORMAT, version:1, createdAt:new Date().toISOString(), localStorage:storage, libraryAudio:audio };
+}
+function validateAppBackup(data){
+  if(!data || typeof data !== 'object') return 'That file is not a DJ Battle backup.';
+  if(data.format !== APP_BACKUP_FORMAT) return 'That file is not a DJ Battle backup.';
+  if(!data.localStorage || typeof data.localStorage !== 'object') return 'The backup has no saved app data.';
+  return '';
+}
+async function restoreAppBackup(data){
+  const error = validateAppBackup(data);
+  if(error) return { ok:false, error };
+  appOwnedStorageKeys().forEach(k => localStorage.removeItem(k));
+  let keys = 0;
+  Object.keys(data.localStorage).forEach(k => {
+    if(k.indexOf(APP_STORAGE_PREFIX) !== 0) return;
+    localStorage.setItem(k, String(data.localStorage[k]));
+    keys += 1;
+  });
+  let audio = 0;
+  for(const [key, value] of Object.entries(data.libraryAudio || {})){
+    const blob = dataUrlToBlob(value);
+    if(blob && (await saveLibraryAudioBlob(key, blob)).ok) audio += 1;
+  }
+  return { ok:true, keys, audio };
+}
+async function resetAppData(){
+  const keys = appOwnedStorageKeys();
+  keys.forEach(k => localStorage.removeItem(k));
+  for(const key of await listLibraryAudioKeys()) await deleteLibraryAudioBlob(key);
+  return { ok:true, keys:keys.length };
+}
+function setDataStatus(text, tone){
+  const el = document.getElementById('settings-data-status');
+  if(el){ el.textContent = text; el.dataset.tone = tone || ''; }
+}
+function reloadAfterDataChange(){
+  if(window.DJB_NO_RELOAD) return;
+  setTimeout(() => window.location.reload(), 900);
+}
+async function downloadAppBackup(){
+  const backup = await buildAppBackup();
+  const json = JSON.stringify(backup, null, 2);
+  if(window.URL && typeof window.URL.createObjectURL === 'function' && !window.DJB_NO_DOWNLOAD){
+    const url = window.URL.createObjectURL(new Blob([json], { type:'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `djb-backup-${backup.createdAt.slice(0,10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+  }
+  const summary = `${Object.keys(backup.localStorage).length} saved item(s), ${Object.keys(backup.libraryAudio).length} audio file(s).`;
+  setDataStatus(`Backup saved: ${summary}`, 'ok');
+  showAppToast('Backup saved', summary);
+  return { ok:true, backup, json };
+}
+async function restoreAppBackupFromFile(file){
+  if(!file) return { ok:false, error:'Choose a backup file.' };
+  let data;
+  try{ data = JSON.parse(await file.text()); }catch(error){ data = null; }
+  const problem = validateAppBackup(data);
+  if(problem){ setDataStatus(problem, 'denied'); showAppToast('Restore failed', problem); return { ok:false, error:problem }; }
+  if(!window.confirm(`Restore the backup from ${String(data.createdAt || '').slice(0,10) || 'this file'}? This replaces the data in this browser.`)) return { ok:false, cancelled:true };
+  const result = await restoreAppBackup(data);
+  setDataStatus(`Restored ${result.keys} saved item(s) and ${result.audio} audio file(s). Reloading…`, 'ok');
+  showAppToast('Backup restored', 'Reloading the app with your saved data.');
+  reloadAfterDataChange();
+  return result;
+}
+async function confirmAndResetAppData(){
+  if(!window.confirm('Reset this app? This deletes your library, playlists, battles, posts and settings saved in this browser. Back up first if you want to keep them.')) return { ok:false, cancelled:true };
+  const result = await resetAppData();
+  setDataStatus('App data reset. Reloading…', 'ok');
+  showAppToast('App reset', `${result.keys} saved item(s) removed.`);
+  reloadAfterDataChange();
+  return result;
+}
+function wireDataBackupControls(){
+  const backup = document.getElementById('settings-backup');
+  const restore = document.getElementById('settings-restore');
+  const input = document.getElementById('settings-restore-file');
+  const reset = document.getElementById('settings-reset');
+  if(backup) backup.onclick = () => downloadAppBackup().catch(error => setDataStatus(`Backup failed: ${error.message || error}`, 'denied'));
+  if(restore && input) restore.onclick = () => input.click();
+  if(input) input.onchange = event => { const file = event.currentTarget.files && event.currentTarget.files[0]; event.currentTarget.value = ''; restoreAppBackupFromFile(file).catch(error => setDataStatus(`Restore failed: ${error.message || error}`, 'denied')); };
+  if(reset) reset.onclick = () => confirmAndResetAppData().catch(error => setDataStatus(`Reset failed: ${error.message || error}`, 'denied'));
+}
+wireDataBackupControls();
+
+// ---- Oct 13: sign-out data prompt, mix upload progress, crate undo/archive, rating history ----
+function signOutWithDataPrompt(){
+  document.getElementById('signout-dialog')?.remove();
+  return new Promise(resolve => {
+    const wrap = document.createElement('div');
+    wrap.id = 'signout-dialog';
+    wrap.className = 'djb-modal-backdrop';
+    wrap.innerHTML = `<div class="djb-modal panel" role="dialog" aria-modal="true" aria-labelledby="signout-title">
+      <span class="eyebrow accent">SIGN OUT</span><h3 id="signout-title">Also remove my data from this device?</h3>
+      <p>Your library, battles and profile are saved in this browser. On a shared computer, remove them so the next person can't see them. On your own device, keep them.</p>
+      <div class="djb-modal-actions"><button class="ghost" type="button" data-signout-cancel>Cancel</button><button class="primary" type="button" data-signout-keep>Keep my data</button><button class="ghost danger" type="button" data-signout-remove>Remove my data</button></div>
+    </div>`;
+    document.body.appendChild(wrap);
+    const done = async choice => {
+      wrap.remove();
+      if(choice === 'cancel') return resolve({ ok:false, cancelled:true });
+      try{ if(window.supabase && window.supabase.auth) await window.supabase.auth.signOut(); }catch(e){ console.warn('signOut failed', e); }
+      updateAuthUI(null);
+      if(choice === 'remove'){
+        const result = await resetAppData();
+        showAppToast('Signed out', `Removed ${result.keys} saved item(s) from this device.`);
+        reloadAfterDataChange();
+        return resolve({ ok:true, removed:true, keys:result.keys });
+      }
+      showAppToast('Signed out', 'Your data is still saved on this device.');
+      resolve({ ok:true, removed:false });
+    };
+    wrap.querySelector('[data-signout-cancel]').onclick = () => done('cancel');
+    wrap.querySelector('[data-signout-keep]').onclick = () => done('keep');
+    wrap.querySelector('[data-signout-remove]').onclick = () => done('remove');
+  });
+}
+
+var mixUploadState = { file:null, controller:null };
+function beginMixUploadUi(file){
+  mixUploadState.file = file;
+  mixUploadState.controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const bar = document.querySelector('#br-upload-progress i');
+  const pct = document.getElementById('br-upload-percent');
+  const cancel = document.getElementById('br-upload-cancel');
+  const retry = document.getElementById('br-submit-btn');
+  if(cancel) cancel.hidden = false;
+  if(retry) retry.hidden = true;
+  if(pct) pct.textContent = '0%';
+  return {
+    signal: mixUploadState.controller && mixUploadState.controller.signal,
+    onProgress: fraction => {
+      const value = Math.max(0, Math.min(100, Math.round(Number(fraction || 0) * 100)));
+      if(bar) bar.style.width = `${value}%`;
+      if(pct) pct.textContent = `${value}%`;
+      const status = document.getElementById('br-upload-status');
+      if(status) status.textContent = `Uploading ${file.name}… ${value}%`;
+    }
+  };
+}
+function finishMixUploadUi(result){
+  mixUploadState.controller = null;
+  const cancel = document.getElementById('br-upload-cancel');
+  const retry = document.getElementById('br-submit-btn');
+  const pct = document.getElementById('br-upload-percent');
+  if(cancel) cancel.hidden = true;
+  if(result && result.error){
+    if(retry){ retry.hidden = false; retry.textContent = mixUploadState.file ? `Retry upload (${mixUploadState.file.name})` : 'Retry upload'; }
+    const status = document.getElementById('br-upload-status');
+    if(status && result.cancelled) status.textContent = 'Upload cancelled. Your file is still selected — tap Retry upload.';
+    if(pct && result.cancelled) pct.textContent = '';
+  } else {
+    if(retry) retry.hidden = true;
+    if(pct) pct.textContent = '100%';
+  }
+}
+function cancelMixUpload(){
+  if(mixUploadState.controller){ mixUploadState.controller.abort(); return true; }
+  return false;
+}
+
+var ARCHIVED_CRATES_KEY = 'djBattleArchivedCrates';
+var CRATE_UNDO_MS = 6000;
+function loadArchivedCrates(){ try{ return JSON.parse(localStorage.getItem(ARCHIVED_CRATES_KEY) || '[]') || []; }catch(e){ return []; } }
+function saveArchivedCrates(list){ localStorage.setItem(ARCHIVED_CRATES_KEY, JSON.stringify(list)); }
+var crateUndoTimers = {};
+async function archiveCrateWithUndo(crateId){
+  const editable = getEditableLibraryCrate(crateId);
+  if(!editable) return { ok:false, error:'Crate is unavailable.' };
+  const crate = JSON.parse(JSON.stringify(editable.crate));
+  const index = editable.index;
+  // remove locally now; delay any server delete until the undo window passes
+  state.playlists.splice(index, 1);
+  if(state.libraryFilters.crate === crateLibraryId(crate.id)) state.libraryFilters.crate = 'all';
+  const list = loadArchivedCrates().filter(item => item.crate.id !== crate.id);
+  list.unshift({ crate, index, archivedAt:new Date().toISOString() });
+  saveArchivedCrates(list);
+  persist();
+  renderLibrary();
+  showCrateUndoToast(crate);
+  crateUndoTimers[crate.id] = setTimeout(() => {
+    delete crateUndoTimers[crate.id];
+    hideCrateUndoToast(crate.id);
+    if(crate.serverBacked){
+      const request = window.DJBattleApi && window.DJBattleApi.apiRequest && state.musicLibrarySync.status !== 'offline'
+        ? window.DJBattleApi.apiRequest(`/api/musicLibrary/crates/${encodeURIComponent(crate.id)}`, { method:'DELETE' })
+        : Promise.resolve({ error:'offline' });
+      request.then(r => { if(r && r.error) queueMusicLibrarySyncChange({ type:'crate', action:'delete', crateId:crate.id, body:{} }); }).catch(()=>{});
+    }
+  }, CRATE_UNDO_MS);
+  return { ok:true, crate };
+}
+function restoreArchivedCrate(crateId){
+  const list = loadArchivedCrates();
+  const found = list.find(item => item.crate.id === crateId);
+  if(!found) return { ok:false, error:'Archived crate not found.' };
+  const undoPending = Boolean(crateUndoTimers[crateId]);
+  if(undoPending){ clearTimeout(crateUndoTimers[crateId]); delete crateUndoTimers[crateId]; }
+  const crate = found.crate;
+  // once the server copy is gone, bring it back as a local crate
+  if(crate.serverBacked && !undoPending){ crate.serverBacked = false; crate.syncStatus = 'local'; }
+  state.playlists.splice(Math.min(found.index, state.playlists.length), 0, crate);
+  saveArchivedCrates(list.filter(item => item.crate.id !== crateId));
+  hideCrateUndoToast(crateId);
+  persist();
+  renderLibrary();
+  showAppToast('Crate restored', crate.name || 'Crate');
+  return { ok:true, crate };
+}
+function showCrateUndoToast(crate){
+  hideCrateUndoToast(crate.id);
+  const toast = document.createElement('div');
+  toast.className = 'crate-undo-toast';
+  toast.dataset.crateUndoToast = crate.id;
+  toast.setAttribute('role', 'status');
+  toast.innerHTML = `<span>Crate archived — <strong>${esc(crate.name || 'Crate')}</strong></span><button class="primary small" type="button">Undo</button>`;
+  toast.querySelector('button').onclick = () => restoreArchivedCrate(crate.id);
+  document.body.appendChild(toast);
+}
+function hideCrateUndoToast(crateId){
+  document.querySelectorAll('.crate-undo-toast').forEach(el => { if(el.dataset.crateUndoToast === String(crateId)) el.remove(); });
+}
+function renderArchivedCrates(){
+  const table = document.getElementById('library-table');
+  if(!table) return;
+  const host = table.closest('.panel, section') || table.parentElement;
+  let panel = document.getElementById('archived-crates');
+  const list = loadArchivedCrates();
+  if(!list.length){ if(panel) panel.remove(); return; }
+  if(!panel){ panel = document.createElement('div'); panel.id = 'archived-crates'; panel.className = 'archived-crates panel'; host.appendChild(panel); }
+  panel.innerHTML = `<span class="eyebrow">ARCHIVED CRATES</span><ul>${list.map(item => `<li><span><strong>${esc(item.crate.name || 'Crate')}</strong><small>Archived ${esc(new Date(item.archivedAt).toLocaleDateString())}</small></span><button class="ghost small" type="button" data-crate-restore="${esc(item.crate.id)}">Restore</button></li>`).join('')}</ul>`;
+  panel.querySelectorAll('[data-crate-restore]').forEach(btn => btn.onclick = () => restoreArchivedCrate(btn.dataset.crateRestore));
+}
+(function wrapRenderLibraryForArchive(){
+  const original = renderLibrary;
+  renderLibrary = function(){ const out = original.apply(this, arguments); try{ renderArchivedCrates(); }catch(e){ console.warn('archived crates render failed', e); } return out; };
+})();
+
+function ratingHistoryPoints(results = state.battleResults){
+  return (results || [])
+    .filter(r => r && r.progressAfter && Number.isFinite(Number(r.progressAfter.rating)))
+    .map(r => ({ t:new Date(r.completedAt || r.date || 0).getTime() || 0, rating:Number(r.progressAfter.rating), before:Number(r.progressBefore && r.progressBefore.rating) }))
+    .sort((a,b) => a.t - b.t);
+}
+function ratingChangeSinceLastWeek(points, now = Date.now()){
+  if(!points.length) return null;
+  const weekAgo = now - 7*24*3600*1000;
+  const current = points[points.length - 1].rating;
+  const older = points.filter(p => p.t <= weekAgo);
+  let base;
+  if(older.length) base = older[older.length - 1].rating;
+  else { const first = points[0]; base = Number.isFinite(first.before) ? first.before : first.rating; }
+  return current - base;
+}
+function ratingHistorySvg(points){
+  const w = 320, h = 90, pad = 8;
+  const vals = points.map(p => p.rating);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const span = max - min || 1;
+  const xy = points.map((p, i) => [pad + (points.length === 1 ? (w - 2*pad)/2 : i * (w - 2*pad) / (points.length - 1)), h - pad - ((p.rating - min) / span) * (h - 2*pad)]);
+  const line = xy.map(([x,y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  return `<svg class="rating-history-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Battle rating over your last ${points.length} battles"><polyline points="${line}" fill="none" stroke="var(--accent, #b9ff31)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>${xy.map(([x,y]) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="var(--accent, #b9ff31)"/>`).join('')}</svg>`;
+}
+function renderRatingHistory(){
+  const el = document.getElementById('profile-rating-history');
+  if(!el) return;
+  const points = ratingHistoryPoints().slice(-20);
+  if(!points.length){
+    el.innerHTML = `<span class="eyebrow">RATING OVER TIME</span><p class="rating-history-empty">No battles yet — your rating chart starts after your first judged battle.</p>`;
+    return;
+  }
+  const delta = ratingChangeSinceLastWeek(points);
+  const sign = delta > 0 ? '+' : delta < 0 ? '−' : '±';
+  const tone = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
+  el.innerHTML = `<div class="rating-history-head"><span class="eyebrow">RATING OVER TIME</span><strong class="rating-history-delta" data-tone="${tone}">${sign}${Math.abs(delta)} since last week</strong></div>${points.length > 1 ? ratingHistorySvg(points) : `<p class="rating-history-empty">One battle so far (rating ${points[0].rating}). Battle again to see your trend.</p>`}`;
+}
+renderRatingHistory();
+
+
+// ---- Community stats: crowd voting, editing, head-to-head, streaks & badges, drafts ----
+function libraryLimitCounts(rows = state.library){
+  const list = Array.isArray(rows) ? rows : [];
+  const drafts = list.filter(t => t && t.sourceType === 'draft_take').length;
+  return { tracks:list.length - drafts, drafts };
+}
+
+// Crowd voting
+function crowdVoteParticipants(battle){
+  return ((battle && battle.participants) || []).filter(p => p && p.userId != null && String(p.status || '') !== 'withdrawn').map(p => ({ userId:String(p.userId), name:p.name || p.displayName || 'DJ' }));
+}
+function isFinishedBattleForCrowd(battle){
+  return Boolean(battle) && ['completed','finished','resolved'].includes(String(battle.lobbyStatus || battle.status || '').toLowerCase());
+}
+function crowdVoteStore(){
+  try{ const parsed = JSON.parse(localStorage.getItem('djBattleCrowdVotes') || '{}'); return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}; }catch(e){ return {}; }
+}
+function saveCrowdVoteStore(store){ localStorage.setItem('djBattleCrowdVotes', JSON.stringify(store)); }
+function crowdVoteSummaryFrom(participants, votes, viewerId){
+  const counts = Object.fromEntries(participants.map(p => [p.userId, 0]));
+  let total = 0; let viewerPick = null;
+  Object.entries(votes || {}).forEach(([voter, pick]) => {
+    if(!(String(pick) in counts)) return;
+    counts[pick] += 1; total += 1;
+    if(viewerId && String(voter) === String(viewerId)) viewerPick = String(pick);
+  });
+  return { totalVotes:total, viewerPick, shares:participants.map(p => ({ userId:p.userId, name:p.name, votes:counts[p.userId], percent: total ? Math.round(counts[p.userId] / total * 100) : 0 })) };
+}
+function localCrowdVoteSummary(battle){
+  const entry = crowdVoteStore()[String(battle && battle.id)] || {};
+  return { ...crowdVoteSummaryFrom(crowdVoteParticipants(battle), entry.votes || {}, currentProfileUserId()), source:'local' };
+}
+function crowdVoteEligibility(battle){
+  const participants = crowdVoteParticipants(battle);
+  const me = String(currentProfileUserId());
+  if(!battle || participants.length < 2) return { canVote:false, reason:'no_opponent' };
+  if(!isFinishedBattleForCrowd(battle)) return { canVote:false, reason:'not_finished' };
+  if(participants.some(p => p.userId === me)) return { canVote:false, reason:'participant' };
+  return { canVote:true };
+}
+function recordLocalCrowdVote(battle, pickedUserId){
+  const check = crowdVoteEligibility(battle);
+  if(!check.canVote) return { ok:false, reason:check.reason };
+  if(!crowdVoteParticipants(battle).some(p => p.userId === String(pickedUserId))) return { ok:false, reason:'invalid_pick' };
+  const store = crowdVoteStore();
+  const key = String(battle.id);
+  const entry = store[key] || { votes:{} };
+  const me = String(currentProfileUserId());
+  if(entry.votes[me]) return { ok:false, duplicate:true, summary:localCrowdVoteSummary(battle) };
+  entry.votes[me] = String(pickedUserId);
+  store[key] = entry;
+  saveCrowdVoteStore(store);
+  return { ok:true, summary:localCrowdVoteSummary(battle) };
+}
+function crowdVoteText(summary){
+  if(!summary || !summary.totalVotes) return 'Crowd: No votes yet';
+  return `Crowd: ${summary.shares.map(s => `${s.percent}%`).join(' / ')} (${summary.totalVotes} vote${summary.totalVotes === 1 ? '' : 's'})`;
+}
+function crowdVoteOrderedForViewer(battle, summary){
+  const me = String(currentProfileUserId());
+  const shares = (summary.shares || []).slice().sort((a, b) => (a.userId === me ? -1 : b.userId === me ? 1 : 0));
+  return { ...summary, shares };
+}
+function crowdVoteInlineHtml(battle){
+  if(crowdVoteParticipants(battle).length < 2) return '';
+  const summary = crowdVoteOrderedForViewer(battle, localCrowdVoteSummary(battle));
+  return `<em class="crowd-vote-inline" data-crowd-inline="${esc(battle.id)}">${esc(crowdVoteText(summary))}</em>`;
+}
+function crowdVoteResultModuleHtml(battle){
+  const participants = crowdVoteParticipants(battle);
+  if(participants.length < 2) return `<div class="battle-result-module crowd-vote-module"><span>Crowd vote</span><strong>Solo battle</strong><p>Crowd voting needs two DJs.</p></div>`;
+  const summary = crowdVoteOrderedForViewer(battle, localCrowdVoteSummary(battle));
+  if(battle && battle.id) setTimeout(() => refreshCrowdVoteSummary(battle).catch(() => {}), 0);
+  return `<div class="battle-result-module crowd-vote-module" data-crowd-module="${esc(battle.id)}"><span>Crowd vote</span><strong data-crowd-text>${esc(crowdVoteText(summary))}</strong><p>${esc(summary.shares.map(s => s.name).join(' vs '))} · listeners only, one vote each</p></div>`;
+}
+async function fetchServerCrowdSummary(battle){
+  if(!communityApiAvailable() || !battle || !battle.serverBacked && !/^[0-9a-f-]{8,}$/i.test(String(battle.id || ''))) return null;
+  const response = await window.DJBattleApi.apiRequest(`/api/battles/${encodeURIComponent(battle.id)}/crowdVotes`, { public:true });
+  if(!response || response.error || !response.data || !response.data.summary) return null;
+  const names = Object.fromEntries(crowdVoteParticipants(battle).map(p => [p.userId, p.name]));
+  const summary = response.data.summary;
+  return { ...summary, shares:(summary.shares || []).map(s => ({ ...s, name:names[s.userId] || 'DJ' })), source:'server' };
+}
+async function refreshCrowdVoteSummary(battle){
+  let summary = null;
+  try{ summary = await fetchServerCrowdSummary(battle); }catch(e){ summary = null; }
+  if(!summary) summary = localCrowdVoteSummary(battle);
+  summary = crowdVoteOrderedForViewer(battle, summary);
+  document.querySelectorAll(`[data-crowd-module="${window.CSS && window.CSS.escape ? window.CSS.escape(String(battle.id)) : String(battle.id)}"] [data-crowd-text]`).forEach(el => { el.textContent = crowdVoteText(summary); });
+  document.querySelectorAll(`[data-crowd-inline="${window.CSS && window.CSS.escape ? window.CSS.escape(String(battle.id)) : String(battle.id)}"]`).forEach(el => { el.textContent = crowdVoteText(summary); });
+  return summary;
+}
+function crowdVoteCardButtonHtml(b){
+  const check = crowdVoteEligibility(b);
+  if(!check.canVote) return '';
+  const voted = localCrowdVoteSummary(b).viewerPick;
+  return `<button class="ghost small crowd-vote-btn" type="button" data-crowd-vote="${esc(b.id)}">${voted ? 'Crowd result' : 'Vote'}</button>`;
+}
+function findBattleForCrowd(battleId){
+  const list = typeof battles !== 'undefined' && Array.isArray(battles) ? battles : [];
+  return list.find(b => String(b.id) === String(battleId)) || null;
+}
+async function submitCrowdVote(battle, pickedUserId){
+  if(communityServerMode() && (battle.serverBacked || /^[0-9a-f-]{8,}$/i.test(String(battle.id || '')))){
+    const response = await window.DJBattleApi.apiRequest(`/api/battles/${encodeURIComponent(battle.id)}/crowdVotes`, { method:'POST', body:{ pickedUserId } });
+    if(response && !response.error){
+      recordLocalCrowdVote(battle, pickedUserId);
+      return { ok:true, server:true, duplicate:Boolean(response.data && response.data.duplicate) };
+    }
+    if(response && response.status && response.status !== 503) return { ok:false, error:response.error };
+  }
+  return recordLocalCrowdVote(battle, pickedUserId);
+}
+function openCrowdVote(battleId){
+  const battle = findBattleForCrowd(battleId);
+  if(!battle) return null;
+  const summary = localCrowdVoteSummary(battle);
+  const voted = summary.viewerPick;
+  const buttons = summary.shares.map(s => `<button class="${voted === s.userId ? 'primary' : 'ghost'} crowd-pick" type="button" data-crowd-pick="${esc(s.userId)}" ${voted ? 'disabled' : ''}><strong>${esc(s.name)}</strong><small>${esc(s.percent)}% · ${esc(s.votes)} vote${s.votes === 1 ? '' : 's'}</small></button>`).join('');
+  openModal(`<span class="eyebrow accent">CROWD VOTE</span><h3>${esc(battle.title || 'Battle')}</h3><p style="color:var(--muted)">${voted ? 'Thanks — your vote is in. One vote per listener.' : 'Who won? Pick one DJ. You can vote once.'}</p><div class="crowd-pick-row">${buttons}</div><p class="crowd-vote-total" id="crowd-vote-total">${esc(crowdVoteText(summary))}</p><div class="modal-actions"><button class="ghost" value="cancel">Close</button></div>`);
+  document.querySelectorAll('[data-crowd-pick]').forEach(button => {
+    button.onclick = async event => {
+      const pick = event.currentTarget.dataset.crowdPick;
+      const result = await submitCrowdVote(battle, pick);
+      if(result && result.ok === false && !result.duplicate){ showErrorToast(result.error || 'Vote not counted.'); return; }
+      openCrowdVote(battle.id);
+    };
+  });
+  return summary;
+}
+document.addEventListener('click', event => {
+  const target = event.target && event.target.closest && event.target.closest('[data-crowd-vote]');
+  if(target){ event.preventDefault(); openCrowdVote(target.dataset.crowdVote); }
+});
+
+// Inline editing for own posts and comments
+function startInlinePostEdit(postId){
+  const card = document.querySelector(`[data-community-post="${window.CSS && window.CSS.escape ? window.CSS.escape(String(postId)) : postId}"].community-post`);
+  const post = state.community.posts.find(row => String(row.id) === String(postId)) || localCommunityPosts().find(row => String(row.id) === String(postId));
+  if(!card || !post || !(post.viewer && post.viewer.isOwner)) return null;
+  if(card.querySelector('.inline-editor')) return card.querySelector('.inline-editor');
+  const editor = document.createElement('form');
+  editor.className = 'inline-editor';
+  editor.innerHTML = `<label>Title<input data-edit-title maxlength="180" value="${esc(post.title || '')}"></label><label>Post<textarea data-edit-body maxlength="4000" rows="4">${esc(post.bodyText || '')}</textarea></label><p class="inline-editor-error hidden" role="alert"></p><div class="inline-editor-actions"><button class="ghost small" type="button" data-edit-cancel>Cancel</button><button class="primary small" type="submit">Save</button></div>`;
+  const body = card.querySelector('h4');
+  card.querySelectorAll(':scope > h4, :scope > p').forEach(el => el.classList.add('hidden'));
+  (body ? body : card).insertAdjacentElement(body ? 'beforebegin' : 'beforeend', editor);
+  if(typeof wireMentionAutocomplete === 'function') wireMentionAutocomplete(editor.querySelector('[data-edit-body]'));
+  if(typeof wireTextLimits === 'function'){ try{ wireTextLimits(editor); }catch(e){} }
+  editor.querySelector('[data-edit-cancel]').onclick = () => renderPosts();
+  editor.onsubmit = event => { event.preventDefault(); saveInlinePostEdit(post, editor.querySelector('[data-edit-title]').value, editor.querySelector('[data-edit-body]').value, editor); };
+  editor.querySelector('[data-edit-body]').focus();
+  return editor;
+}
+async function saveInlinePostEdit(post, title, bodyText, editor){
+  const showError = message => { const el = editor && editor.querySelector('.inline-editor-error'); if(el){ el.textContent = message; el.classList.remove('hidden'); } };
+  const cleanTitle = String(title || '').slice(0, 180);
+  const cleanBody = String(bodyText || '').slice(0, 4000);
+  if(!cleanTitle.trim() || !cleanBody.trim()){ showError('Title and post can’t be empty.'); return { error:'missing_fields' }; }
+  if(post.localOnly){
+    const row = state.posts[post.localIndex];
+    if(!row || !isOwnLocalPost(row)){ showError('You can only edit your own posts.'); return { forbidden:true }; }
+    row.title = cleanTitle; row.body = cleanBody; row.editedAt = new Date().toISOString();
+    persist();
+  }else{
+    const response = await window.DJBattleApi.apiRequest(`/api/community/posts/${encodeURIComponent(post.id)}`, { method:'PATCH', body:{ title:cleanTitle, bodyText:cleanBody, mentionedProfileIds:mentionedProfileIdsFor(cleanBody) } });
+    if(response.error){ showError(`Couldn't save: ${response.error}`); return response; }
+    const updated = response.data && response.data.post;
+    state.community.posts = state.community.posts.map(row => String(row.id) === String(post.id) ? (updated || { ...row, title:cleanTitle, bodyText:cleanBody, editedAt:new Date().toISOString() }) : row);
+  }
+  renderPosts();
+  if(activeProfileTab === 'posts' && typeof renderProfileCommunityPosts === 'function') renderProfileCommunityPosts();
+  return { ok:true };
+}
+function startInlineCommentEdit(commentId, postId){
+  const node = document.querySelector(`[data-community-comment="${window.CSS && window.CSS.escape ? window.CSS.escape(String(commentId)) : commentId}"]`);
+  const comment = (state.community.comments[postId] || []).find(row => String(row.id) === String(commentId));
+  if(!node || !comment || !(comment.viewer && comment.viewer.isOwner)) return null;
+  const para = node.querySelector(':scope > p');
+  const editor = document.createElement('form');
+  editor.className = 'inline-editor';
+  editor.innerHTML = `<textarea data-edit-comment maxlength="2200" rows="3">${esc(comment.bodyText || '')}</textarea><p class="inline-editor-error hidden" role="alert"></p><div class="inline-editor-actions"><button class="ghost small" type="button" data-edit-cancel>Cancel</button><button class="primary small" type="submit">Save</button></div>`;
+  if(para) para.replaceWith(editor); else node.appendChild(editor);
+  editor.querySelector('[data-edit-cancel]').onclick = () => renderCommunityCommentsModal(postId);
+  editor.onsubmit = async event => {
+    event.preventDefault();
+    const bodyText = String(editor.querySelector('[data-edit-comment]').value || '').slice(0, 2200);
+    const err = editor.querySelector('.inline-editor-error');
+    if(!bodyText.trim()){ err.textContent = 'Comment can’t be empty.'; err.classList.remove('hidden'); return; }
+    const response = await window.DJBattleApi.apiRequest(`/api/community/comments/${encodeURIComponent(commentId)}`, { method:'PATCH', body:{ bodyText, mentionedProfileIds:mentionedProfileIdsFor(bodyText) } });
+    if(response.error){ err.textContent = `Couldn't save: ${response.error}`; err.classList.remove('hidden'); return; }
+    const updated = response.data && response.data.comment;
+    state.community.comments[postId] = (state.community.comments[postId] || []).map(row => String(row.id) === String(commentId) ? (updated || { ...row, bodyText, editedAt:new Date().toISOString() }) : row);
+    renderCommunityCommentsModal(postId);
+  };
+  return editor;
+}
+
+// Head-to-head records from real battle history
+function headToHeadKey(opponent){
+  const o = opponent || {};
+  if(o.publicProfileId || o.profileId) return `id:${o.publicProfileId || o.profileId}`;
+  if(o.name) return `name:${String(o.name).trim().toLowerCase()}`;
+  return '';
+}
+function headToHeadRecord(opponent, results = state.battleResults){
+  const key = headToHeadKey(opponent);
+  const nameKey = opponent && opponent.name ? `name:${String(opponent.name).trim().toLowerCase()}` : '';
+  const rows = (results || []).filter(r => {
+    if(!r || !['win','loss','tie'].includes(String(r.outcome))) return false;
+    if(historyOpponentStatus(r) !== 'opponent') return false;
+    const k = headToHeadKey(r.opponent);
+    return Boolean(key) && (k === key || (nameKey && r.opponent && `name:${String(r.opponent.name || '').trim().toLowerCase()}` === nameKey));
+  }).sort((a, b) => (new Date(historyCompletedAt(b) || 0).getTime() || 0) - (new Date(historyCompletedAt(a) || 0).getTime() || 0));
+  const wins = rows.filter(r => r.outcome === 'win').length;
+  const losses = rows.filter(r => r.outcome === 'loss').length;
+  const ties = rows.filter(r => r.outcome === 'tie').length;
+  const last = rows[0] || null;
+  return { wins, losses, ties, total:rows.length, last, name:(opponent && opponent.name) || (last && last.opponent && last.opponent.name) || 'this DJ' };
+}
+function headToHeadSummaryText(record){
+  if(!record || !record.total) return '';
+  return `You're ${record.wins}–${record.losses}${record.ties ? `–${record.ties}` : ''} vs ${record.name}`;
+}
+function headToHeadLastMeetingText(record){
+  if(!record || !record.last) return '';
+  const r = record.last;
+  const label = r.outcome === 'win' ? 'Won' : r.outcome === 'loss' ? 'Lost' : 'Tied';
+  const score = r.score != null ? ` ${r.score}${r.opponent && r.opponent.score != null ? `–${r.opponent.score}` : ''}` : '';
+  return `Last meeting: ${label}${score} · ${historyDateText(r)}`;
+}
+function headToHeadLineHtml(resultRecord){
+  if(!resultRecord || historyOpponentStatus(resultRecord) !== 'opponent') return '';
+  const record = headToHeadRecord(resultRecord.opponent);
+  if(!record.total) return '';
+  return `<div class="h2h-line"><strong>${esc(headToHeadSummaryText(record))}</strong><span>${esc(headToHeadLastMeetingText(record))}</span></div>`;
+}
+function headToHeadProfileHtml(opponent){
+  const record = headToHeadRecord(opponent);
+  if(!record.total) return `<div class="h2h-line h2h-profile muted"><strong>No battles vs ${esc(opponent && opponent.name || 'this DJ')} yet</strong></div>`;
+  return `<div class="h2h-line h2h-profile"><span class="eyebrow">HEAD TO HEAD</span><strong>${esc(headToHeadSummaryText(record))}</strong><span>${esc(headToHeadLastMeetingText(record))}</span></div>`;
+}
+
+// Win streaks and badges from real results only
+function competitiveResultsChronological(results = state.battleResults){
+  return (results || []).filter(r => r && ['win','loss','tie'].includes(String(r.outcome)))
+    .slice().sort((a, b) => (new Date(historyCompletedAt(a) || 0).getTime() || 0) - (new Date(historyCompletedAt(b) || 0).getTime() || 0));
+}
+function winStreaks(results = state.battleResults){
+  const rows = competitiveResultsChronological(results);
+  let best = 0; let run = 0;
+  rows.forEach(r => { if(r.outcome === 'win'){ run += 1; best = Math.max(best, run); } else run = 0; });
+  return { current:run, best, battles:rows.length, wins:rows.filter(r => r.outcome === 'win').length };
+}
+function battleBadges(results = state.battleResults){
+  const s = winStreaks(results);
+  const total = (results || []).filter(r => r && ['win','loss','tie','practice'].includes(String(r.outcome))).length;
+  return [
+    { id:'first_win', label:'First Win', hint:'Win a battle', earned:s.wins >= 1 },
+    { id:'five_battles', label:'5 Battles', hint:`${Math.min(total, 5)}/5 battles`, earned:total >= 5 },
+    { id:'ten_battles', label:'10 Battles', hint:`${Math.min(total, 10)}/10 battles`, earned:total >= 10 },
+    { id:'streak_3', label:'3-Win Streak', hint:'Win 3 in a row', earned:s.best >= 3 },
+    { id:'streak_5', label:'5-Win Streak', hint:'Win 5 in a row', earned:s.best >= 5 }
+  ];
+}
+function renderProfileStreaks(){
+  const el = document.getElementById('profile-streaks');
+  if(!el) return;
+  const s = winStreaks();
+  const badges = battleBadges();
+  el.innerHTML = `<div class="streak-head"><span class="eyebrow">WIN STREAK</span><div class="streak-stats"><div><strong>${esc(s.current)}</strong><small>Current</small></div><div><strong>${esc(s.best)}</strong><small>Best</small></div></div></div><div class="badge-row">${badges.map(b => `<div class="dj-badge ${b.earned ? 'earned' : 'locked'}" data-badge="${esc(b.id)}" title="${esc(b.earned ? 'Earned' : b.hint)}"><span class="dj-badge-icon">${b.earned ? '★' : '🔒'}</span><strong>${esc(b.label)}</strong><small>${esc(b.earned ? 'Earned' : b.hint)}</small></div>`).join('')}</div>`;
+}
+(function wrapRatingHistoryForStreaks(){
+  const original = renderRatingHistory;
+  renderRatingHistory = function(){ const out = original.apply(this, arguments); try{ renderProfileStreaks(); }catch(e){ console.warn('streaks render failed', e); } return out; };
+})();
+renderProfileStreaks();
+
+Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), {
+  libraryLimitCounts, crowdVoteEligibility, recordLocalCrowdVote, localCrowdVoteSummary, crowdVoteText, crowdVoteResultModuleHtml, crowdVoteCardButtonHtml, openCrowdVote,
+  startInlinePostEdit, saveInlinePostEdit, startInlineCommentEdit, communityPostHtml, communityCommentHtml,
+  headToHeadRecord, headToHeadSummaryText, headToHeadLastMeetingText, headToHeadLineHtml, headToHeadProfileHtml,
+  winStreaks, battleBadges, renderProfileStreaks, renderCompletedBattleResult, battleCard, renderPosts, renderLibrary,
+  communityStatsState: () => state
+});
