@@ -70,7 +70,9 @@
       if(rec && recordState.state === 'countin') rec.disabled = true;
       if(reviewPanel) reviewPanel.classList.toggle('hidden', !review);
       if(audio && objectUrl && audio.src !== objectUrl) audio.src = objectUrl;
-      if(metadata) metadata.innerHTML = review ? `<span>File</span><strong>${esc(recordState.fileName || 'Recorded take')}</strong><span>State</span><strong>${esc(recordState.state)}</strong><span>Submit</span><strong>${recordState.submitted ? 'Submitted' : 'Not submitted'}</strong>` : '';
+      if(metadata) metadata.innerHTML = review ? `<span>File</span><strong>${esc(recordState.fileName || 'Recorded take')}</strong><span>State</span><strong>${esc(recordState.state)}</strong><span>Submit</span><strong>${recordState.submitted ? 'Submitted' : 'Not submitted'}</strong>${recordState.draftSaved ? '<span>Draft</span><strong>Saved to Library → Drafts</strong>' : ''}` : '';
+      const saveBtn = doc.getElementById('save-recording-draft');
+      if(saveBtn){ saveBtn.textContent = recordState.draftSaved ? 'Draft Saved' : 'Save Draft'; saveBtn.disabled = Boolean(recordState.draftSaved); }
       if(duration) duration.textContent = recordState.duration || elapsedText(recordState.elapsedMs);
       const audioRecording = doc.getElementById('audio-recording-state');
       if(audioRecording) audioRecording.textContent = recording ? 'Recording' : armed ? 'Armed' : review ? 'Review' : 'Not Armed';
@@ -317,27 +319,58 @@
       };
     }
 
-    function restart(){
-      if(win.lastRecordedMixFile && typeof win.confirm === 'function' && !win.confirm('Restarting will discard the current unsent take. Continue?')) return { ok:false, cancelled:true };
-      if(objectUrl && win.URL && win.URL.revokeObjectURL) win.URL.revokeObjectURL(objectUrl);
-      objectUrl = '';
-      win.lastRecordedMixFile = null;
-      state.studioRecording = { state:'armed', armed:true, startedAt:null, elapsedMs:0, fileName:'', duration:'', error:'', submitted:false, draftSaved:false };
-      persist();
-      updateUi();
-      return { ok:true };
+    async function confirmDiscard(){
+      if(typeof deps.confirm === 'function') return Boolean(await deps.confirm('Restart this take?', 'Restarting throws away the take you just recorded. Saved drafts stay in your Library.', 'Discard and restart'));
+      if(typeof win.confirm === 'function') return win.confirm('Restarting will discard the current unsent take. Continue?');
+      return true;
     }
 
-    function saveDraft(){
+    async function restart(){
+      const hasUnsavedTake = Boolean(win.lastRecordedMixFile) && !state.studioRecording.draftSaved && !state.studioRecording.submitted;
+      if(hasUnsavedTake && !(await confirmDiscard())) return { ok:false, cancelled:true };
+      if(objectUrl && win.URL && win.URL.revokeObjectURL) win.URL.revokeObjectURL(objectUrl);
+      objectUrl = '';
+      reviewPeaks = null;
+      win.lastRecordedMixFile = null;
+      state.studioRecording = { state:'armed', armed:true, startedAt:null, elapsedMs:0, fileName:'', duration:'', error:'', submitted:false, draftSaved:false, tracklist:[] };
+      persist();
+      updateUi();
+      // Battles with a time limit go straight back into the 3-2-1 count-in; open practice just re-arms.
+      const limitMs = deps.getBattleLimitMs ? deps.getBattleLimitMs() : null;
+      if(limitMs > 0 && deps.autoCountInOnRestart !== false){
+        start();
+        return { ok:true, countIn:true };
+      }
+      return { ok:true, countIn:false };
+    }
+
+    async function saveDraft(){
       if(!win.lastRecordedMixFile){
         state.studioRecording.error = 'No recorded take is available to save.';
         updateUi();
         return { ok:false };
       }
-      state.studioRecording = { ...state.studioRecording, state:'draft', draftSaved:true, error:'' };
+      if(state.studioRecording.draftSaved) return { ok:true, duplicate:true };
+      if(typeof deps.saveDraftToLibrary === 'function'){
+        const session = deps.activeStudioBattleSession ? deps.activeStudioBattleSession() : null;
+        const saved = await deps.saveDraftToLibrary(win.lastRecordedMixFile, {
+          duration: state.studioRecording.duration,
+          tracklist: state.studioRecording.tracklist || [],
+          battleId: session && (session.battleId || session.id) || null,
+          genre: session && session.genre || ''
+        });
+        if(!saved || !saved.ok){
+          state.studioRecording.error = saved && saved.error || 'Could not save this draft.';
+          updateUi();
+          return { ok:false, error:state.studioRecording.error };
+        }
+        state.studioRecording = { ...state.studioRecording, state:'draft', draftSaved:true, draftTrackId:saved.track && saved.track.id || null, error:'' };
+      }else{
+        state.studioRecording = { ...state.studioRecording, state:'draft', draftSaved:true, error:'' };
+      }
       persist();
       updateUi();
-      return { ok:true };
+      return { ok:true, trackId:state.studioRecording.draftTrackId || null };
     }
 
     function submit(){

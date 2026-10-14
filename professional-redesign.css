@@ -1700,3 +1700,20 @@ time.rel-time{color:inherit}
 .review-waveform .review-marker span{position:absolute;top:2px;left:4px;font-size:10px;color:#ffb13b;white-space:nowrap;font-weight:600}
 .review-waveform .review-playhead{position:absolute;top:0;bottom:0;width:2px;background:#fff;pointer-events:none;text-decoration:none}
 .review-waveform .wave-pending{color:var(--muted,#9aa58a);font-size:12px;align-self:center}
+
+/* ---- Battle & social (Oct 14) ---- */
+.hero-score-actions{display:flex;gap:8px;justify-content:center;margin-top:14px;flex-wrap:wrap}
+.hero-score-actions[hidden]{display:none}
+.battle-result-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:12px}
+.draft-take-panel{margin-top:12px;padding:12px;border:1px solid rgba(198,255,61,.35);border-radius:12px;background:rgba(198,255,61,.06)}
+.draft-take-panel p{color:var(--muted,#8b94a3);margin:6px 0 10px}
+.mention-link{color:#c6ff3d;font-weight:700;text-decoration:none}
+a.mention-link:hover{text-decoration:underline}
+.mention-link.unresolved{color:#d8e6b3;font-weight:600}
+.mention-suggest{position:relative;margin-top:4px;background:#12161b;border:1px solid rgba(198,255,61,.4);border-radius:10px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.45);z-index:20}
+.mention-suggest.hidden{display:none}
+.mention-option{display:flex;gap:10px;align-items:baseline;width:100%;padding:9px 12px;background:transparent;border:0;color:#e9edf2;text-align:left;cursor:pointer}
+.mention-option:hover,.mention-option:focus{background:rgba(198,255,61,.12)}
+.mention-option strong{color:#c6ff3d}
+.mention-option span{color:#8b94a3;font-size:.85em}
+.follow-author.active{border-color:#c6ff3d;color:#c6ff3d}

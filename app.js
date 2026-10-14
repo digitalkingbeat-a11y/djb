@@ -993,7 +993,6 @@ function installProfessionalShell(){
       ['library','ML','Music Library'],
       ['community','CM','Community'],
       ['rankings','RK','Rankings'],
-      ['tour','VT','Virtual Tour'],
       ['activity','AC','Activity'],
       ['profile','PR','Profile'],
       ['settings','SE','Settings']
@@ -1154,7 +1153,7 @@ function installProfessionalShell(){
 function installAuxiliaryViews(){
   const main = document.querySelector('.main');
   if(!main) return;
-  if(!document.getElementById('tour')){
+  if(false && !document.getElementById('tour')){
     const section = document.createElement('section');
     section.id = 'tour';
     section.className = 'view';
@@ -1172,13 +1171,18 @@ function installAuxiliaryViews(){
     const section = document.createElement('section');
     section.id = 'settings';
     section.className = 'view';
-    section.innerHTML = `<div class="product-page-head"><div><span class="eyebrow accent">SETTINGS</span><h2>Settings</h2></div></div><div class="settings-grid"><section class="panel" id="settings-data-panel"><span class="eyebrow">YOUR DATA</span><h3>Back up &amp; restore</h3><p>Everything you make here lives in this browser. Save one backup file, restore it on any browser, or start fresh.</p><div class="settings-data-actions"><button class="primary small" id="settings-backup" type="button">Back up my data</button><button class="ghost small" id="settings-restore" type="button">Restore from backup</button><button class="ghost small danger" id="settings-reset" type="button">Reset</button><input id="settings-restore-file" type="file" accept=".json,application/json" hidden></div><small id="settings-data-status" class="settings-data-status"></small></section><section class="panel"><span class="eyebrow">TOUR</span><h3>Virtual Tour</h3><p>Replay the product walkthrough from the navigation at any time.</p><button class="primary small" data-view-target="tour" type="button">Open Tour</button></section><section class="panel"><span class="eyebrow">STUDIO</span><h3>Device Preferences</h3><p>Controller and audio device choices are browser-scoped and never imply unsupported output routing.</p><button class="ghost small" data-view-target="studio" type="button">Open Studio Setup</button></section><section class="panel"><span class="eyebrow">ACCOUNT</span><h3>Profile Controls</h3><p>Public profile, relationships, battle history, and privacy controls stay in Profile.</p><button class="ghost small" data-view-target="profile" type="button">Open Profile</button></section></div>`;
+    section.innerHTML = `<div class="product-page-head"><div><span class="eyebrow accent">SETTINGS</span><h2>Settings</h2></div></div><div class="settings-grid"><section class="panel" id="settings-data-panel"><span class="eyebrow">YOUR DATA</span><h3>Back up &amp; restore</h3><p>Everything you make here lives in this browser. Save one backup file, restore it on any browser, or start fresh.</p><div class="settings-data-actions"><button class="primary small" id="settings-backup" type="button">Back up my data</button><button class="ghost small" id="settings-restore" type="button">Restore from backup</button><button class="ghost small danger" id="settings-reset" type="button">Reset</button><input id="settings-restore-file" type="file" accept=".json,application/json" hidden></div><small id="settings-data-status" class="settings-data-status"></small></section><section class="panel" id="settings-tour-panel"><span class="eyebrow">TOUR</span><h3>Guided tour</h3><p>Walk through the app again, one step at a time.</p><button class="primary small" id="settings-replay-tour" type="button">Replay tour</button></section><section class="panel"><span class="eyebrow">STUDIO</span><h3>Device Preferences</h3><p>Controller and audio device choices are browser-scoped and never imply unsupported output routing.</p><button class="ghost small" data-view-target="studio" type="button">Open Studio Setup</button></section><section class="panel"><span class="eyebrow">ACCOUNT</span><h3>Profile Controls</h3><p>Public profile, relationships, battle history, and privacy controls stay in Profile.</p><button class="ghost small" data-view-target="profile" type="button">Open Profile</button></section></div>`;
     main.insertBefore(section, document.getElementById('operations') || null);
   }
 }
 
 installProfessionalShell();
 function switchView(view){
+  if(view === 'tour'){
+    // The old Virtual Tour page is gone; any link to it now opens the guided pop-up tour.
+    activeTourStep = 0;
+    return startGuidedTour();
+  }
   if(isStudioRecordingActive() && view !== 'studio'){
     if(!switchView.__force){
       appConfirmDanger('Leave Battle Studio?', 'A recording is in progress. Leaving now risks losing the active take.', 'Leave Studio').then(ok => { if(ok){ switchView.__force = true; try { switchView(view); } finally { switchView.__force = false; } } });
@@ -1209,7 +1213,6 @@ function switchView(view){
     renderActivityPage();
     loadDjNotifications({ preserve:true }).catch(err=>console.warn('Activity refresh failed', err));
   }
-  if(view === 'tour') renderVirtualTour();
   if(view === 'settings') renderSettingsPage();
   if(view === 'community') loadCommunityFeed({ preserve:true }).catch(err=>console.warn('Community refresh failed', err));
   if(view === 'battles') loadServerBattleLobby({ render:false }).then(()=>renderBattles()).catch(err=>console.warn('Battle lobby refresh failed', err));
@@ -2012,7 +2015,7 @@ function latestBattleScore(results = state.battleResults){
   if(!scored.length) return null;
   const time = item => { const t = Date.parse(item.completedAt || ''); return Number.isFinite(t) ? t : 0; };
   const latest = scored.reduce((best, item) => time(item) > time(best) ? item : best, scored[0]);
-  return { score: Math.round(Number(latest.score)), title: latest.title || 'Latest battle', date: latest.date || '', outcome: latest.outcome || '' };
+  return { score: Math.round(Number(latest.score)), title: latest.title || 'Latest battle', date: latest.date || '', outcome: latest.outcome || '', record: latest };
 }
 
 function renderHeroScore(){
@@ -2023,12 +2026,139 @@ function renderHeroScore(){
     wrap.dataset.state = 'empty';
     set('hero-score-value', '--'); set('hero-score-unit', 'No battles yet');
     set('hero-score-title', 'Your latest score shows here'); set('hero-score-date', 'Enter a battle to get judged');
+    renderHeroScoreActions(null);
     return;
   }
   wrap.dataset.state = 'scored';
   set('hero-score-value', String(latest.score)); set('hero-score-unit', '/100');
   set('hero-score-title', `Latest: ${latest.title}`);
   set('hero-score-date', [latest.outcome && latest.outcome !== 'recorded' ? latest.outcome.toUpperCase() : '', latest.date].filter(Boolean).join(' · ') || 'Latest battle');
+  renderHeroScoreActions(latest.record);
+}
+
+function renderHeroScoreActions(record){
+  const wrap = document.getElementById('hero-score-actions'); if(!wrap) return;
+  if(!record){ wrap.hidden = true; wrap.innerHTML = ''; return; }
+  const id = historyResultId(record);
+  const canRematch = Boolean(historyRematchProfileId(record));
+  wrap.hidden = false;
+  wrap.innerHTML = `${canRematch ? `<button class="primary small" type="button" data-result-rematch="${esc(id)}">Rematch</button>` : ''}<button class="ghost small" type="button" data-result-share="${esc(id)}">Share result</button>`;
+  wireResultActionButtons(wrap);
+}
+
+function wireResultActionButtons(scope){
+  (scope || document).querySelectorAll('[data-result-rematch]').forEach(button => {
+    button.onclick = event => openRematchSetupFromHistory(event.currentTarget.dataset.resultRematch);
+  });
+  (scope || document).querySelectorAll('[data-result-share]').forEach(button => {
+    button.onclick = event => {
+      const record = findBattleHistoryResult(event.currentTarget.dataset.resultShare) || state.lastCompletedShareRecord;
+      shareBattleResult(record).catch(err => console.warn('Share result failed', err));
+    };
+  });
+}
+
+// ---- Share result card ----
+function battleShareCardData(record){
+  const r = record || {};
+  const opponent = r.opponent || {};
+  const me = (r.profile && r.profile.displayName) || currentUser().displayName || 'You';
+  const aiOnly = historyOpponentStatus(r) === 'ai_only';
+  const oppName = aiOnly ? 'AI Judge' : (opponent.name || 'Opponent pending');
+  const myScore = Number.isFinite(Number(r.score)) ? Math.round(Number(r.score)) : null;
+  const oppRaw = opponent.score ?? r.opponentScore;
+  const oppScore = oppRaw !== null && oppRaw !== undefined && oppRaw !== '' && Number.isFinite(Number(oppRaw)) ? Math.round(Number(oppRaw)) : null;
+  let winner = '';
+  if(r.outcome === 'win') winner = me;
+  else if(r.outcome === 'loss') winner = oppName;
+  else if(r.outcome === 'tie') winner = 'Tie';
+  else if(myScore !== null && oppScore !== null) winner = myScore > oppScore ? me : oppScore > myScore ? oppName : 'Tie';
+  return {
+    title: historyTitle(r),
+    me, opponent: oppName, myScore, oppScore,
+    winner: winner || (aiOnly ? 'Practice' : 'Pending'),
+    outcome: r.outcome || 'recorded',
+    genre: historyGenre(r),
+    date: historyDateText(r)
+  };
+}
+
+function drawBattleShareCard(canvas, data){
+  const size = 1080;
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext && canvas.getContext('2d');
+  if(!ctx) return false;
+  const lime = '#c6ff3d';
+  ctx.fillStyle = '#0b0d10'; ctx.fillRect(0, 0, size, size);
+  const glow = ctx.createRadialGradient ? ctx.createRadialGradient(size/2, size*0.45, 40, size/2, size*0.45, size*0.7) : null;
+  if(glow){ glow.addColorStop(0, 'rgba(198,255,61,0.16)'); glow.addColorStop(1, 'rgba(198,255,61,0)'); ctx.fillStyle = glow; ctx.fillRect(0, 0, size, size); }
+  ctx.strokeStyle = lime; ctx.lineWidth = 6; ctx.strokeRect(36, 36, size - 72, size - 72);
+  ctx.textAlign = 'left'; ctx.fillStyle = lime; ctx.font = '900 64px Inter, Arial, sans-serif'; ctx.fillText('DB', 84, 140);
+  ctx.fillStyle = '#e9edf2'; ctx.font = '700 30px Inter, Arial, sans-serif'; ctx.fillText('DJ BATTLE', 190, 132);
+  ctx.textAlign = 'right'; ctx.fillStyle = '#8b94a3'; ctx.font = '500 28px Inter, Arial, sans-serif'; ctx.fillText(String(data.date || ''), size - 84, 132);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#e9edf2'; ctx.font = '700 44px Inter, Arial, sans-serif';
+  ctx.fillText(String(data.title || 'Battle').slice(0, 40), size/2, 250);
+  ctx.fillStyle = '#8b94a3'; ctx.font = '500 30px Inter, Arial, sans-serif'; ctx.fillText(String(data.genre || ''), size/2, 300);
+  const col = (x, name, score, isWinner) => {
+    ctx.fillStyle = isWinner ? lime : '#e9edf2'; ctx.font = '800 46px Inter, Arial, sans-serif';
+    ctx.fillText(String(name).slice(0, 18), x, 450);
+    ctx.font = '900 200px Inter, Arial, sans-serif';
+    ctx.fillText(score === null ? '--' : String(score), x, 660);
+  };
+  col(size*0.27, data.me, data.myScore, data.winner === data.me);
+  col(size*0.73, data.opponent, data.oppScore, data.winner === data.opponent);
+  ctx.fillStyle = '#5b6370'; ctx.font = '900 56px Inter, Arial, sans-serif'; ctx.fillText('VS', size/2, 590);
+  ctx.fillStyle = lime; ctx.fillRect(size/2 - 300, 760, 600, 110);
+  ctx.fillStyle = '#0b0d10'; ctx.font = '900 50px Inter, Arial, sans-serif';
+  const label = data.winner === 'Tie' ? 'TIE' : data.winner === 'Pending' || data.winner === 'Practice' ? String(data.winner).toUpperCase() : `WINNER: ${String(data.winner).toUpperCase().slice(0, 16)}`;
+  ctx.fillText(label, size/2, 833);
+  ctx.fillStyle = '#8b94a3'; ctx.font = '500 26px Inter, Arial, sans-serif'; ctx.fillText('Scores out of 100', size/2, 960);
+  return true;
+}
+
+function battleShareFileName(data){
+  const slug = String(data && data.title || 'battle').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'battle';
+  return `djbattle-result-${slug}.png`;
+}
+
+function canvasToPngBlob(canvas){
+  return new Promise(resolve => {
+    try{
+      if(canvas.toBlob) return canvas.toBlob(blob => resolve(blob), 'image/png');
+    }catch(e){}
+    resolve(null);
+  });
+}
+
+async function shareBattleResult(record, options = {}){
+  if(!record){ appAlert('No battle result to share yet.'); return { ok:false }; }
+  const data = battleShareCardData(record);
+  const canvas = options.canvas || document.createElement('canvas');
+  if(!drawBattleShareCard(canvas, data)){ appAlert('This browser cannot draw the share picture.'); return { ok:false, data }; }
+  const blob = await canvasToPngBlob(canvas);
+  const name = battleShareFileName(data);
+  const nav = options.navigator || window.navigator;
+  const FileCtor = window.File;
+  const file = blob && FileCtor ? new FileCtor([blob], name, { type:'image/png' }) : null;
+  const text = `${data.me} ${data.myScore ?? '--'} vs ${data.opponent} ${data.oppScore ?? '--'} — ${data.title}`;
+  if(file && nav && typeof nav.share === 'function' && typeof nav.canShare === 'function' && nav.canShare({ files:[file] })){
+    try{
+      await nav.share({ files:[file], title:'DJ Battle result', text });
+      return { ok:true, shared:true, data, name };
+    }catch(error){
+      if(error && error.name === 'AbortError') return { ok:false, cancelled:true, data, name };
+    }
+  }
+  const url = blob && window.URL && window.URL.createObjectURL ? window.URL.createObjectURL(blob) : (canvas.toDataURL ? canvas.toDataURL('image/png') : '');
+  if(url){
+    const a = document.createElement('a');
+    a.href = url; a.download = name; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+    if(blob && window.URL.revokeObjectURL) setTimeout(() => { try{ window.URL.revokeObjectURL(url); }catch(e){} }, 4000);
+  }
+  showAppToast('Result picture saved', name);
+  return { ok:true, downloaded:true, data, name };
 }
 
 function updateBattleProgressUi(){
@@ -2302,6 +2432,22 @@ function renderBattleResultProgress(session, status, options = {}){
   panel.innerHTML = `<div class="battle-result-surface battle-${level}"><div class="battle-status-strip">${lights.map(([label,on,active])=>`<div class="battle-result-module battle-${on ? (active ? 'warn' : 'ok') : 'muted'}"><div class="battle-lamp-row"><i class="battle-lamp"></i><b>${esc(label)}</b></div></div>`).join('')}</div><div class="battle-progress-shell"><span class="eyebrow">${esc(formatBattleStatus(normalized))}</span><div class="battle-progress-line"><strong>${esc(message)}</strong><span>${esc(options.submissionId || session && session.submissionId || '')}</span></div></div></div>`;
 }
 
+function completedResultRecord(battle, result){
+  const key = result && (result.resultKey || (battle && result.submissionId ? `${battle.id}:${result.submissionId}` : ''));
+  const found = (key && findBattleHistoryResult(key)) || (result && result.submissionId && findBattleHistoryResult(result.submissionId));
+  if(found) return found;
+  const opponent = battleResultOpponentSummary(battle || {}, result || {});
+  return { resultKey:key || `share-${Date.now()}`, title:battle && battle.title, genre:battle && battle.genre, modeId:battle && battle.modeId, score:result && result.score, outcome:battleResultOutcome(result, battle), opponent, completedAt:result && result.completedAt, battle:battle || {}, profile:{ displayName:currentUser().displayName } };
+}
+
+function completedResultActionsHtml(battle, result){
+  const record = completedResultRecord(battle, result);
+  state.lastCompletedShareRecord = record;
+  const id = historyResultId(record);
+  const canRematch = Boolean(findBattleHistoryResult(id) && historyRematchProfileId(record));
+  return `${canRematch ? `<button class="primary" type="button" data-result-rematch="${esc(id)}">Rematch</button>` : ''}<button class="ghost" type="button" data-result-share="${esc(id)}">Share result</button>`;
+}
+
 function renderCompletedBattleResult(battle, result, options = {}){
   const progression = result.progression || {};
   const progress = progressionSnapshotForResult(battle, result, options.progressionState);
@@ -2357,7 +2503,9 @@ function renderCompletedBattleResult(battle, result, options = {}){
       <div class="battle-reward-note">${esc(rewardResultText(result))}</div>
       ${duplicateNote}
       <div class="battle-result-module"><span>Submission playback</span>${playback}</div>
+      <div class="battle-result-actions" id="battle-result-actions">${completedResultActionsHtml(battle, result)}</div>
     </div>`;
+    wireResultActionButtons(panel);
   }
   document.getElementById('br-status').textContent = formatBattleStatus(battle.status);
 }
@@ -3044,6 +3192,27 @@ function startGuidedTour(){
   return true;
 }
 
+const TOUR_SEEN_KEY = 'djBattleTourSeen';
+function replayGuidedTour(){
+  activeTourStep = 0;
+  return startGuidedTour();
+}
+function shouldShowFirstRunTour(store = localStorage){
+  try{
+    return !store.getItem(TOUR_SEEN_KEY) && !store.getItem('djBattleTourComplete');
+  }catch(e){ return false; }
+}
+function maybeShowFirstRunTour(store = localStorage){
+  if(!shouldShowFirstRunTour(store)) return false;
+  try{ store.setItem(TOUR_SEEN_KEY, '1'); }catch(e){}
+  return replayGuidedTour();
+}
+function scheduleFirstRunTour(){
+  const ua = String(window.navigator && window.navigator.userAgent || '');
+  if(/jsdom/i.test(ua) || (window.navigator && window.navigator.webdriver) || window.__DJB_SKIP_FIRST_RUN_TOUR) return;
+  setTimeout(() => { try{ maybeShowFirstRunTour(); }catch(e){ console.warn('First-run tour skipped', e); } }, 900);
+}
+
 function renderVirtualTour(){
   const replay = document.getElementById('replay-tour');
   if(replay) replay.onclick = () => { activeTourStep = 0; startGuidedTour(); };
@@ -3088,6 +3257,7 @@ function activityItem(label, title, detail, actionView, time, kind){
 function collectActivityEntries(){
   const entries = [];
   (state.djNotifications.rows || []).slice(0, 20).forEach(row => entries.push({ kind:'alert', label:'Alert', title:row.title || row.type || 'Notification', detail:row.body || 'Platform activity', view:'activity', time:activityTimestamp(row) }));
+  localMentionAlertsForMe().slice(0, 20).forEach(row => entries.push({ kind:'alert', label:'Mention', title:`${row.byName || 'A DJ'} mentioned you`, detail:`In ${row.title || 'a post'}`, view:'community', time:activityTimestamp(row) }));
   (state.djChallenges.rows || []).slice(0, 20).forEach(row => entries.push({ kind:'challenge', label:'Challenge', title:row.title || 'Battle challenge', detail:row.status || 'Pending', view:'profile', time:activityTimestamp(row) }));
   battles.slice(0, 20).forEach(battle => entries.push({ kind:'battle', label:'Battle', title:battle.title || 'Battle', detail:`${battleModeDisplayLabel(battle.modeId, battle.type)} / ${battle.genre || 'Open Format'} / ${formatBattleStatus(battle.status || battle.lobbyStatus || 'open')}`, view:'battles', time:activityTimestamp(battle) }));
   (state.community.posts && state.community.posts.length ? state.community.posts : localCommunityPosts()).slice(0, 20).forEach(post => entries.push({ kind:'community', label:'Community', title:post.title || 'Post', detail:`${post.authorName || post.user || 'DJ'} / ${post.categoryLabel || post.room || 'Feed'}`, view:'community', time:activityTimestamp(post) }));
@@ -3137,8 +3307,8 @@ function renderActivityPage(){
 
 function renderSettingsPage(){
   wireDataBackupControls();
-  const replay = document.querySelector('#settings [data-view-target="tour"]');
-  if(replay) replay.onclick = () => { activeTourStep = 0; startGuidedTour(); };
+  const replay = document.getElementById('settings-replay-tour');
+  if(replay) replay.onclick = () => replayGuidedTour();
 }
 
 const aiFilterButtons=document.querySelectorAll('[data-ai-filter]');
@@ -3350,7 +3520,7 @@ function communityPostHtml(post){
   const owner = post.viewer && post.viewer.isOwner;
   const edited = post.editedAt ? ' / edited' : '';
   const locked = post.locked ? ' / comments locked' : '';
-  const body = post.tombstone ? '<p class="community-tombstone">This discussion item is unavailable.</p>' : `<p>${esc(post.bodyText || '')}</p>`;
+  const body = post.tombstone ? '<p class="community-tombstone">This discussion item is unavailable.</p>' : `<p>${mentionifyText(post.bodyText || '')}</p>`;
   const authorProfileId = post.author && post.author.publicProfileId || '';
   const challengeProfile = communityChallengeProfileForPost(post);
   const canChallenge = challengeProfile && publicProfileCanChallenge(challengeProfile);
@@ -3358,6 +3528,7 @@ function communityPostHtml(post){
     <div class="post-head">
       <div class="avatar">${esc((post.author && (post.author.displayName || post.author.name) || 'DJ').split(/\s+/).map(part=>part[0]).join('').slice(0,2).toUpperCase())}</div>
       <div class="post-author-copy"><strong>${esc(post.author && (post.author.displayName || post.author.name) || 'DJ')}</strong><span>${esc(communityCategoryLabel(post.categoryId))} / ${relativeTimeHtml(post.createdAt)}${esc(edited)}${esc(locked)}</span></div>
+      ${postAuthorFollowButtonHtml(post)}
       ${canChallenge ? `<button class="ghost small request-battle" type="button" data-community-challenge="${esc(authorProfileId)}" data-community-post="${esc(post.id)}">Request Battle</button>` : ''}
     </div>
     <h4>${esc(post.title || 'Community post')}</h4>
@@ -3372,6 +3543,159 @@ function communityPostHtml(post){
       ${owner ? `<button class="ghost small" type="button" data-community-edit="${esc(post.id)}">Edit</button><button class="ghost small" type="button" data-community-delete="${esc(post.id)}">Delete</button>` : ''}
     </div>
   </article>`;
+}
+
+// ---- @mentions ----
+function mentionHandleFor(name){
+  return String(name || '').replace(/[^A-Za-z0-9_]/g, '').slice(0, 32);
+}
+function knownMentionDjs(){
+  const byHandle = new Map();
+  const add = (name, publicProfileId) => {
+    const handle = mentionHandleFor(name);
+    if(handle.length < 2 || /^(guest|dj|localdj|privatedj)$/i.test(handle)) return;
+    const key = handle.toLowerCase();
+    const existing = byHandle.get(key);
+    if(existing && existing.publicProfileId) return;
+    byHandle.set(key, { handle, displayName:String(name), publicProfileId:publicProfileId || (existing && existing.publicProfileId) || null });
+  };
+  (state.community.posts || []).concat(localCommunityPosts()).forEach(post => { const a = post.author || {}; add(a.displayName || a.name, a.publicProfileId); });
+  Object.values(state.community.comments || {}).forEach(list => (list || []).forEach(c => { const a = c.author || {}; add(a.displayName || a.name, a.publicProfileId); }));
+  const rankingRows = state.publicRankings && Array.isArray(state.publicRankings.rows) ? state.publicRankings.rows : [];
+  rankingRows.forEach(row => { const p = row.profile || row; add(p.displayName || p.name, p.publicProfileId); });
+  const rels = state.djRelationships || {};
+  ['following','followers'].forEach(key => { const rows = rels[key] && rels[key].rows || []; rows.forEach(row => { const p = row.profile || row; add(p.displayName || p.name, p.publicProfileId); }); });
+  ((rels.opponents && rels.opponents.rows) || []).forEach(row => { const p = row.opponent || {}; add(p.displayName || p.name, p.publicProfileId); });
+  const mine = mentionHandleFor(currentUser().displayName).toLowerCase();
+  byHandle.delete(mine);
+  return [...byHandle.values()];
+}
+function mentionSuggestions(prefix, limit = 6){
+  const q = String(prefix || '').toLowerCase();
+  return knownMentionDjs().filter(dj => dj.handle.toLowerCase().startsWith(q) || dj.displayName.toLowerCase().includes(q)).slice(0, limit);
+}
+function extractMentionHandles(text){
+  const out = [];
+  String(text || '').replace(/(^|[^A-Za-z0-9_@])@([A-Za-z0-9_]{2,32})/g, (m, lead, handle) => { if(!out.some(h => h.toLowerCase() === handle.toLowerCase())) out.push(handle); return m; });
+  return out;
+}
+function mentionedProfileIdsFor(text){
+  const known = knownMentionDjs();
+  return extractMentionHandles(text).map(h => known.find(dj => dj.handle.toLowerCase() === h.toLowerCase())).filter(dj => dj && dj.publicProfileId).map(dj => dj.publicProfileId).slice(0, 10);
+}
+function mentionifyText(text){
+  const known = knownMentionDjs();
+  const source = String(text || '');
+  const re = /(^|[^A-Za-z0-9_@])@([A-Za-z0-9_]{2,32})/g;
+  let out = '', last = 0, m;
+  while((m = re.exec(source))){
+    const start = m.index + m[1].length;
+    out += esc(source.slice(last, start));
+    const dj = known.find(row => row.handle.toLowerCase() === m[2].toLowerCase());
+    out += dj && dj.publicProfileId
+      ? `<a href="#" class="mention-link" data-mention-profile="${esc(dj.publicProfileId)}">@${esc(m[2])}</a>`
+      : `<span class="mention-link unresolved">@${esc(m[2])}</span>`;
+    last = start + 1 + m[2].length;
+  }
+  return out + esc(source.slice(last));
+}
+function wireMentionLinks(scope){
+  (scope || document).querySelectorAll('[data-mention-profile]').forEach(link => {
+    link.onclick = event => { event.preventDefault(); loadPublicDjProfile(event.currentTarget.dataset.mentionProfile); };
+  });
+}
+function wireMentionAutocomplete(textarea){
+  if(!textarea || textarea.dataset.mentionWired) return;
+  textarea.dataset.mentionWired = '1';
+  const box = document.createElement('div');
+  box.className = 'mention-suggest hidden';
+  box.setAttribute('role', 'listbox');
+  textarea.insertAdjacentElement('afterend', box);
+  const close = () => { box.classList.add('hidden'); box.innerHTML = ''; };
+  const update = () => {
+    const caret = textarea.selectionStart ?? textarea.value.length;
+    const before = textarea.value.slice(0, caret);
+    const match = before.match(/(^|[^A-Za-z0-9_@])@([A-Za-z0-9_]{0,32})$/);
+    if(!match) return close();
+    const items = mentionSuggestions(match[2]);
+    if(!items.length) return close();
+    box.innerHTML = items.map(dj => `<button type="button" class="mention-option" role="option" data-mention-handle="${esc(dj.handle)}"><strong>@${esc(dj.handle)}</strong><span>${esc(dj.displayName)}</span></button>`).join('');
+    box.classList.remove('hidden');
+    box.querySelectorAll('[data-mention-handle]').forEach(button => {
+      button.onmousedown = event => event.preventDefault();
+      button.onclick = event => {
+        const handle = event.currentTarget.dataset.mentionHandle;
+        const pos = textarea.selectionStart ?? textarea.value.length;
+        const head = textarea.value.slice(0, pos).replace(/@([A-Za-z0-9_]{0,32})$/, `@${handle} `);
+        textarea.value = head + textarea.value.slice(pos);
+        try{ textarea.setSelectionRange(head.length, head.length); }catch(e){}
+        textarea.dispatchEvent(new window.Event('input', { bubbles:true }));
+        close();
+        textarea.focus();
+      };
+    });
+  };
+  textarea.addEventListener('input', update);
+  textarea.addEventListener('keyup', event => { if(event.key === 'Escape') close(); });
+  textarea.addEventListener('blur', () => setTimeout(close, 150));
+}
+const LOCAL_MENTION_ALERTS_KEY = 'djBattleMentionAlerts';
+function localMentionAlerts(){
+  const rows = safeParse(LOCAL_MENTION_ALERTS_KEY, []);
+  return Array.isArray(rows) ? rows : [];
+}
+function recordLocalMentionAlerts(text, context = {}){
+  const handles = extractMentionHandles(text);
+  if(!handles.length) return [];
+  const known = knownMentionDjs();
+  const byName = currentUser().displayName;
+  const created = handles.map(h => {
+    const dj = known.find(row => row.handle.toLowerCase() === h.toLowerCase());
+    return { id:`mention-${Date.now()}-${h}`, handle:dj ? dj.handle : h, publicProfileId:dj && dj.publicProfileId || null, byName, title:String(context.title || 'a post').slice(0, 140), postId:context.postId || null, createdAt:new Date().toISOString() };
+  });
+  try{ localStorage.setItem(LOCAL_MENTION_ALERTS_KEY, JSON.stringify([...created, ...localMentionAlerts()].slice(0, 100))); }catch(e){}
+  return created;
+}
+function localMentionAlertsForMe(){
+  const me = mentionHandleFor(currentUser().displayName).toLowerCase();
+  if(!me) return [];
+  return localMentionAlerts().filter(row => String(row.handle || '').toLowerCase() === me && row.byName !== currentUser().displayName);
+}
+
+// ---- Follow from a post ----
+const LOCAL_FOLLOWS_KEY = 'djBattleLocalFollows';
+function localFollowSet(){
+  const rows = safeParse(LOCAL_FOLLOWS_KEY, []);
+  return new Set(Array.isArray(rows) ? rows.map(String) : []);
+}
+function isFollowingProfile(profileIdValue){
+  const summary = state.djRelationships.publicSummaries[profileIdValue];
+  if(summary && typeof summary.following === 'boolean') return summary.following;
+  return localFollowSet().has(String(profileIdValue));
+}
+function postAuthorFollowButtonHtml(post){
+  const author = post && post.author || {};
+  const id = author.publicProfileId || '';
+  if(!id || (post.viewer && post.viewer.isOwner) || author.profileVisibility === 'private') return '';
+  const following = isFollowingProfile(id);
+  return `<button class="ghost small follow-author ${following ? 'active' : ''}" type="button" data-follow-author="${esc(id)}">${following ? 'Following' : 'Follow'}</button>`;
+}
+async function followPostAuthor(profileIdValue, button){
+  const id = String(profileIdValue || '');
+  if(!id) return { skipped:true };
+  const wasFollowing = isFollowingProfile(id);
+  if(djRelationshipApiAvailable()){
+    if(!state.djRelationships.publicSummaries[id]) state.djRelationships.publicSummaries[id] = { following:wasFollowing, canFollow:true };
+    const result = await togglePublicProfileFollow({ publicProfileId:id });
+    if(result && result.error){ appAlert(result.error); return result; }
+  }else{
+    const set = localFollowSet();
+    if(wasFollowing) set.delete(id); else set.add(id);
+    try{ localStorage.setItem(LOCAL_FOLLOWS_KEY, JSON.stringify([...set])); }catch(e){}
+    state.djRelationships.publicSummaries[id] = { ...(state.djRelationships.publicSummaries[id] || {}), following:!wasFollowing };
+  }
+  document.querySelectorAll(`[data-follow-author="${typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id.replace(/"/g, '')}"]`).forEach(b => { b.textContent = wasFollowing ? 'Follow' : 'Following'; b.classList.toggle('active', !wasFollowing); });
+  return { following:!wasFollowing };
 }
 
 function renderPosts(){
@@ -3513,6 +3837,7 @@ function communityPostPayloadFromModal(postId){
     categoryId,
     visibility:document.getElementById('post-visibility')?.value || 'public',
     attachments,
+    mentionedProfileIds:mentionedProfileIdsFor(bodyText),
     idempotencyKey:stableClientIdempotencyKey(postId ? 'community-edit' : 'community-post', { accountId:communityAccountId() || currentProfileUserId(), postId, title, bodyText, categoryId, mediaValue })
   };
 }
@@ -3558,6 +3883,7 @@ async function publishCommunityPostFromModal(postId){
     });
     persist();
   }
+  recordLocalMentionAlerts(payload.bodyText, { title:payload.title });
   document.getElementById('modal')?.close();
   renderPosts();
   if(activeProfileTab === 'posts') renderProfileCommunityPosts();
@@ -3604,7 +3930,7 @@ function communityCommentHtml(comment){
   const owner = comment.viewer && comment.viewer.isOwner;
   return `<div class="community-comment ${comment.parentCommentId ? 'reply' : ''}" data-community-comment="${esc(comment.id)}">
     <div><strong>${esc(comment.author && (comment.author.displayName || comment.author.name) || 'DJ')}</strong><span>${relativeTimeHtml(comment.createdAt)}${comment.editedAt ? ' / edited' : ''}</span></div>
-    <p>${esc(comment.tombstone ? 'Comment unavailable.' : comment.bodyText || '')}</p>
+    <p>${comment.tombstone ? esc('Comment unavailable.') : mentionifyText(comment.bodyText || '')}</p>
     <div class="community-comment-actions">
       <span>Like ${esc(counts.like)}</span>
       ${communityServerMode() ? `<button class="ghost small" type="button" data-community-reply="${esc(comment.id)}">Reply</button>` : ''}
@@ -3618,6 +3944,7 @@ function renderCommunityCommentsModal(postId){
   if(!list) return;
   const comments = state.community.comments[postId] || [];
   list.innerHTML = comments.length ? comments.map(communityCommentHtml).join('') : `<div class="community-empty"><strong>No comments yet</strong><p>${esc(state.community.commentStatus[postId] || 'Start the thread with a focused reply.')}</p></div>`;
+  wireMentionLinks(list);
   list.querySelectorAll('[data-community-reply]').forEach(button => {
     button.onclick = event => {
       const input = document.getElementById('community-comment-parent');
@@ -3654,9 +3981,10 @@ async function publishCommunityComment(postId){
   const parentCommentId = document.getElementById('community-comment-parent')?.value || '';
   const response = await window.DJBattleApi.apiRequest('/api/community/comments', {
     method:'POST',
-    body:{ postId, bodyText, parentCommentId:parentCommentId || null, idempotencyKey:stableClientIdempotencyKey('community-comment', { accountId:communityAccountId(), postId, parentCommentId, bodyText }) }
+    body:{ postId, bodyText, parentCommentId:parentCommentId || null, mentionedProfileIds:mentionedProfileIdsFor(bodyText), idempotencyKey:stableClientIdempotencyKey('community-comment', { accountId:communityAccountId(), postId, parentCommentId, bodyText }) }
   });
   if(response.error){ appAlert(response.error); return response; }
+  recordLocalMentionAlerts(bodyText, { title:'a comment', postId });
   const comment = response.data && response.data.comment;
   if(comment){
     state.community.comments[postId] = dedupeCommunityPosts([...(state.community.comments[postId] || []), comment]);
@@ -3749,6 +4077,10 @@ function wireCommunityControls(){
   });
   document.querySelectorAll('[data-community-profile]').forEach(button => {
     button.onclick = event => loadPublicDjProfile(event.currentTarget.dataset.communityProfile);
+  });
+  wireMentionLinks(document);
+  document.querySelectorAll('[data-follow-author]').forEach(button => {
+    button.onclick = event => followPostAuthor(event.currentTarget.dataset.followAuthor, event.currentTarget).catch(err => console.warn('Follow failed', err));
   });
   document.querySelectorAll('[data-community-challenge]').forEach(button => {
     button.onclick = event => {
@@ -4812,7 +5144,8 @@ function smartCratePresets(){
     { id:'recently-added', builtIn:true, name:'Recently Added', type:'smart_crate', smartRules:{ preset:'recently_added' } },
     { id:'missing-analysis', builtIn:true, name:'Missing Analysis', type:'smart_crate', smartRules:{ analysisStatus:'missing' } },
     { id:'original-music', builtIn:true, name:'Original Music', type:'smart_crate', smartRules:{ rightsClassification:'original' } },
-    { id:'battle-ready', builtIn:true, name:'Battle Ready', type:'smart_crate', smartRules:{ battleReady:true } }
+    { id:'battle-ready', builtIn:true, name:'Battle Ready', type:'smart_crate', smartRules:{ battleReady:true } },
+    { id:'drafts', builtIn:true, name:'Drafts', type:'smart_crate', smartRules:{ mediaType:'draft_take' } }
   ];
 }
 function allLibraryCrates(){
@@ -6702,9 +7035,13 @@ function renderLibraryDetail(track){
     </div>
     ${editable ? `<label class="artwork-control">Track artwork<input type="file" accept="image/*" data-artwork-track="${esc(track.libraryId)}"></label>` : '<small style="color:var(--muted)">Platform artwork is controlled by the approved source catalog.</small>'}
     ${editable && !track.serverBacked ? `<div class="library-audio-status ${track.audioMissing ? 'missing' : ''}" id="library-audio-status"><strong>${esc(libraryAudioStatusLabel(track))}</strong>${track.audioMissing || (!securePlaybackSource(track) && track.localAudioPersisted) ? '<p style="color:var(--muted);margin:4px 0 0">Local audio was not found after refresh. Re-attach the file to restore playback.</p><label class="artwork-control">Re-attach audio<input type="file" accept="audio/*" data-reattach-audio="' + esc(track.id || track.libraryId) + '"></label>' : ''}</div>` : ''}
+    ${track.sourceType === 'draft_take' ? `<div class="draft-take-panel"><span class="eyebrow accent">DRAFT TAKE</span><p>Saved from Battle Studio. Submit it to your active battle when you're ready.</p><button class="primary small" type="button" data-submit-draft="${esc(track.id)}">Submit draft</button></div>` : ''}
     ${editable ? `<div class="track-tempo-editor"><span class="eyebrow">EDIT BPM / KEY</span><div class="form-grid">${bpmKeyFieldsHtml('edit', track)}</div><button class="primary small" id="edit-bpmkey-save" type="button" data-edit-track="${esc(track.libraryId)}">Save BPM / Key</button></div>` : ''}
     ${renderCrateEditorPanel()}
   `;
+  document.querySelectorAll('[data-submit-draft]').forEach(button => {
+    button.onclick = event => submitDraftTake(event.currentTarget.dataset.submitDraft).catch(err => console.warn('Draft submit failed', err));
+  });
   if(editable){
     wireTapTempo('edit');
     const save = document.getElementById('edit-bpmkey-save');
@@ -11406,7 +11743,7 @@ async function renderOfficialRankings(){
 }
 renderOfficialRankings();
 
-function openModal(html){document.getElementById('modal-content').innerHTML=html;document.getElementById('modal').showModal();}
+function openModal(html){document.getElementById('modal-content').innerHTML=html;document.getElementById('modal').showModal();['post-body','community-comment-body'].forEach(id=>{const el=document.getElementById(id);if(el)wireMentionAutocomplete(el);});}
 studioStreamingManager = StudioModules.streaming.create({
   document,
   state,
@@ -11877,8 +12214,55 @@ function getDeckRuntimeDiagnostics(){
   return deckRuntimeManager ? deckRuntimeManager.diagnostics() : {};
 }
 
+async function saveRecordingDraftToLibrary(file, meta = {}){
+  if(!file) return { ok:false, error:'No recorded take is available to save.' };
+  const id = `draft-${Date.now()}`;
+  const when = new Date();
+  const track = {
+    id,
+    title: meta.title || `Draft take ${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour:'numeric', minute:'2-digit' })}`,
+    artist: currentUser().displayName,
+    genre: meta.genre || 'Draft',
+    source: 'MY_LIBRARY',
+    sourceType: 'draft_take',
+    rightsCategory: 'Unverified',
+    battleEligible: false,
+    duration: meta.duration || '—',
+    fileName: file.name || `${id}.webm`,
+    mimeType: file.type || 'audio/webm',
+    createdAt: when.toISOString(),
+    uploadDate: when.toISOString(),
+    draftBattleId: meta.battleId || null,
+    draftTracklist: Array.isArray(meta.tracklist) ? meta.tracklist.slice(0, 50) : [],
+    visibility: 'private',
+    userId: currentProfileUserId()
+  };
+  state.library.unshift(track);
+  const saved = await attachLibraryAudioBlob(id, file);
+  if(!saved.ok){
+    state.library = state.library.filter(row => row.id !== id);
+    return { ok:false, error:saved.error || 'Could not store the take in this browser.' };
+  }
+  persist();
+  if(typeof renderLibrary === 'function'){ try{ renderLibrary(); }catch(e){} }
+  showAppToast('Draft saved', 'Find it under Library → Drafts.');
+  return { ok:true, track };
+}
+
+async function submitDraftTake(trackId){
+  const track = (state.library || []).find(row => String(row.id) === String(trackId) || String(row.libraryId || '') === String(trackId));
+  if(!track || track.sourceType !== 'draft_take') return { ok:false, error:'Draft not found.' };
+  const blob = await loadLibraryAudioBlob(track.id);
+  if(!blob){ appAlert('The audio for this draft is missing from this browser.'); return { ok:false, error:'missing_audio' }; }
+  const FileCtor = window.File;
+  window.lastRecordedMixFile = FileCtor ? new FileCtor([blob], track.fileName || `${track.id}.webm`, { type:track.mimeType || 'audio/webm' }) : blob;
+  return studioRecordingManager.submit();
+}
+
 const studioRecordingManager = StudioModules.recording.create({
   window,
+  confirm: (title, body, label) => appConfirmDanger(title, body, label),
+  saveDraftToLibrary: saveRecordingDraftToLibrary,
   document,
   state,
   localStorage,
@@ -11941,6 +12325,7 @@ function wireControllerAndAudioControls(){ controllerMappingManager.wireControls
 function wireDeckRuntimeControls(){ return deckRuntimeManager ? deckRuntimeManager.wireControls() : undefined; }
 wireDeckRuntimeControls();
 wireStudioRecordingControls();
+scheduleFirstRunTour();
 const stemUnlock = document.getElementById('stem-unlock');
 if(stemUnlock) stemUnlock.onclick=()=>{if(!state.premium){openPremium('Premium unlocks stem-enabled battles and stem controls.');return;}document.getElementById('stem-buttons')?.classList.toggle('hidden');};
 
@@ -12031,6 +12416,29 @@ document.addEventListener('change', event => {
 });
 
 window.__DJBattleTestHooks = {
+  shouldShowFirstRunTour,
+  maybeShowFirstRunTour,
+  replayGuidedTour,
+  battleShareCardData,
+  drawBattleShareCard,
+  shareBattleResult,
+  battleShareFileName,
+  completedResultActionsHtml,
+  renderHeroScore,
+  saveRecordingDraftToLibrary,
+  submitDraftTake,
+  getStudioRecordingManager: () => studioRecordingManager,
+  mentionifyText,
+  mentionSuggestions,
+  mentionedProfileIdsFor,
+  extractMentionHandles,
+  knownMentionDjs,
+  recordLocalMentionAlerts,
+  localMentionAlertsForMe,
+  wireMentionAutocomplete,
+  postAuthorFollowButtonHtml,
+  followPostAuthor,
+  collectActivityEntries,
   appConfirmDanger, showErrorToast, runAction, handleGlobalError, relativeTimeLabel, relativeTimeHtml, chooseReportReason, REPORT_REASONS,
   initAuth,
   currentUser,
