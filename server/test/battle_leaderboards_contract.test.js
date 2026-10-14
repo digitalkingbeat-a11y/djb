@@ -14,6 +14,34 @@ const root = path.join(__dirname, '..');
 const serverSource = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
 const sql = fs.readFileSync(path.join(root, 'sql', '016_create_public_leaderboard_snapshots.sql'), 'utf8');
 
+describe('monthly leaderboard period filter', () => {
+  it('period=month keeps only awards applied this calendar month (UTC); all-time keeps everything', async () => {
+    const now = new Date('2026-10-14T12:00:00.000Z');
+    const client = dataClient(seedData({
+      battle_progression_awards:[
+        award({ id:'a-oct', resolution_id:'r-oct', user_id:'dj-1', applied_at:'2026-10-03T10:00:00.000Z', rating_after:1700 }),
+        award({ id:'a-sep', resolution_id:'r-sep', user_id:'dj-2', applied_at:'2026-09-28T10:00:00.000Z', created_at:'2026-09-28T10:00:00.000Z', updated_at:'2026-09-28T10:00:00.000Z', rating_after:1900 })
+      ]
+    }));
+    const month = await listPublicLeaderboards(client, { category:'competitive_battles', period:'month', now });
+    const all = await listPublicLeaderboards(client, { category:'competitive_battles', now });
+    expect(month.period).to.equal('month');
+    expect(month.periodStart).to.equal('2026-10-01T00:00:00.000Z');
+    expect(month.filters.period).to.equal('month');
+    expect(month.rows.map(r => r.djName)).to.deep.equal(['Creator DJ']);
+    expect(all.period).to.equal('all');
+    expect(all.rows).to.have.length(2);
+  });
+
+  it('normalizes unknown periods to all-time and drops undated awards from the month board', () => {
+    const { normalizePeriod, filterAwardsByPeriod } = require('../battle_leaderboards');
+    expect(normalizePeriod('MONTH')).to.equal('month');
+    expect(normalizePeriod('year')).to.equal('all');
+    const kept = filterAwardsByPeriod([{ id:1 }, { id:2, applied_at:'2026-10-02T00:00:00Z' }], 'month', new Date('2026-10-14T00:00:00Z'));
+    expect(kept.map(a => a.id)).to.deep.equal([2]);
+  });
+});
+
 describe('public leaderboards from progression award ledger', () => {
   it('builds public rankings only from applied awards and dedupes repeated resolution entries', async () => {
     const client = dataClient(seedData({

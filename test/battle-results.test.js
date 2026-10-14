@@ -120,7 +120,7 @@ test('completed Battle Results show score, evidence, confidence, recommendations
   assert.match(text, /Keep transitions controlled/);
   assert.match(text, /Rule-based scoring/);
   assert.match(text, /AI feedback/);
-  assert.match(text, /Human voting/);
+  assert.match(text, /Crowd vote/);
   assert.deepEqual(errors, []);
 });
 

@@ -20,3 +20,4 @@ Recommended next steps
 - For privacy, consider anonymizing or limiting fields exposed in the public views.
 
 If you want, I can also produce the exact `supabase` CLI commands or an automated migration script next.
+- 028_create_battle_crowd_votes.sql — creates `battle_crowd_votes` (one winner pick per listener per finished battle; writes go through the server)
