@@ -409,6 +409,7 @@ test('notification mute and block actions use protected endpoints without exposi
   };
 
   await hooks.muteDjNotificationSource('notification-1');
+  setTimeout(() => window.document.querySelector('[data-app-confirm-ok]').click(), 0);
   await hooks.blockDjNotificationSource('notification-1');
 
   assert.ok(calls.some(call => call.url === '/api/notificationMutes' && call.body.mutedPublicProfileId === 'dj_challenger'));
