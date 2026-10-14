@@ -29,7 +29,7 @@ function loadAppDom(){
 test('professional shell locks the requested navigation and default Battles view', () => {
   const window = loadAppDom();
   const labels = [...window.document.querySelectorAll('#nav .nav-btn > span:first-of-type')].map(node => node.textContent.trim());
-  assert.deepEqual(labels, ['Battles', 'Battle Studio', 'Music Library', 'Community', 'Rankings', 'Virtual Tour', 'Activity', 'Profile', 'Settings']);
+  assert.deepEqual(labels, ['Home', 'Battles', 'Battle Studio', 'Music Library', 'Community', 'Rankings', 'Virtual Tour', 'Activity', 'Profile', 'Settings']);
   assert.equal(window.document.querySelector('#battles')?.classList.contains('active'), true);
   assert.equal(window.document.getElementById('page-title')?.textContent.trim(), 'Battles');
   assert.equal(window.document.getElementById('operator-nav')?.classList.contains('hidden'), true);
