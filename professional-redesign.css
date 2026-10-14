@@ -1577,3 +1577,13 @@ td{
 .notification-toast--warn{border-color:rgba(255,184,0,.6)!important}
 .badge-coming-soon{display:inline-block;padding:1px 8px;border-radius:999px;background:rgba(198,255,0,.14);color:var(--accent,#c6ff00);font-size:12px;font-weight:700}
 .preview-label{border-style:dashed}
+
+/* Oct 14 b: sample rankings tag, unranked label, rank estimate */
+.sample-rankings-tag{display:inline-flex;align-items:center;gap:8px;margin:0 0 10px;padding:5px 12px;border-radius:999px;border:1px solid rgba(185,255,49,.45);background:rgba(185,255,49,.08);color:var(--accent,#b9ff31);font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.sample-rankings-tag i{width:8px;height:8px;border-radius:50%;background:var(--accent,#b9ff31);box-shadow:0 0 8px var(--accent,#b9ff31)}
+.sample-rankings-table{width:100%;border-collapse:collapse}
+.sample-rankings-table td,.sample-rankings-table th{padding:8px 10px;border-bottom:1px solid #1f2730;text-align:left}
+.sample-you-row{background:rgba(185,255,49,.06)}
+.unranked-label{color:#9aa4b2;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+.sample-rankings-note{color:var(--muted,#9aa4b2);font-size:13px;margin-top:8px}
+.rank-estimate-label{color:var(--accent,#b9ff31)}

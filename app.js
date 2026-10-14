@@ -1099,6 +1099,7 @@ function switchView(view){
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===view));
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
   document.getElementById('page-title').textContent=pageTitles[view]||'DJ Battle';
+  if(state.shareTitle) setShareMeta('', '');
   if(view === 'operations'){
     renderJudgingOperationsAccess();
     if(state.operatorUser) loadJudgingOperationsStatus();
@@ -1115,6 +1116,7 @@ function switchView(view){
     loadDjNotifications({ preserve:true }).catch(err=>console.warn('Notification refresh failed', err));
   }
   if(view === 'activity'){
+    markActivitySeenForTitle();
     renderActivityPage();
     loadDjNotifications({ preserve:true }).catch(err=>console.warn('Activity refresh failed', err));
   }
@@ -1577,9 +1579,15 @@ function assignTracksForBattle(b,num){
     for(let i=0;i<num;i++){assigned.push(pool[i]);} 
   } else {
     for(let i=0;i<pool.length;i++) assigned.push(pool[i]);
-    for(let i=assigned.length;i<num;i++) assigned.push(`Assignment pending track ${i+1}`);
   }
   return assigned;
+}
+function missingBattleTracks(assigned, num){
+  return Math.max(0, Number(num || 0) - (assigned || []).filter(Boolean).length);
+}
+function showNeedMoreTracks(b, missing){
+  openModal(`<span class="eyebrow accent">NOT ENOUGH TRACKS</span><h3>Need ${missing} more track${missing === 1 ? '' : 's'}</h3><p style="color:var(--muted)" id="need-more-tracks-note">"${esc(b.title || 'This battle')}" needs a real track in every slot before it can start. Upload or mark tracks as battle-eligible in your Music Library.</p><div class="modal-actions"><button class="ghost" value="cancel">Close</button><button class="primary" type="button" id="need-tracks-library">Open Library</button></div>`);
+  setTimeout(()=>{ const btn=document.getElementById('need-tracks-library'); if(btn) btn.onclick=()=>{ document.getElementById('modal').close(); if(typeof switchView==='function') switchView('library'); }; },0);
 }
 
 function generatePracticeScore(){
@@ -1630,6 +1638,26 @@ function getAiHighScoreRows(){
   return rows.sort((a,b)=>b.best-a.best || b.average-a.average).map((row,index)=>({ ...row, rank:index+1 }));
 }
 
+const SAMPLE_RANKINGS_TAG = 'Sample rankings — not live';
+function setSampleRankingsTag(container, id, show){
+  if(!container || !container.parentNode) return;
+  let tag = document.getElementById(id);
+  if(show && !tag){
+    tag = document.createElement('div');
+    tag.id = id;
+    tag.className = 'sample-rankings-tag';
+    tag.innerHTML = `<i></i>${esc(SAMPLE_RANKINGS_TAG)}`;
+    container.parentNode.insertBefore(tag, container);
+  }else if(!show && tag){ tag.remove(); }
+}
+function sampleRankingsHtml(){
+  const me = currentUser().displayName;
+  const rows = rankings.filter(row => !isCurrentUserName(row[1]));
+  const body = rows.map(row => `<tr><td>#${esc(row[0])}</td><td><strong>${esc(row[1])}</strong></td><td>${esc(row[2])}</td><td>${esc(row[3])}</td><td>${esc(row[6])}</td></tr>`).join('')
+    + `<tr class="sample-you-row"><td><span class="unranked-label">Unranked</span></td><td><strong>${esc(me)} (you)</strong></td><td>—</td><td>—</td><td>—</td></tr>`;
+  return `<div class="sample-rankings-tag" id="rankings-sample-tag"><i></i>${esc(SAMPLE_RANKINGS_TAG)}</div><div class="table-wrap"><table class="sample-rankings-table"><thead><tr><th>Rank</th><th>DJ</th><th>Genre</th><th>Record</th><th>Rating</th></tr></thead><tbody>${body}</tbody></table></div><p class="sample-rankings-note">The server can't be reached, so these are built-in examples. You show as Unranked until real results load.</p>`;
+}
+
 function renderAiLeaderboard(filter='Global'){
   const aiTarget = document.getElementById('ai-ranking-table');
   if(!aiTarget) return;
@@ -1653,6 +1681,7 @@ function renderAiLeaderboard(filter='Global'){
         </tr>
       `).join('') : '<tr><td colspan="8">No solo scores yet.</td></tr>';
       aiTarget.innerHTML = tableBody;
+      setSampleRankingsTag(aiTarget.closest('.table-wrap'), 'ai-sample-tag', false);
     }).catch(err=>{ console.warn('renderAiLeaderboard live error', err); aiTarget.innerHTML = '<tr><td colspan="8">No solo scores yet.</td></tr>'; });
     return;
   }
@@ -1666,9 +1695,10 @@ function renderAiLeaderboard(filter='Global'){
     return rowType.includes(filterKey) || rowGenre.includes(filterKey) || (filterKey === 'scratch' && rowType.includes('scratch')) || (filterKey === 'transition' && rowType.includes('transition')) || (filterKey === '5-song mix' && rowType.includes('5-song')) || (filterKey === '30-minute mix' && rowType.includes('30')) || (filterKey === '60-minute mix' && rowType.includes('60'));
   });
 
+  setSampleRankingsTag(aiTarget.closest('.table-wrap'), 'ai-sample-tag', true);
   const tableBody = filtered.length ? filtered.map(row => `
-    <tr>
-      <td>#${esc(row.rank)}</td>
+    <tr class="${isCurrentUserName(row.dj) ? 'sample-you-row' : ''}">
+      <td>${isCurrentUserName(row.dj) ? '<span class="unranked-label">Unranked</span>' : `#${esc(row.rank)}`}</td>
       <td><strong>${esc(row.dj)}</strong></td>
       <td>${esc(row.best)}</td>
       <td>${esc(row.average)}</td>
@@ -1707,13 +1737,25 @@ function cloneBattleProgressSnapshot(progress = state.battleProgress){
   };
 }
 
+// Rank only against real, server-confirmed leaderboard rows. The built-in sample
+// table (Nova Cut, Maya Mixx, Juno...) is never used. Returns null when no live data.
+function liveRankingRatings(){
+  const pr = state.publicRankings || {};
+  if(pr.status !== 'synced' && !pr.stale) return null;
+  const rows = (pr.rows || []).filter(row => Number(row.rating) > 0 && !isCurrentUserName(row.displayName || row.dj || row.name));
+  return rows.length ? rows.map(row => Number(row.rating)) : null;
+}
 function localRankForRating(rating){
-  const rows = rankings
-    .filter(row => !isCurrentUserName(row[1]))
-    .map(row => Number(row[6] || 0))
-    .concat(Number(rating || 0))
-    .sort((a,b)=>b-a);
-  return rows.findIndex(value => value === Number(rating || 0)) + 1;
+  const live = liveRankingRatings();
+  if(!live) return null;
+  const value = Number(rating || 0);
+  return live.filter(r => r > value).length + 1;
+}
+function rankMovementModule(before, after){
+  if(before && after){
+    return `<strong>#${esc(before)} -> #${esc(after)}</strong><p>${after < before ? 'Moved up' : after > before ? 'Moved down' : 'No rank change'}</p>`;
+  }
+  return `<strong class="rank-estimate-label">Local estimate</strong><p>No live rankings yet. Your rank appears once the server confirms results.</p>`;
 }
 
 function localVerifiedResultId(resultKey){
@@ -2178,7 +2220,7 @@ function renderCompletedBattleResult(battle, result, options = {}){
       <div class="battle-progression-grid">
         <div class="battle-result-module"><span>XP earned</span><strong>+${esc(Number(progression.xp || 0))}</strong><p>${esc(progress.before.xp)} -> ${esc(progress.after.xp)}</p></div>
         <div class="battle-result-module"><span>Rating</span><strong>${Number(progression.ratingDelta || 0) >= 0 ? '+' : ''}${esc(Number(progression.ratingDelta || 0))}</strong><p>${esc(progress.before.rankingRating)} -> ${esc(progress.after.rankingRating)}</p></div>
-        <div class="battle-result-module"><span>Ranking movement</span><strong>#${esc(progress.rankBefore)} -> #${esc(progress.rankAfter)}</strong><p>${progress.rankAfter < progress.rankBefore ? 'Moved up' : progress.rankAfter > progress.rankBefore ? 'Moved down' : 'No rank change'}</p></div>
+        <div class="battle-result-module"><span>Ranking movement</span>${rankMovementModule(progress.rankBefore, progress.rankAfter)}</div>
         <div class="battle-result-module"><span>Belt progress</span><strong>${esc(progress.before.belt)} -> ${esc(progress.after.belt)}</strong><p>Next: ${esc(nextBeltForXp(progress.after.xp).name)}</p></div>
       </div>
       <div class="battle-reward-note">${esc(rewardResultText(result))}</div>
@@ -2592,6 +2634,8 @@ function openBattle(id){
       const numMatch=(String(b.tracks).match(/(\d+)/)||[])[0];
       const num = numMatch? Number(numMatch) : (b.type&&b.type.includes('5')?5:2);
       const assigned = assignTracksForBattle(b,num);
+      const missing = missingBattleTracks(assigned, num);
+      if(missing > 0){ showNeedMoreTracks(b, missing); return; }
       const waitingBattle = { ...b, genre: chosenGenre, durationMinutes: chosenLength, status:'waiting', lobbyStatus:'waiting' };
       showLocalWaitingRoom(waitingBattle, assigned, {
         onSolo: () => startBattleSession({ id: Date.now(), title: b.title, type: b.type }, { mode: 'Solo AI Rating', genre: chosenGenre, duration: chosenLength, opponent: null, assigned: [] })
@@ -2615,6 +2659,7 @@ function openBattleLifecycle(id){
     setTimeout(()=>{ const btn=document.getElementById('refresh-lobby-now'); if(btn) btn.onclick=()=>loadServerBattleLobby().catch(()=>{}); },0);
     return;
   }
+  setShareMeta(`${b.title || 'Battle'} — DJ Battle`, `${b.type || 'DJ battle'}${b.genre ? ` · ${b.genre}` : ''}. Join the battle on DJ Battle.`);
   const mode = BattleModes.getBattleMode(b.modeId || b.type);
   const selectedLength = b.durationMinutes || parseMinutes(b.time);
   const lengthOptions = mode ? mode.allowedDurations : [10, 20, 30, 60];
@@ -2713,6 +2758,10 @@ async function joinBattleFromModal(b){
     joinedBattle = { ...joinedBattle, status:'waiting', lobbyStatus:'waiting' };
   }
   const assigned = resolveBattleTracks(joinedBattle);
+  if(!['own_selection','ai_practice','open_library'].includes(joinedBattle.trackSelectionMethod)){
+    const missing = missingBattleTracks(assigned, joinedBattle.trackCount || 2);
+    if(missing > 0){ showNeedMoreTracks(joinedBattle, missing); return; }
+  }
   let preparedBattle = joinedBattle;
   if(!needsOpponent || opponent){
     const prepared = BattleModes.prepareBattle(joinedBattle, { userId: currentProfileUserId(), assignedTracks: assigned, now: new Date().toISOString() });
@@ -8052,6 +8101,11 @@ function renderRankingRows(){
   const empty = document.getElementById('rankings-empty');
   if(!target || !empty) return;
   const rows = state.publicRankings.rows || [];
+  if(!rows.length && ['failed','configuration_required','offline'].includes(state.publicRankings.status)){
+    empty.classList.add('hidden');
+    target.innerHTML = sampleRankingsHtml();
+    return;
+  }
   if(!rows.length){
     target.innerHTML = '';
     empty.classList.remove('hidden');
@@ -10136,7 +10190,45 @@ function renderChallengeCountPill(){
   }
 }
 
+
+// Tab title + share meta. Social crawlers only read index.html's static tags; these
+// updates help browsers, bookmarks and JS-aware previewers.
+const DEFAULT_TAB_TITLE = 'DJ Battle — Battle Studio';
+const DEFAULT_SHARE_DESCRIPTION = 'Battle other DJs, get AI-judged scores and climb the rankings.';
+function setMetaContent(attr, key, value){
+  let el = document.head && document.head.querySelector(`meta[${attr}="${key}"]`);
+  if(!el && document.head){ el = document.createElement('meta'); el.setAttribute(attr, key); document.head.appendChild(el); }
+  if(el) el.setAttribute('content', value);
+}
+function setShareMeta(title, description){
+  state.shareTitle = title || '';
+  const t = title || DEFAULT_TAB_TITLE;
+  const d = description || DEFAULT_SHARE_DESCRIPTION;
+  setMetaContent('name', 'description', d);
+  setMetaContent('property', 'og:title', t);
+  setMetaContent('property', 'og:description', d);
+  setMetaContent('name', 'twitter:title', t);
+  setMetaContent('name', 'twitter:description', d);
+  updateTabTitle();
+}
+function unreadTitleCount(){
+  const n = state.djNotifications ? state.djNotifications.counts : null;
+  const total = Number(n && n.unreadTotal || 0);
+  if(state.tabUnreadSeen == null || total < state.tabUnreadSeen) state.tabUnreadSeen = Math.min(total, state.tabUnreadSeen || 0);
+  return Math.max(0, total - (state.tabUnreadSeen || 0));
+}
+function updateTabTitle(){
+  const count = unreadTitleCount();
+  document.title = count > 0 ? `(${count}) DJ Battle` : (state.shareTitle || DEFAULT_TAB_TITLE);
+  return document.title;
+}
+function markActivitySeenForTitle(){
+  state.tabUnreadSeen = Number(state.djNotifications && state.djNotifications.counts && state.djNotifications.counts.unreadTotal || 0);
+  updateTabTitle();
+}
+
 function renderNotificationCountPill(){
+  updateTabTitle();
   const pill = document.getElementById('notification-count-pill');
   if(!pill) return;
   const count = Number(state.djNotifications.counts.unreadTotal || 0);
@@ -10730,6 +10822,10 @@ function renderPublicDjProfile(profile, status){
     };
   }else{
     state.profileRanking.public.profile = profile;
+  }
+  {
+    const shareName = profile.displayName || profile.name || 'DJ';
+    setShareMeta(`${shareName} — DJ Battle profile`, `${shareName}${profile.country ? ` from ${profile.country}` : ''} on DJ Battle. See their battles, belt and rankings.`);
   }
   const stats = profile.stats || {};
   const country = profile.country || 'Unknown';
