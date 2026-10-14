@@ -87,6 +87,7 @@ const state = {
 };
 state.battleProgress = { xp: 0, rating: 0, rankingRating: 0, wins: 0, losses: 0, belt: 'White', ...state.battleProgress };
 state.publicRankings.filters = { country:'all', belt:'all', relationship:'all', ...(state.publicRankings.filters || {}) };
+state.publicRankings.period = (function(){ try{ return localStorage.getItem('djBattleRankingsPeriod') === 'month' ? 'month' : 'all'; }catch(e){ return 'all'; } })();
 state.librarySort = safeParse('djBattleLibrarySort', null) || { field:'title', direction:'asc' };
 state.libraryFilters = Object.assign({ crate:'all', search:'', compatibleOnly:false }, (function(){ const saved = safeParse('djBattleLibraryFilters', null); return saved && typeof saved === 'object' ? { crate:typeof saved.crate === 'string' ? saved.crate : 'all', search:typeof saved.search === 'string' ? saved.search.slice(0,120) : '', compatibleOnly:Boolean(saved.compatibleOnly) } : {}; })());
 state.battleFormatFilter = 'all';
@@ -845,6 +846,10 @@ async function fetchLeaderboardLive(opts={}){
       // Use ilike to match battle_type or genre containing the filter string
       const pattern = `%${filter}%`;
       query = query.or(`battle_type.ilike.${pattern},genre.ilike.${pattern}`);
+    }
+    if(opts.period === 'month' && typeof query.gte === 'function'){
+      // Server-side date filter on ai_scores.created_at (no migration needed)
+      query = query.gte('created_at', leaderboardMonthStartIso());
     }
     const { data, error } = await query;
     if(error) return { error: error.message || String(error), rows: [] };
@@ -1797,7 +1802,7 @@ function renderAiLeaderboard(filter='Global'){
   const aiTarget = document.getElementById('ai-ranking-table');
   if(!aiTarget) return;
   if(LIVE_MODE){
-    fetchLeaderboardLive({filter}).then(resp=>{
+    fetchLeaderboardLive({filter, period:(state.publicRankings && state.publicRankings.period) || 'all'}).then(resp=>{
       if(!resp || resp.error || !Array.isArray(resp.rows)){
         aiTarget.innerHTML = '<tr><td colspan="8">No solo scores yet.</td></tr>';
         return;
@@ -3706,13 +3711,16 @@ function renderPosts(){
   const serverCapable = communityApiAvailable();
   const signedIn = Boolean(communityAccountId());
   const useServerRows = state.community.source === 'server' || (serverCapable && signedIn);
-  const rows = useServerRows ? state.community.posts : localCommunityPosts();
+  const allRows = useServerRows ? state.community.posts : localCommunityPosts();
+  const rows = typeof filterPostsByRoom === 'function' ? filterPostsByRoom(allRows) : allRows;
+  if(typeof renderCommunityRoomChips === 'function') renderCommunityRoomChips(allRows);
   const target = document.getElementById('forum-feed');
   if(target){
     const emptyCopy = useServerRows
       ? (state.community.status === 'loading' ? 'Loading DJ posts.' : 'No community posts match this feed.')
       : 'No saved community posts match this feed yet.';
-    target.innerHTML = rows.length ? rows.map(communityPostHtml).join('') : `<div class="panel community-empty"><strong>${esc(emptyCopy)}</strong><p>Share a post or adjust the feed filters.</p></div>`;
+    const roomEmpty = typeof selectedCommunityRoom === 'function' && selectedCommunityRoom() !== 'all' && allRows.length;
+    target.innerHTML = rows.length ? rows.map(communityPostHtml).join('') : `<div class="panel community-empty"><strong>${esc(roomEmpty ? 'No posts in this room yet.' : emptyCopy)}</strong><p>${roomEmpty ? 'Pick All to see every room, or start the conversation here.' : 'Share a post or adjust the feed filters.'}</p></div>`;
   }
   const latest = document.getElementById('latest-posts');
   if(latest){
@@ -8528,6 +8536,7 @@ function publicRankingQuery(page){
   if(ranking.filters.country && ranking.filters.country !== 'all') params.set('country', ranking.filters.country);
   if(ranking.filters.belt && ranking.filters.belt !== 'all') params.set('belt', ranking.filters.belt);
   if(ranking.filters.relationship && ranking.filters.relationship !== 'all') params.set('relationship', ranking.filters.relationship);
+  if(ranking.period === 'month') params.set('period', 'month');
   params.set('page', String(page || ranking.page || 1));
   params.set('limit', String(ranking.pageSize || 20));
   return params.toString();
@@ -13424,4 +13433,449 @@ Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), {
   headToHeadRecord, headToHeadSummaryText, headToHeadLastMeetingText, headToHeadLineHtml, headToHeadProfileHtml,
   winStreaks, battleBadges, renderProfileStreaks, renderCompletedBattleResult, battleCard, renderPosts, renderLibrary,
   communityStatsState: () => state
+});
+
+// ===== Discovery: saved searches, room chips, monthly boards, genre stats, reminders =====
+function discoveryRead(key, fallback){ const v = safeParse(key, fallback); return v == null ? fallback : v; }
+function discoveryWrite(key, value){ try{ localStorage.setItem(key, JSON.stringify(value)); }catch(e){ if(typeof appAlert === 'function') appAlert('Storage is full, so this could not be saved.'); } }
+function discoveryId(prefix){ return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`; }
+
+// --- 1) Saved battle searches ---
+const SAVED_SEARCH_KEY = 'djBattleSavedSearches';
+const SAVED_SEARCH_ALERT_KEY = 'djBattleSavedSearchAlerts';
+const SAVED_SEARCH_FILTER_KEYS = ['mode','genre','duration','entry','search','country','belt','scoringType','opponent','relationship','ownSelection','bitcoin'];
+function loadSavedSearches(){ const v = discoveryRead(SAVED_SEARCH_KEY, []); return Array.isArray(v) ? v.filter(item => item && item.id && item.filters) : []; }
+function saveSavedSearches(list){ discoveryWrite(SAVED_SEARCH_KEY, list); }
+function loadSavedSearchAlerts(){ const v = discoveryRead(SAVED_SEARCH_ALERT_KEY, []); return Array.isArray(v) ? v : []; }
+function pickLobbyFilters(filters){
+  const out = {};
+  SAVED_SEARCH_FILTER_KEYS.forEach(key => { if(filters && filters[key] != null) out[key] = filters[key]; });
+  return out;
+}
+function savedSearchSummary(filters){
+  const f = filters || {};
+  const parts = [];
+  if(f.genre && f.genre !== 'all') parts.push(f.genre);
+  if(f.mode && f.mode !== 'all') parts.push(battleModeDisplayLabel(f.mode));
+  if(f.duration === 'short') parts.push('2-10 min'); else if(f.duration === 'medium') parts.push('20-30 min'); else if(f.duration === 'long') parts.push('60 min');
+  if(f.entry && f.entry !== 'all') parts.push(readableComponentName(f.entry));
+  if(f.search) parts.push(`"${f.search}"`);
+  if(f.bitcoin) parts.push('Bitcoin');
+  return parts.join(' · ') || 'Any battle';
+}
+function battleIsOpenForDiscovery(b){
+  const status = String(b && (b.lobbyStatus || b.status) || 'open').toLowerCase();
+  return !['completed','finished','resolved','cancelled','canceled','expired','judging'].includes(status);
+}
+function battleMatchesSavedFilters(b, filters){
+  if(!b || !battleIsOpenForDiscovery(b)) return false;
+  const f = filters || {};
+  const genre = battleModeFixedGenre(b.modeId) || b.genre || 'Open Format';
+  const duration = battleDurationMinutes(b);
+  if(f.mode && f.mode !== 'all' && b.modeId !== f.mode) return false;
+  if(f.genre && f.genre !== 'all' && String(genre).toLowerCase() !== String(f.genre).toLowerCase()) return false;
+  if(f.duration === 'short' && duration > 10) return false;
+  if(f.duration === 'medium' && (duration < 20 || duration > 30)) return false;
+  if(f.duration === 'long' && duration < 60) return false;
+  if(f.entry && f.entry !== 'all' && battleEntryKind(b) !== f.entry) return false;
+  if(f.bitcoin && !(b.bitcoinRewardMetadata || (b.reward && b.reward.type === 'bitcoin'))) return false;
+  if(f.ownSelection && battleEntryKind(b) !== 'own_selection') return false;
+  const q = String(f.search || '').trim().toLowerCase();
+  if(q && !battleSearchText(b).includes(q)) return false;
+  return true;
+}
+function createSavedSearch(name, filters = state.battleLobby.filters, rows = battles){
+  const clean = String(name || '').trim().slice(0, 40);
+  if(!clean) return { error:'Give the search a name.' };
+  const list = loadSavedSearches();
+  if(list.some(item => item.name.toLowerCase() === clean.toLowerCase())) return { error:'You already have a saved search with that name.' };
+  const picked = pickLobbyFilters(filters);
+  // Battles already listed don't alert; only new ones do.
+  const seenIds = (rows || []).filter(b => battleMatchesSavedFilters(b, picked)).map(b => String(b.id));
+  const search = { id:discoveryId('ss'), name:clean, filters:picked, createdAt:new Date().toISOString(), seenIds };
+  list.push(search);
+  saveSavedSearches(list);
+  startSavedSearchPolling();
+  return { ok:true, search };
+}
+function removeSavedSearch(id){
+  saveSavedSearches(loadSavedSearches().filter(item => item.id !== id));
+}
+function checkSavedSearchMatches(rows = battles){
+  const list = loadSavedSearches();
+  if(!list.length) return [];
+  const alerts = loadSavedSearchAlerts();
+  const alerted = new Set(alerts.map(a => String(a.battleId)));
+  const created = [];
+  list.forEach(search => {
+    const seen = new Set((search.seenIds || []).map(String));
+    (rows || []).forEach(b => {
+      const id = String(b && b.id || '');
+      if(!id || seen.has(id) || !battleMatchesSavedFilters(b, search.filters)) return;
+      seen.add(id);
+      if(alerted.has(id)) return;
+      alerted.add(id);
+      const alert = { id:discoveryId('ssa'), searchId:search.id, searchName:search.name, battleId:id, battleTitle:b.title || 'Battle', createdAt:new Date().toISOString() };
+      alerts.unshift(alert);
+      created.push(alert);
+    });
+    search.seenIds = Array.from(seen).slice(-500);
+  });
+  saveSavedSearches(list);
+  if(created.length){
+    discoveryWrite(SAVED_SEARCH_ALERT_KEY, alerts.slice(0, 100));
+    showAppToast(created.length === 1 ? 'New battle matches your search' : `${created.length} new battles match your searches`, created.length === 1 ? `${created[0].battleTitle} · ${created[0].searchName}` : created.map(a => a.searchName).filter((v, i, arr) => arr.indexOf(v) === i).join(', '));
+  }
+  return created;
+}
+function renderSavedSearches(){
+  const anchor = document.getElementById('battle-lobby-mode-filter');
+  const bar = anchor && anchor.closest('label') && anchor.closest('label').parentElement;
+  if(!bar) return;
+  let panel = document.getElementById('saved-searches');
+  if(!panel){
+    panel = document.createElement('div');
+    panel.id = 'saved-searches';
+    panel.className = 'saved-searches';
+    bar.parentNode.insertBefore(panel, bar.nextSibling);
+  }
+  const list = loadSavedSearches();
+  panel.innerHTML = `<div class="saved-searches-head"><span class="eyebrow">SAVED SEARCHES</span><form class="saved-search-form" id="saved-search-form"><input id="saved-search-name" maxlength="40" placeholder="Name these filters, e.g. Bass House 5-min" aria-label="Saved search name"><button class="primary small" type="submit">Save search</button></form></div>`
+    + (list.length
+      ? `<div class="saved-search-list">${list.map(item => `<span class="saved-search-chip" data-saved-search="${esc(item.id)}"><button class="saved-search-apply" type="button" data-saved-search-apply="${esc(item.id)}" title="Apply these filters"><strong>${esc(item.name)}</strong><small>${esc(savedSearchSummary(item.filters))}</small></button><button class="saved-search-remove" type="button" data-saved-search-remove="${esc(item.id)}" aria-label="Remove ${esc(item.name)}">×</button></span>`).join('')}</div><p class="saved-search-note">You'll get an Activity alert when a new battle matches.</p>`
+      : '<p class="saved-search-note">Set the filters above, name them and save. New matching battles show up in Activity.</p>');
+  const form = panel.querySelector('#saved-search-form');
+  form.onsubmit = event => {
+    event.preventDefault();
+    const result = createSavedSearch(panel.querySelector('#saved-search-name').value);
+    if(result.error){ appAlert(result.error); return; }
+    showAppToast('Search saved', `${result.search.name} · ${savedSearchSummary(result.search.filters)}`);
+    renderSavedSearches();
+  };
+  panel.querySelectorAll('[data-saved-search-remove]').forEach(btn => btn.onclick = () => { removeSavedSearch(btn.dataset.savedSearchRemove); renderSavedSearches(); });
+  panel.querySelectorAll('[data-saved-search-apply]').forEach(btn => btn.onclick = () => {
+    const found = loadSavedSearches().find(item => item.id === btn.dataset.savedSearchApply);
+    if(!found) return;
+    state.battleLobby.filters = { ...state.battleLobby.filters, mode:'all', genre:'all', duration:'all', entry:'all', search:'', ownSelection:false, bitcoin:false, ...found.filters };
+    state.battleLobby.page = 1;
+    renderBattles('All');
+    loadServerBattleLobby({ page:1 }).catch(err => console.warn('Saved search apply failed', err));
+  });
+}
+(function wrapBattlesForDiscovery(){
+  const originalRender = renderBattles;
+  renderBattles = function(){ const out = originalRender.apply(this, arguments); try{ renderSavedSearches(); }catch(e){ console.warn('saved searches render failed', e); } return out; };
+  const originalLoad = loadServerBattleLobby;
+  loadServerBattleLobby = async function(){
+    const out = await originalLoad.apply(this, arguments);
+    try{ if(out && !out.error && !out.skipped) checkSavedSearchMatches(battles); }catch(e){ console.warn('saved search check failed', e); }
+    return out;
+  };
+})();
+let savedSearchPollTimer = null;
+function startSavedSearchPolling(){
+  if(savedSearchPollTimer || typeof setInterval !== 'function') return;
+  savedSearchPollTimer = setInterval(() => {
+    if(typeof document !== 'undefined' && document.hidden) return;
+    if(!loadSavedSearches().length || !battleLobbyServerApiAvailable()) return;
+    const onBattles = document.getElementById('battles') && document.getElementById('battles').classList.contains('active');
+    loadServerBattleLobby({ render:onBattles }).catch(() => {});
+  }, 60000);
+  if(savedSearchPollTimer && typeof savedSearchPollTimer.unref === 'function') savedSearchPollTimer.unref();
+}
+
+// --- 2) Community room chips ---
+const COMMUNITY_ROOM_KEY = 'djBattleCommunityRoom';
+function selectedCommunityRoom(){ try{ return localStorage.getItem(COMMUNITY_ROOM_KEY) || 'all'; }catch(e){ return 'all'; } }
+function setCommunityRoom(room){ try{ localStorage.setItem(COMMUNITY_ROOM_KEY, room || 'all'); }catch(e){} renderPosts(); }
+function postRoomKey(post){ return String(post && (post.categoryId || post.category || post.slug) || 'general'); }
+function communityRoomCounts(rows){
+  const map = new Map();
+  (rows || []).forEach(post => {
+    const key = postRoomKey(post);
+    const cur = map.get(key) || { id:key, label:post.categoryLabel || communityCategoryLabel(key), count:0 };
+    cur.count += 1;
+    map.set(key, cur);
+  });
+  return Array.from(map.values()).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+}
+function filterPostsByRoom(rows){
+  const room = selectedCommunityRoom();
+  return room === 'all' ? rows : (rows || []).filter(post => postRoomKey(post) === room);
+}
+function renderCommunityRoomChips(rows){
+  const feed = document.getElementById('forum-feed');
+  if(!feed) return;
+  let bar = document.getElementById('community-room-chips');
+  if(!bar){
+    bar = document.createElement('div');
+    bar.id = 'community-room-chips';
+    bar.className = 'community-room-chips';
+    bar.setAttribute('role', 'tablist');
+    bar.setAttribute('aria-label', 'Community rooms');
+    feed.parentNode.insertBefore(bar, feed);
+  }
+  const room = selectedCommunityRoom();
+  const rooms = communityRoomCounts(rows);
+  if(room !== 'all' && !rooms.some(r => r.id === room)) rooms.push({ id:room, label:communityCategoryLabel(room), count:0 });
+  bar.innerHTML = [{ id:'all', label:'All', count:(rows || []).length }, ...rooms].map(r => `<button type="button" class="room-chip${r.id === room ? ' active' : ''}" role="tab" aria-selected="${r.id === room}" data-room-chip="${esc(r.id)}">${esc(r.label)}<b>${esc(r.count)}</b></button>`).join('');
+  bar.querySelectorAll('[data-room-chip]').forEach(btn => btn.onclick = () => setCommunityRoom(btn.dataset.roomChip));
+}
+
+// --- 3) Monthly / all-time leaderboards ---
+function leaderboardMonthStartIso(now = new Date()){
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+}
+function resultsInPeriod(results, period, now = new Date()){
+  if(period !== 'month') return (results || []).slice();
+  const start = new Date(leaderboardMonthStartIso(now)).getTime();
+  return (results || []).filter(r => { const t = new Date(historyCompletedAt(r) || '').getTime(); return Number.isFinite(t) && t >= start; });
+}
+function localPeriodSummary(period, results = state.battleResults, now = new Date()){
+  const rows = resultsInPeriod(results, period, now).filter(r => r && ['win','loss','tie'].includes(String(r.outcome)));
+  const scores = rows.map(r => Number(r.score)).filter(Number.isFinite);
+  return {
+    battles:rows.length,
+    wins:rows.filter(r => r.outcome === 'win').length,
+    losses:rows.filter(r => r.outcome === 'loss').length,
+    ties:rows.filter(r => r.outcome === 'tie').length,
+    best:scores.length ? Math.max(...scores) : null
+  };
+}
+function rankingsPeriodLabel(period){ return period === 'month' ? 'This month' : 'All-time'; }
+function setRankingsPeriod(period){
+  state.publicRankings.period = period === 'month' ? 'month' : 'all';
+  try{ localStorage.setItem('djBattleRankingsPeriod', state.publicRankings.period); }catch(e){}
+  state.publicRankings.page = 1;
+  state.publicRankings.rows = [];
+  renderRankingsPage();
+  loadRankingsPage({ force:true }).catch(err => console.warn('Rankings period change failed', err));
+}
+function rankingsPeriodSourceText(){
+  const r = state.publicRankings;
+  if(r.status === 'synced'){
+    if(r.period === 'month' && r.servedPeriod !== 'month') return 'Live · server returned all-time (monthly not deployed yet)';
+    return `Live · ${rankingsPeriodLabel(r.period)}`;
+  }
+  return 'Sample, not live';
+}
+function renderRankingsPeriodTabs(){
+  const cats = document.getElementById('rankings-category-tabs');
+  if(!cats) return;
+  let bar = document.getElementById('rankings-period-tabs');
+  if(!bar){
+    bar = document.createElement('div');
+    bar.id = 'rankings-period-tabs';
+    bar.className = 'rankings-period-tabs';
+    bar.setAttribute('role', 'tablist');
+    bar.setAttribute('aria-label', 'Leaderboard period');
+    cats.parentNode.insertBefore(bar, cats);
+  }
+  const period = state.publicRankings.period || 'all';
+  const live = state.publicRankings.status === 'synced';
+  bar.innerHTML = ['month','all'].map(p => `<button type="button" class="period-tab${p === period ? ' active' : ''}" role="tab" aria-selected="${p === period}" data-rankings-period="${p}">${esc(rankingsPeriodLabel(p))}</button>`).join('')
+    + `<span class="period-source ${live ? 'live' : 'sample'}" id="rankings-period-source">${esc(rankingsPeriodSourceText())}</span>`;
+  bar.querySelectorAll('[data-rankings-period]').forEach(btn => btn.onclick = () => { if(btn.dataset.rankingsPeriod !== period) setRankingsPeriod(btn.dataset.rankingsPeriod); });
+}
+function renderLocalPeriodPanel(){
+  const list = document.getElementById('rankings-list');
+  if(!list) return;
+  const old = document.getElementById('rankings-local-period');
+  if(old) old.remove();
+  if(state.publicRankings.status === 'synced') return;
+  const period = state.publicRankings.period || 'all';
+  const s = localPeriodSummary(period);
+  const panel = document.createElement('div');
+  panel.id = 'rankings-local-period';
+  panel.className = 'rankings-local-period';
+  panel.innerHTML = `<span class="eyebrow">YOUR RESULTS · ${esc(rankingsPeriodLabel(period).toUpperCase())} · FROM THIS DEVICE</span>`
+    + (s.battles
+      ? `<div class="local-period-stats"><div><strong>${s.wins}–${s.losses}${s.ties ? `–${s.ties}` : ''}</strong><small>W–L${s.ties ? '–T' : ''}</small></div><div><strong>${s.battles}</strong><small>Battles</small></div><div><strong>${s.best == null ? '—' : esc(s.best)}</strong><small>Best score</small></div></div><p>Not a ranking. Live ranks load when the server is reachable.</p>`
+      : `<p>No battles ${period === 'month' ? 'this month' : 'yet'} on this device.</p>`);
+  list.parentNode.insertBefore(panel, list.nextSibling);
+}
+(function wrapRankingsForPeriod(){
+  const originalRender = renderRankingsPage;
+  renderRankingsPage = function(){ const out = originalRender.apply(this, arguments); try{ renderRankingsPeriodTabs(); renderLocalPeriodPanel(); }catch(e){ console.warn('period tabs render failed', e); } return out; };
+  const originalLoad = loadRankingsPage;
+  loadRankingsPage = async function(){
+    const out = await originalLoad.apply(this, arguments);
+    try{
+      if(out && out.data){
+        const data = out.data.leaderboard || out.data;
+        state.publicRankings.servedPeriod = data && data.period === 'month' ? 'month' : 'all';
+        renderRankingsPeriodTabs();
+      }
+    }catch(e){}
+    return out;
+  };
+})();
+
+// --- 4) Genre stats on the Profile ---
+function genreStats(results = state.battleResults){
+  const map = new Map();
+  (results || []).forEach(r => {
+    if(!r || !['win','loss','tie'].includes(String(r.outcome))) return;
+    const genre = String(r.genre || '').trim() || 'Open Format';
+    const cur = map.get(genre) || { genre, wins:0, losses:0, ties:0, total:0 };
+    if(r.outcome === 'win') cur.wins += 1; else if(r.outcome === 'loss') cur.losses += 1; else cur.ties += 1;
+    cur.total += 1;
+    map.set(genre, cur);
+  });
+  const rows = Array.from(map.values()).map(row => ({ ...row, winRate:(row.wins + row.ties * 0.5) / row.total }));
+  rows.sort((a, b) => b.total - a.total || b.winRate - a.winRate || a.genre.localeCompare(b.genre));
+  // Best genre: highest win rate with at least 2 battles (or 1 if nothing has 2), ties broken by wins
+  const pool = rows.some(r => r.total >= 2) ? rows.filter(r => r.total >= 2) : rows;
+  const best = pool.filter(r => r.wins > 0).slice().sort((a, b) => b.winRate - a.winRate || b.wins - a.wins || b.total - a.total)[0] || null;
+  return { rows, best:best ? best.genre : null };
+}
+function genreRecordText(row){ return `${row.wins}–${row.losses}${row.ties ? `–${row.ties}` : ''}`; }
+function renderProfileGenreStats(){
+  const el = document.getElementById('profile-genre-stats');
+  if(!el) return;
+  const stats = genreStats();
+  if(!stats.rows.length){
+    el.innerHTML = '<span class="eyebrow">GENRE STATS</span><p class="genre-empty">No head-to-head battles yet. Your record per genre shows up here after your first battle.</p>';
+    return;
+  }
+  el.innerHTML = `<span class="eyebrow">GENRE STATS</span><div class="genre-stat-list">${stats.rows.map(row => `<div class="genre-stat${row.genre === stats.best ? ' best' : ''}" data-genre-stat="${esc(row.genre)}"><strong>${esc(row.genre)}</strong><span>${esc(genreRecordText(row))}</span>${row.genre === stats.best ? '<em>Best genre</em>' : ''}</div>`).join('')}</div>`;
+}
+(function wrapStreaksForGenres(){
+  const original = renderProfileStreaks;
+  renderProfileStreaks = function(){ const out = original.apply(this, arguments); try{ renderProfileGenreStats(); }catch(e){ console.warn('genre stats render failed', e); } return out; };
+})();
+renderProfileGenreStats();
+
+// --- 5) Battle reminders ---
+const REMINDER_KEY = 'djBattleReminders';
+const REMINDER_ALERT_KEY = 'djBattleReminderAlerts';
+const REMINDER_LEAD_MS = 10 * 60 * 1000;
+function loadReminders(){ const v = discoveryRead(REMINDER_KEY, {}); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
+function saveReminders(map){ discoveryWrite(REMINDER_KEY, map); }
+function loadReminderAlerts(){ const v = discoveryRead(REMINDER_ALERT_KEY, []); return Array.isArray(v) ? v : []; }
+function reminderTarget(b, now = Date.now()){
+  if(!b || !battleIsOpenForDiscovery(b)) return null;
+  const toMs = v => { const t = new Date(v || '').getTime(); return Number.isFinite(t) ? t : null; };
+  const start = toMs(b.scheduledStartAt || b.scheduledAt || b.startsAt || b.startAt);
+  if(start && start > now) return { kind:'start', at:start };
+  const deadline = toMs(b.submissionDeadlineAt || b.deadlineAt || b.expiresAt);
+  if(deadline && deadline > now) return { kind:'deadline', at:deadline };
+  return null;
+}
+function battleReminderButtonHtml(b){
+  const target = reminderTarget(b);
+  const on = Boolean(loadReminders()[String(b && b.id)]);
+  if(!target && !on) return '';
+  return `<button class="ghost small remind-btn${on ? ' on' : ''}" type="button" data-battle-remind="${esc(b.id)}" aria-pressed="${on}">${on ? '🔔 Reminder on' : '🔔 Remind me'}</button>`;
+}
+function toggleBattleReminder(battleId, now = Date.now()){
+  const id = String(battleId);
+  const map = loadReminders();
+  if(map[id]){
+    delete map[id];
+    saveReminders(map);
+    showAppToast('Reminder off', 'You won\u2019t be reminded about this battle.');
+    return { on:false };
+  }
+  const battle = battles.find(b => String(b.id) === id);
+  const target = reminderTarget(battle, now);
+  if(!target) return { error:'This battle has no upcoming start time or deadline.' };
+  map[id] = { battleId:id, title:battle.title || 'Battle', kind:target.kind, at:new Date(target.at).toISOString(), fireAt:new Date(target.at - REMINDER_LEAD_MS).toISOString(), fired:false };
+  saveReminders(map);
+  startReminderTicker();
+  if(typeof window !== 'undefined' && window.Notification && window.Notification.permission === 'default' && typeof window.Notification.requestPermission === 'function'){
+    try{ const p = window.Notification.requestPermission(); if(p && typeof p.catch === 'function') p.catch(() => {}); }catch(e){}
+  }
+  showAppToast('Reminder set', `${map[id].title}: 10 min before the ${target.kind === 'start' ? 'start' : 'submission deadline'}.`);
+  return { on:true, reminder:map[id] };
+}
+function showReminderToast(reminder){
+  const toast = showAppToast(reminder.kind === 'start' ? 'Battle starts in 10 min' : 'Submission due in 10 min', reminder.title);
+  if(!toast) return toast;
+  toast.classList.add('reminder-toast');
+  const btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'primary small'; btn.textContent = 'Open Studio'; btn.setAttribute('data-reminder-open-studio', reminder.battleId);
+  btn.onclick = () => { toast.remove(); switchView('studio'); };
+  toast.appendChild(btn);
+  return toast;
+}
+function checkBattleReminders(now = Date.now()){
+  const map = loadReminders();
+  const fired = [];
+  Object.values(map).forEach(rem => {
+    if(!rem || rem.fired) return;
+    const fireAt = new Date(rem.fireAt).getTime();
+    const at = new Date(rem.at).getTime();
+    if(!Number.isFinite(fireAt) || now < fireAt) return;
+    rem.fired = true;
+    if(now > at + 30 * 60 * 1000) return; // long past: drop quietly
+    fired.push(rem);
+  });
+  if(!fired.length){ return fired; }
+  saveReminders(map);
+  const alerts = loadReminderAlerts();
+  fired.forEach(rem => {
+    alerts.unshift({ id:discoveryId('rma'), battleId:rem.battleId, title:rem.title, kind:rem.kind, at:rem.at, createdAt:new Date(now).toISOString() });
+    showReminderToast(rem);
+    if(typeof window !== 'undefined' && window.Notification && window.Notification.permission === 'granted'){
+      try{ new window.Notification(rem.kind === 'start' ? 'Battle starts in 10 min' : 'Submission due in 10 min', { body:rem.title, tag:`djb-reminder-${rem.battleId}` }); }catch(e){}
+    }
+  });
+  discoveryWrite(REMINDER_ALERT_KEY, alerts.slice(0, 100));
+  return fired;
+}
+(function wrapBattleCardForReminders(){
+  const original = battleCard;
+  battleCard = function(b){
+    const html = original.apply(this, arguments);
+    const btn = battleReminderButtonHtml(b);
+    if(!btn) return html;
+    const at = html.lastIndexOf('<p>');
+    return at >= 0 ? html.slice(0, at) + btn + '\n    ' + html.slice(at) : html;
+  };
+})();
+if(typeof document !== 'undefined' && document.addEventListener){
+  document.addEventListener('click', event => {
+    const btn = event.target && event.target.closest && event.target.closest('[data-battle-remind]');
+    if(!btn) return;
+    const result = toggleBattleReminder(btn.dataset.battleRemind);
+    if(result.error){ appAlert(result.error); return; }
+    btn.classList.toggle('on', result.on);
+    btn.setAttribute('aria-pressed', String(result.on));
+    btn.textContent = result.on ? '🔔 Reminder on' : '🔔 Remind me';
+  });
+}
+let reminderTimer = null;
+function startReminderTicker(){
+  if(reminderTimer || typeof setInterval !== 'function') return;
+  reminderTimer = setInterval(() => checkBattleReminders(), 15000);
+  if(reminderTimer && typeof reminderTimer.unref === 'function') reminderTimer.unref();
+}
+
+// Activity: saved-search and reminder alerts
+(function wrapActivityForDiscovery(){
+  const original = collectActivityEntries;
+  collectActivityEntries = function(){
+    const base = original.apply(this, arguments);
+    const extra = [];
+    loadSavedSearchAlerts().slice(0, 30).forEach(a => extra.push({ kind:'alert', label:'Saved search', title:`New battle: ${a.battleTitle}`, detail:`Matches "${a.searchName}"`, view:'battles', time:activityTimestamp(a) }));
+    loadReminderAlerts().slice(0, 30).forEach(a => extra.push({ kind:'alert', label:'Reminder', title:a.kind === 'start' ? `${a.title} starts soon` : `${a.title}: submission due soon`, detail:`10 minutes before ${a.kind === 'start' ? 'the start' : 'the deadline'}`, view:'studio', time:activityTimestamp(a) }));
+    return sortActivityEntries(base.concat(extra));
+  };
+})();
+
+// Timers only run when there is something to watch.
+if(Object.keys(loadReminders()).length){ checkBattleReminders(); startReminderTicker(); }
+if(loadSavedSearches().length) startSavedSearchPolling();
+
+Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), {
+  battleMatchesSavedFilters, createSavedSearch, removeSavedSearch, loadSavedSearches, loadSavedSearchAlerts, checkSavedSearchMatches, renderSavedSearches, savedSearchSummary,
+  communityRoomCounts, filterPostsByRoom, selectedCommunityRoom, setCommunityRoom,
+  leaderboardMonthStartIso, localPeriodSummary, resultsInPeriod, setRankingsPeriod, publicRankingQuery, renderRankingsPage, fetchLeaderboardLive,
+  genreStats, renderProfileGenreStats,
+  reminderTarget, toggleBattleReminder, checkBattleReminders, loadReminders, loadReminderAlerts, battleReminderButtonHtml,
+  collectActivityEntries, renderBattles,
+  discoveryState: () => state,
+  discoveryBattles: () => battles,
+  setDiscoveryBattles: rows => { battles = rows; }
 });

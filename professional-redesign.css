@@ -1752,3 +1752,38 @@ a.mention-link:hover{text-decoration:underline}
 .dj-badge.locked{opacity:.4;filter:grayscale(1)}
 .dj-badge-icon{font-size:20px}
 .dj-badge small{color:var(--muted);font-size:11px}
+
+/* Discovery: saved searches, room chips, period tabs, genre stats, reminders */
+.saved-searches{margin:10px 0 14px;padding:12px 14px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:#0f1114;display:grid;gap:10px}
+.saved-searches-head{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.saved-search-form{display:flex;gap:8px;flex:1;min-width:260px;justify-content:flex-end}
+.saved-search-form input{flex:1;max-width:340px;background:#15181d;border:1px solid rgba(255,255,255,.12);color:#fff;border-radius:8px;padding:7px 10px}
+.saved-search-list{display:flex;flex-wrap:wrap;gap:8px}
+.saved-search-chip{display:inline-flex;align-items:stretch;border:1px solid var(--accent);border-radius:999px;overflow:hidden;background:rgba(200,255,0,.06)}
+.saved-search-apply{background:none;border:0;color:#fff;padding:6px 12px;text-align:left;cursor:pointer;display:grid}
+.saved-search-apply small{color:var(--muted);font-size:11px}
+.saved-search-remove{background:none;border:0;border-left:1px solid rgba(255,255,255,.1);color:var(--muted);padding:0 10px;font-size:16px;cursor:pointer}
+.saved-search-remove:hover{color:#ff5c5c}
+.saved-search-note{margin:0;color:var(--muted);font-size:12px}
+.community-room-chips,.rankings-period-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px;align-items:center}
+.room-chip,.period-tab{background:#15181d;border:1px solid rgba(255,255,255,.12);color:#d8dbe0;border-radius:999px;padding:6px 12px;cursor:pointer;display:inline-flex;gap:8px;align-items:center;font-weight:600}
+.room-chip b{background:rgba(255,255,255,.08);border-radius:999px;padding:0 7px;font-size:11px}
+.room-chip.active,.period-tab.active{background:var(--accent);border-color:var(--accent);color:#0b0c0e}
+.room-chip.active b{background:rgba(0,0,0,.18)}
+.period-source{margin-left:auto;font-size:11px;letter-spacing:.04em;text-transform:uppercase;padding:4px 10px;border-radius:999px}
+.period-source.live{color:var(--accent);border:1px solid var(--accent)}
+.period-source.sample{color:#ffb547;border:1px dashed #ffb547}
+.rankings-local-period{margin-top:12px;padding:12px 14px;border:1px dashed rgba(255,255,255,.18);border-radius:12px}
+.rankings-local-period p{margin:6px 0 0;color:var(--muted);font-size:12px}
+.local-period-stats{display:flex;gap:22px;margin-top:8px}
+.local-period-stats strong{display:block;font-size:20px;color:#fff}
+.local-period-stats small{color:var(--muted)}
+.profile-genre-stats{margin:14px 0}
+.genre-stat-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-top:10px}
+.genre-stat{border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:10px 12px;display:grid;gap:2px}
+.genre-stat span{font-size:20px;font-weight:700}
+.genre-stat.best{border-color:var(--accent);background:rgba(200,255,0,.07)}
+.genre-stat.best em{color:var(--accent);font-style:normal;font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+.genre-empty{color:var(--muted);margin:8px 0 0}
+.remind-btn.on{border-color:var(--accent);color:var(--accent)}
+.reminder-toast{display:grid;gap:6px}
