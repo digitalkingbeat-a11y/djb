@@ -28,6 +28,14 @@
     const deckPeakKey = { a:'', b:'' };
     const playLog = [];
     let tickHandle = null;
+    const pro = () => deps.studioPro || win.DJBattleStudioPro || global.DJBattleStudioPro || null;
+    // Studio Pro: per-channel filter + echo/reverb sends, PFL cue bus and headphone output.
+    const fxValues = { a:{ filter:0, echoBeats:0, echoWet:0.35, reverbWet:0 }, b:{ filter:0, echoBeats:0, echoWet:0.35, reverbWet:0 } };
+    const pfl = { a:false, b:false };
+    let cueMix = 0.5;
+    let cueBus = null;
+    let headphone = { deviceId:'', status:'' };
+    const detectedBpm = { a:null, b:null };
     const isJsdom = () => /jsdom/i.test(win && win.navigator && win.navigator.userAgent || '');
 
     function isValidDeck(deck){
@@ -126,6 +134,11 @@
           if(!nextMaster && nextCtx.createAnalyser) nextMaster = buildMasterTap(nextCtx);
           if(nextMaster) gain.connect(nextMaster.tap);
           nextFx[deck] = chain;
+          if(nextCtx.createMediaStreamDestination){
+            const pflGain = nextCtx.createGain(); pflGain.gain.value = 0;
+            chain.output.connect(pflGain);
+            chain.pfl = pflGain;
+          }
           nextSources[deck] = source;
           nextGains[deck] = gain;
         });
@@ -145,8 +158,10 @@
       fx = nextFx;
       masterTap = nextMaster ? nextMaster.tap : null;
       masterAnalysers = nextMaster ? nextMaster.analysers : [];
+      buildCueBus(nextCtx, nextFx, nextMaster);
       ['a','b'].forEach(applyChannelFx);
       applyMix();
+      applyCue();
       startTick();
       return { ok:true, audioContext:audioCtx, destination:recordingDestination };
     }
@@ -162,8 +177,26 @@
       const mid = ctx.createBiquadFilter(); mid.type = 'peaking'; mid.frequency.value = 1000; if(mid.Q) mid.Q.value = 0.9;
       const high = ctx.createBiquadFilter(); high.type = 'highshelf'; high.frequency.value = 4000;
       const analyser = ctx.createAnalyser(); analyser.fftSize = 2048;
-      trim.connect(low); low.connect(mid); mid.connect(high); high.connect(analyser);
-      return { input:trim, output:analyser, trim, low, mid, high, analyser };
+      trim.connect(low); low.connect(mid); mid.connect(high);
+      // high shelf -> one-knob filter -> mix bus (dry + echo return + reverb return) -> analyser
+      const filter = ctx.createBiquadFilter(); filter.type = 'allpass'; filter.frequency.value = 20000; if(filter.Q) filter.Q.value = 0.9;
+      const mix = ctx.createGain();
+      high.connect(filter); filter.connect(mix);
+      let echoSend = null, delay = null, feedback = null, reverbSend = null, convolver = null;
+      if(ctx.createDelay){
+        echoSend = ctx.createGain(); echoSend.gain.value = 0;
+        delay = ctx.createDelay(4); delay.delayTime.value = 0.5;
+        feedback = ctx.createGain(); feedback.gain.value = 0.35;
+        filter.connect(echoSend); echoSend.connect(delay); delay.connect(feedback); feedback.connect(delay); delay.connect(mix);
+      }
+      if(ctx.createConvolver && pro() && ctx.createBuffer){
+        reverbSend = ctx.createGain(); reverbSend.gain.value = 0;
+        convolver = ctx.createConvolver();
+        try{ convolver.buffer = pro().makeImpulse(ctx, 2.4, 3); }catch(e){}
+        filter.connect(reverbSend); reverbSend.connect(convolver); convolver.connect(mix);
+      }
+      mix.connect(analyser);
+      return { input:trim, output:analyser, trim, low, mid, high, filter, mix, echoSend, delay, feedback, reverbSend, convolver, analyser };
     }
 
     function buildMasterTap(ctx){
@@ -210,6 +243,7 @@
         if(chain.mid) try{ chain.mid.gain.value = v.mid; }catch(e){}
         if(chain.high) try{ chain.high.gain.value = v.high; }catch(e){}
       }
+      applySendFx(deck);
       Object.keys(MIXER_DEFAULTS).forEach(band => {
         const out = doc.getElementById(`${mixerInputId(deck, band)}-out`);
         if(out) out.textContent = formatMixerValue(band, v[band]);
@@ -296,6 +330,157 @@
       if(tickHandle || isJsdom()) return;
       const raf = win.requestAnimationFrame ? win.requestAnimationFrame.bind(win) : (fn => setTimeout(fn, 50));
       tickHandle = raf(tick);
+    }
+
+    // ---- Filter + send FX ----
+    function readSendFx(deck){
+      const v = fxValues[deck];
+      const num = (id, fallback) => { const el = doc.getElementById(id); const n = el ? Number(el.value) : NaN; return isFinite(n) ? n : fallback; };
+      v.filter = num(`filter-${deck}`, v.filter);
+      v.echoBeats = num(`echo-beats-${deck}`, v.echoBeats);
+      v.echoWet = num(`echo-wet-${deck}`, v.echoWet);
+      v.reverbWet = num(`reverb-wet-${deck}`, v.reverbWet);
+      return v;
+    }
+
+    function applySendFx(deckInput){
+      const deck = validDeck(deckInput);
+      const v = readSendFx(deck);
+      const P = pro();
+      const filt = P ? P.filterSettings(v.filter) : { type:'allpass', frequency:20000, label:'Off', mode:'off' };
+      const bpm = effectiveBpm(deck);
+      const delaySec = P ? P.echoDelaySeconds(bpm, v.echoBeats || 0.5) : 0.5;
+      const chain = fx[deck];
+      if(chain){
+        if(chain.filter) try{ chain.filter.type = filt.type; chain.filter.frequency.value = filt.frequency; }catch(e){}
+        if(chain.echoSend) try{ chain.echoSend.gain.value = v.echoBeats > 0 ? v.echoWet : 0; }catch(e){}
+        if(chain.delay) try{ chain.delay.delayTime.value = delaySec; }catch(e){}
+        if(chain.reverbSend) try{ chain.reverbSend.gain.value = v.reverbWet; }catch(e){}
+      }
+      const fOut = doc.getElementById(`filter-${deck}-out`);
+      if(fOut) fOut.textContent = filt.label;
+      const eOut = doc.getElementById(`echo-${deck}-out`);
+      if(eOut) eOut.textContent = v.echoBeats > 0 ? `${Math.round(delaySec * 1000)} ms${bpm ? '' : ' (no BPM)'} / ${Math.round(v.echoWet * 100)}%` : 'Off';
+      const rOut = doc.getElementById(`reverb-${deck}-out`);
+      if(rOut) rOut.textContent = v.reverbWet > 0 ? `${Math.round(v.reverbWet * 100)}%` : 'Off';
+      return { deck, filter:filt, echo:{ beats:v.echoBeats, delaySeconds:delaySec, wet:v.echoBeats > 0 ? v.echoWet : 0 }, reverb:{ wet:v.reverbWet }, connected:Boolean(chain) };
+    }
+
+    // ---- Headphone cue (PFL) ----
+    function buildCueBus(ctx, chains, master){
+      if(!ctx.createMediaStreamDestination) return null;
+      const dest = ctx.createMediaStreamDestination();
+      const cue = ctx.createGain();
+      const masterSend = ctx.createGain();
+      Object.values(chains).forEach(chain => { if(chain.pfl) chain.pfl.connect(cue); });
+      if(master && master.tap) master.tap.connect(masterSend);
+      cue.connect(dest); masterSend.connect(dest);
+      let element = null;
+      if(doc.createElement && !isJsdom()){
+        element = doc.createElement('audio');
+        element.id = 'headphone-cue-out';
+        element.hidden = true;
+        try{ element.srcObject = dest.stream; }catch(e){}
+        if(doc.body) doc.body.appendChild(element);
+      }
+      cueBus = { cue, master:masterSend, dest, element };
+      if(headphone.deviceId) setHeadphoneDevice(headphone.deviceId);
+      return cueBus;
+    }
+
+    function applyCue(){
+      const P = pro();
+      const knob = doc.getElementById('cue-mix');
+      if(knob && isFinite(Number(knob.value))) cueMix = Number(knob.value);
+      const g = P ? P.cueMixGains(cueMix) : { cue:1 - cueMix, master:cueMix };
+      ['a','b'].forEach(deck => {
+        const chain = fx[deck];
+        if(chain && chain.pfl) try{ chain.pfl.gain.value = pfl[deck] ? 1 : 0; }catch(e){}
+        const btn = doc.querySelector(`[data-pfl="${deck}"]`);
+        if(btn){ btn.classList.toggle('active', pfl[deck]); btn.setAttribute('aria-pressed', pfl[deck] ? 'true' : 'false'); }
+      });
+      if(cueBus){
+        try{ cueBus.cue.gain.value = g.cue; cueBus.master.gain.value = g.master; }catch(e){}
+      }
+      const out = doc.getElementById('cue-mix-out');
+      if(out) out.textContent = `Cue ${Math.round(g.cue * 100)}% / Master ${Math.round(g.master * 100)}%`;
+      return { pfl:{ ...pfl }, cueMix, gains:g, connected:Boolean(cueBus) };
+    }
+
+    function togglePfl(deckInput, force){
+      const deck = validDeck(deckInput);
+      pfl[deck] = typeof force === 'boolean' ? force : !pfl[deck];
+      const r = applyCue();
+      if(cueBus && cueBus.element && pfl[deck] && cueBus.element.paused !== false){ try{ const p = cueBus.element.play(); if(p && p.catch) p.catch(()=>{}); }catch(e){} }
+      return { ok:true, deck, on:pfl[deck], ...r };
+    }
+
+    function headphoneSupport(){
+      const P = pro();
+      return P ? P.headphoneSupport(win) : { supported:false };
+    }
+
+    function renderHeadphoneUi(devices){
+      const note = doc.getElementById('headphone-note');
+      const select = doc.getElementById('headphone-output');
+      const support = headphoneSupport();
+      if(!support.supported){
+        if(select){ select.disabled = true; select.innerHTML = '<option value="">Not available</option>'; }
+        if(note) note.textContent = 'Headphone output not supported in this browser';
+        return support;
+      }
+      if(select){
+        select.disabled = false;
+        const list = (devices || []).filter(d => d.kind === 'audiooutput');
+        select.innerHTML = '<option value="">Choose headphones…</option>' + list.map((d, i) => `<option value="${esc(d.deviceId)}" ${d.deviceId === headphone.deviceId ? 'selected' : ''}>${esc(d.label || `Output ${i + 1}`)}</option>`).join('');
+      }
+      if(note) note.textContent = headphone.status || 'Pick a second output for the cue mix. The crowd hears the browser default output.';
+      return support;
+    }
+
+    async function refreshHeadphoneDevices(){
+      const md = win.navigator && win.navigator.mediaDevices;
+      let devices = [];
+      try{ if(md && md.enumerateDevices) devices = await md.enumerateDevices(); }catch(e){}
+      renderHeadphoneUi(devices);
+      return devices;
+    }
+
+    async function setHeadphoneDevice(deviceId){
+      headphone.deviceId = String(deviceId || '');
+      const support = headphoneSupport();
+      if(!support.supported){ headphone.status = 'Headphone output not supported in this browser'; renderHeadphoneUi(); return { ok:false, error:headphone.status }; }
+      if(!cueBus || !cueBus.element){ headphone.status = 'Headphones set. Cue starts when a deck plays.'; renderHeadphoneUi(); return { ok:true, pending:true }; }
+      try{
+        await cueBus.element.setSinkId(headphone.deviceId);
+        const p = cueBus.element.play(); if(p && p.catch) p.catch(()=>{});
+        headphone.status = 'Cue mix playing on the chosen headphones.';
+        renderHeadphoneUi();
+        return { ok:true };
+      }catch(error){
+        headphone.status = `Could not switch output: ${String(error && error.message || error)}`;
+        renderHeadphoneUi();
+        return { ok:false, error:headphone.status };
+      }
+    }
+
+    // ---- Auto BPM ----
+    function applyDetectedBpm(deckInput, result){
+      const deck = validDeck(deckInput);
+      if(!result || !(result.bpm > 0)) return { ok:false };
+      const loaded = state.studioDecks && state.studioDecks[deck];
+      if(loaded && parseFloat(loaded.bpm) > 0) return { ok:false, skipped:'already-set' };
+      if(state.studioDecks){ state.studioDecks[deck] = { ...(loaded || {}), bpm:result.bpm, bpmSource:'detected' }; }
+      detectedBpm[deck] = result.bpm;
+      const bpmEl = doc.getElementById(`bpm-${deck}`);
+      if(bpmEl){
+        bpmEl.dataset.trackBpm = String(result.bpm);
+        bpmEl.innerHTML = `${esc(result.bpm)} <span class="bpm-detected-tag" title="Detected from the audio. Edit or Tap Tempo to override.">Detected</span>`;
+      }
+      updateDeckButtons(deck);
+      applySendFx(deck);
+      if(loaded && loaded.trackId && deps.saveDetectedBpm) deps.saveDetectedBpm(loaded.trackId, result.bpm);
+      return { ok:true, deck, bpm:result.bpm };
     }
 
     // ---- Sync / Key lock / Loop ----
@@ -456,7 +641,9 @@
       const buffer = await ctx.decodeAudioData(data);
       const channels = [];
       for(let c = 0; c < buffer.numberOfChannels; c += 1) channels.push(buffer.getChannelData(c));
-      peakCache[key] = { peaks:computePeaks(channels, 160), duration:buffer.duration };
+      let bpm = null;
+      try{ bpm = pro() ? pro().detectBpm(channels, buffer.sampleRate) : null; }catch(e){}
+      peakCache[key] = { peaks:computePeaks(channels, 160), duration:buffer.duration, bpm };
       return peakCache[key];
     }
 
@@ -464,7 +651,10 @@
       deckPeakKey[deck] = key || '';
       if(!key) return Promise.resolve(null);
       return decodePeaks(key, getArrayBuffer).then(result => {
-        if(deckPeakKey[deck] === key) renderWaveformForDeck(deck, {});
+        if(deckPeakKey[deck] === key){
+          renderWaveformForDeck(deck, {});
+          if(result && result.bpm && !trackBpm(deck)) applyDetectedBpm(deck, result.bpm);
+        }
         return result;
       }).catch(() => null);
     }
@@ -528,6 +718,9 @@
       Object.values(gains).forEach(gain => { try{ gain.disconnect(); }catch(e){} });
       Object.values(fx).forEach(chain => ['trim','low','mid','high','analyser'].forEach(k => { try{ chain[k] && chain[k].disconnect(); }catch(e){} }));
       try{ if(masterTap) masterTap.disconnect(); }catch(e){}
+      Object.values(fx).forEach(chain => ['filter','mix','echoSend','delay','feedback','reverbSend','convolver','pfl'].forEach(k => { try{ chain[k] && chain[k].disconnect(); }catch(e){} }));
+      if(cueBus){ ['cue','master','dest'].forEach(k => { try{ cueBus[k] && cueBus[k].disconnect && cueBus[k].disconnect(); }catch(e){} }); try{ if(cueBus.element){ cueBus.element.pause(); cueBus.element.srcObject = null; } }catch(e){} }
+      cueBus = null;
       fx = {}; masterTap = null; masterAnalysers = [];
       Object.values(localObjectUrls).forEach(url => {
         try{ if(url && win.URL && win.URL.revokeObjectURL) win.URL.revokeObjectURL(url); }catch(e){}
@@ -819,7 +1012,12 @@
         const timeEl = doc.getElementById(`time-${deck}`);
         if(nameEl) nameEl.textContent = rec.title;
         if(artistEl) artistEl.textContent = rec.artist || 'Unknown';
-        if(bpmEl){ bpmEl.textContent = rec.bpm || '--'; bpmEl.dataset.trackBpm = parseFloat(rec.bpm) > 0 ? String(parseFloat(rec.bpm)) : ''; }
+        if(bpmEl){
+          bpmEl.textContent = rec.bpm || '--';
+          bpmEl.dataset.trackBpm = parseFloat(rec.bpm) > 0 ? String(parseFloat(rec.bpm)) : '';
+          if(rec.bpmSource === 'detected' && parseFloat(rec.bpm) > 0) bpmEl.innerHTML = `${esc(rec.bpm)} <span class="bpm-detected-tag" title="Detected from the audio. Edit in the Library to override.">Detected</span>`;
+        }
+        detectedBpm[deck] = null;
         syncRate[deck] = null;
         loops[deck] = null;
         if(keyEl) keyEl.innerHTML = deps.keyBadgeHtml ? deps.keyBadgeHtml(rec.key || rec.camelotKey || '--') : esc(rec.key || rec.camelotKey || '--');
@@ -1065,6 +1263,16 @@
           el.oninput = () => applyChannelFx(deck);
           el.ondblclick = () => resetMixerControl(deck, band);
         });
+        ['filter','echo-beats','echo-wet','reverb-wet'].forEach(id => {
+          const el = doc.getElementById(`${id}-${deck}`);
+          if(!el) return;
+          el.oninput = () => applySendFx(deck);
+          el.onchange = () => applySendFx(deck);
+        });
+        const filterEl = doc.getElementById(`filter-${deck}`);
+        if(filterEl) filterEl.ondblclick = () => { filterEl.value = '0'; applySendFx(deck); };
+        const pflBtn = doc.querySelector(`[data-pfl="${deck}"]`);
+        if(pflBtn) pflBtn.onclick = event => { if(event && event.stopPropagation) event.stopPropagation(); togglePfl(deck); };
         applyChannelFx(deck);
         updateDeckButtons(deck);
         const vol = doc.getElementById(`vol-${deck}`);
@@ -1081,6 +1289,14 @@
       applyMix();
       const xfader = doc.getElementById('xfader');
       if(xfader) xfader.oninput = applyMix;
+      const cueKnob = doc.getElementById('cue-mix');
+      if(cueKnob) cueKnob.oninput = applyCue;
+      const hpSelect = doc.getElementById('headphone-output');
+      if(hpSelect) hpSelect.onchange = () => setHeadphoneDevice(hpSelect.value);
+      const hpRefresh = doc.getElementById('headphone-refresh');
+      if(hpRefresh) hpRefresh.onclick = () => refreshHeadphoneDevices();
+      applyCue();
+      renderHeadphoneUi();
       setTimeout(() => {
         setFocusedDeck('a');
         doc.querySelectorAll('.deck').forEach(el => {
@@ -1166,7 +1382,17 @@
       getPeakCacheKeys:() => Object.keys(peakCache),
       logDeckEvent,
       getPlayLog:() => playLog.slice(),
-      tracklistBetween:(start, end) => buildTracklist(playLog, start, end)
+      tracklistBetween:(start, end) => buildTracklist(playLog, start, end),
+      applySendFx,
+      togglePfl,
+      applyCue,
+      setHeadphoneDevice,
+      refreshHeadphoneDevices,
+      renderHeadphoneUi,
+      applyDetectedBpm,
+      getDetectedBpm:deck => detectedBpm[validDeck(deck)],
+      getChain:deck => fx[validDeck(deck)] || null,
+      getCueBus:() => cueBus
     };
   }
 

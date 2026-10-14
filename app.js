@@ -1037,6 +1037,8 @@ function installProfessionalShell(){
         <button class="ghost small" id="stop-record" type="button" disabled>STOP</button>
         <span class="record-state" id="record-status">Recording idle</span>
         <strong id="record-timer">00:00</strong>
+        <div class="record-countin hidden" id="record-countin" aria-live="assertive"></div>
+        <small class="record-time-left hidden" id="record-time-left"></small>
         <div class="record-meters" aria-label="Recording input meters"><i id="record-meter-l"></i><i id="record-meter-r"></i></div>
       </div>
       <div class="studio-grid professional-studio-grid">
@@ -1051,9 +1053,14 @@ function installProfessionalShell(){
               <label title="Double-click to reset">High<input id="eq-high-a" type="range" min="-12" max="12" step="1" value="0"><output id="eq-high-a-out">0 dB</output></label>
               <label title="Double-click to reset">Mid<input id="eq-mid-a" type="range" min="-12" max="12" step="1" value="0"><output id="eq-mid-a-out">0 dB</output></label>
               <label title="Double-click to reset">Low<input id="eq-low-a" type="range" min="-12" max="12" step="1" value="0"><output id="eq-low-a-out">0 dB</output></label>
-              <label>Filter<input id="filter-a" type="range" min="-1" max="1" step="0.01" value="0"></label>
+              <label class="filter-knob" title="Left: low-pass. Right: high-pass. Double-click to center (off)">Filter<input id="filter-a" type="range" min="-1" max="1" step="0.01" value="0"><output id="filter-a-out">Off</output></label>
+              <div class="send-fx" aria-label="Channel A effects">
+                <label>Echo<select id="echo-beats-a" aria-label="Echo time, Deck A"><option value="0">Off</option><option value="0.25">1/4</option><option value="0.5">1/2</option><option value="1">1 beat</option></select></label>
+                <label>Echo wet<input id="echo-wet-a" type="range" min="0" max="0.9" step="0.01" value="0.35"><output id="echo-a-out">Off</output></label>
+                <label>Reverb<input id="reverb-wet-a" type="range" min="0" max="1" step="0.01" value="0"><output id="reverb-a-out">Off</output></label>
+              </div>
               <label>Fader<input id="vol-a" type="range" min="0" max="1" step="0.01" value="1"></label>
-              <button class="ghost small" type="button">Cue</button>
+              <button class="ghost small pfl-btn" type="button" data-pfl="a" aria-pressed="false" title="Send Channel A to the headphone cue">&#127911; CUE</button>
             </div>
             <div class="mixer-channel">
               <strong>CH B</strong>
@@ -1061,14 +1068,23 @@ function installProfessionalShell(){
               <label title="Double-click to reset">High<input id="eq-high-b" type="range" min="-12" max="12" step="1" value="0"><output id="eq-high-b-out">0 dB</output></label>
               <label title="Double-click to reset">Mid<input id="eq-mid-b" type="range" min="-12" max="12" step="1" value="0"><output id="eq-mid-b-out">0 dB</output></label>
               <label title="Double-click to reset">Low<input id="eq-low-b" type="range" min="-12" max="12" step="1" value="0"><output id="eq-low-b-out">0 dB</output></label>
-              <label>Filter<input id="filter-b" type="range" min="-1" max="1" step="0.01" value="0"></label>
+              <label class="filter-knob" title="Left: low-pass. Right: high-pass. Double-click to center (off)">Filter<input id="filter-b" type="range" min="-1" max="1" step="0.01" value="0"><output id="filter-b-out">Off</output></label>
+              <div class="send-fx" aria-label="Channel B effects">
+                <label>Echo<select id="echo-beats-b" aria-label="Echo time, Deck B"><option value="0">Off</option><option value="0.25">1/4</option><option value="0.5">1/2</option><option value="1">1 beat</option></select></label>
+                <label>Echo wet<input id="echo-wet-b" type="range" min="0" max="0.9" step="0.01" value="0.35"><output id="echo-b-out">Off</output></label>
+                <label>Reverb<input id="reverb-wet-b" type="range" min="0" max="1" step="0.01" value="0"><output id="reverb-b-out">Off</output></label>
+              </div>
               <label>Fader<input id="vol-b" type="range" min="0" max="1" step="0.01" value="1"></label>
-              <button class="ghost small" type="button">Cue</button>
+              <button class="ghost small pfl-btn" type="button" data-pfl="b" aria-pressed="false" title="Send Channel B to the headphone cue">&#127911; CUE</button>
             </div>
           </div>
           <label class="crossfader">Crossfader<input id="xfader" type="range" min="-1" max="1" step="0.01" value="0"><output id="xfader-out">A 71% / B 71%</output></label>
           <label class="master-level">Master<input id="master-level" type="range" min="0" max="1.2" step="0.01" value="1"></label>
-          <div class="fx-row"><button class="ghost small" type="button" disabled>FX 1</button><button class="ghost small" type="button" disabled>FX 2</button><span>FX disabled until mapped by provider/device support.</span></div>
+          <div class="headphone-panel" aria-label="Headphone cue">
+            <label class="cue-mix">Cue / Master<input id="cue-mix" type="range" min="0" max="1" step="0.01" value="0.5"><output id="cue-mix-out">Cue 71% / Master 71%</output></label>
+            <label class="headphone-output">Headphones<span class="hp-row"><select id="headphone-output" aria-label="Headphone output device"><option value="">Choose headphones…</option></select><button class="ghost small" id="headphone-refresh" type="button">Find</button></span></label>
+            <small id="headphone-note" class="headphone-note"></small>
+          </div>
         </section>
         ${deckShellHtml('b', 'B')}
         <section class="panel studio-browser-panel">
@@ -6679,7 +6695,7 @@ function renderLibraryDetail(track){
     ${artworkMarkup(track, 'library-detail-art')}
     <div style="margin-top:12px"><span class="eyebrow">TRACK DETAIL</span><h3>${esc(trackTitle(track))}</h3><p style="color:var(--muted);margin:4px 0">${esc(trackArtist(track))}</p></div>
     <div class="library-readout-grid">
-      <div class="library-readout"><span>BPM</span><strong>${esc(track.bpm)}</strong></div>
+      <div class="library-readout"><span>BPM</span><strong>${esc(track.bpm)}${bpmSourceTag(track)}</strong></div>
       <div class="library-readout"><span>KEY</span><strong>${keyBadgeHtml(track.key)}</strong></div>
       <div class="library-readout"><span>SOURCE</span><strong>${esc(trackSource(track))}</strong></div>
       <div class="library-readout"><span>RIGHTS</span><strong>${track.battleEligible ? 'READY' : 'LOCKED'}</strong></div>
@@ -6699,6 +6715,7 @@ function renderLibraryDetail(track){
       if(bpmKey.key) patch.key = bpmKey.key;
       if(!Object.keys(patch).length){ showAppToast('Nothing to save', 'Enter a BPM between 40 and 220 or a key.'); return; }
       const result = await updateLibraryTrackMetadataOptimistic(save.dataset.editTrack, patch);
+      if(result && result.ok && patch.bpm){ const ed = getEditableLibraryTrack(save.dataset.editTrack); if(ed){ ed.track.bpmSource = 'manual'; persist(); } }
       if(result && result.ok) showAppToast('Saved', 'BPM and key updated.');
     };
   }
@@ -6844,6 +6861,7 @@ function normalizedDeckRecord(track){
     name: trackTitle(track),
     artist: trackArtist(track),
     bpm: parseBpm(track) || track.bpm || '--',
+    bpmSource: track.bpmSource || '',
     key: track.key || '--',
     camelotKey: track.camelotKey || parseCamelotKey(track.key),
     genre: track.genre || 'Unsorted',
@@ -6885,6 +6903,7 @@ function applyTrackPatchLocal(track, patch){
   if(patch.title != null){ track.title = patch.title; track.name = patch.title; }
   if(patch.artist != null) track.artist = patch.artist;
   if(patch.bpm != null) track.bpm = patch.bpm;
+  if(patch.bpmSource != null) track.bpmSource = patch.bpmSource;
   if(patch.key != null){ track.key = patch.key; track.camelotKey = parseCamelotKey(patch.key); }
   if(patch.genre != null) track.genre = patch.genre;
   if(patch.duration != null) track.duration = patch.duration;
@@ -6895,6 +6914,30 @@ function applyTrackPatchLocal(track, patch){
   if(patch.usageRelationships != null) track.usageRelationships = patch.usageRelationships;
   track.syncStatus = track.serverBacked ? 'optimistic' : track.syncStatus;
   return track;
+}
+
+// Auto BPM: save a detected tempo through the normal track patch path, only when the track has none.
+async function saveDetectedBpm(trackId, bpm){
+  const editable = getEditableLibraryTrack(trackId);
+  if(!editable || parseBpm(editable.track)) return { ok:false, skipped:true };
+  const result = await updateLibraryTrackMetadataOptimistic(trackId, { bpm });
+  if(result && result.ok){ editable.track.bpmSource = 'detected'; persist(); }
+  return result;
+}
+async function detectBpmFromFile(file){
+  const Pro = window.DJBattleStudioPro;
+  const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if(!Pro || !Offline || !file || typeof file.arrayBuffer !== 'function') return null;
+  try{
+    const data = await file.arrayBuffer();
+    const buffer = await new Offline(1, 1, 44100).decodeAudioData(data);
+    const channels = [];
+    for(let c = 0; c < buffer.numberOfChannels; c += 1) channels.push(buffer.getChannelData(c));
+    return Pro.detectBpm(channels, buffer.sampleRate);
+  }catch(e){ return null; }
+}
+function bpmSourceTag(track){
+  return track && track.bpmSource === 'detected' && parseBpm(track) ? ' <span class="bpm-detected-tag" title="Detected from the audio. Edit or Tap Tempo to override.">Detected</span>' : '';
 }
 
 async function updateLibraryTrackMetadataOptimistic(trackId, patch){
@@ -7106,6 +7149,22 @@ function handleLibraryFilesWithMeta(files){
     openModal(`<span class="eyebrow accent">UPLOAD TRACK</span><h3>Upload ${esc(f.name)}</h3><div class="form-grid"><label>Title<input id="meta-title" value="${esc(f.name.replace(/\.[^/.]+$/, ''))}"></label><label>Artist<input id="meta-artist" placeholder="Artist"></label><label>Genre<input id="meta-genre" placeholder="Genre"></label>${bpmKeyFieldsHtml('meta')}<label>Rights Category<select id="meta-rights"><option>Original / I Own the Rights</option><option>Licensed / I Have Permission</option><option>Royalty-Free / Cleared</option><option>Commercial / Copyrighted Music</option><option>Unsure</option></select></label><label class="toggle-row">I confirm that I own the necessary rights to this music or have permission to upload and use it on this platform.<input type="checkbox" id="meta-declare"></label></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" id="meta-save">Upload</button></div>`);
     setTimeout(()=>{
       wireTapTempo('meta');
+      const metaBpm = document.getElementById('meta-bpm');
+      const metaHint = document.getElementById('meta-tap-hint');
+      const metaTap = document.getElementById('meta-tap');
+      let bpmSource = '';
+      const markManual = () => { bpmSource = metaBpm && metaBpm.value ? 'manual' : ''; const tag = document.getElementById('meta-bpm-detected'); if(tag) tag.remove(); };
+      if(metaBpm) metaBpm.addEventListener('input', markManual);
+      if(metaTap) metaTap.addEventListener('click', () => setTimeout(markManual, 0));
+      if(metaHint) metaHint.textContent = 'Detecting BPM from the audio…';
+      detectBpmFromFile(f).then(result => {
+        if(!metaBpm || !document.body.contains(metaBpm)) return;
+        if(!result || metaBpm.value){ if(metaHint && !metaBpm.value) metaHint.textContent = 'Could not detect BPM. Type it or tap along.'; return; }
+        metaBpm.value = String(result.bpm);
+        bpmSource = 'detected';
+        metaBpm.insertAdjacentHTML('afterend', '<span class="bpm-detected-tag" id="meta-bpm-detected" title="Detected from the audio. Type or Tap Tempo to override.">Detected</span>');
+        if(metaHint) metaHint.textContent = `Detected ${result.bpm} BPM. Type or tap to override.`;
+      });
       document.getElementById('meta-save').onclick = async ()=>{
         const bpmKey = readBpmKeyFields('meta');
         const title = document.getElementById('meta-title').value || f.name;
@@ -7116,13 +7175,14 @@ function handleLibraryFilesWithMeta(files){
         const serverUpload = await createServerBackedLibraryTrackFromFile(f, { title, artist, genre, ...(bpmKey.bpm ? { bpm:bpmKey.bpm } : {}), ...(bpmKey.key ? { key:bpmKey.key } : {}), rightsClassification:rightsCategoryToClassification(rights) }).catch(error => ({ error:String(error && error.message || error) }));
         if(serverUpload && serverUpload.data && serverUpload.data.track){
           await attachLibraryAudioBlob(serverUpload.data.track.id, f);
+          if(bpmKey.bpm && bpmSource){ const ed = getEditableLibraryTrack(serverUpload.data.track.id); if(ed){ ed.track.bpmSource = bpmSource; persist(); } }
           document.getElementById('modal').close();
           next();
           return;
         }
         const realDuration = await readAudioDuration(f);
         const track = { id: 'u-'+Date.now(), title, name: title, artist, uploader: (document.getElementById('profile-name')?.textContent||'You'), album:null, artwork:null, artworkDataUrl:null, genre, bpm:'--', key:'--', duration: realDuration || '--', uploadDate: new Date().toISOString(), size: f.size||0, fileName: f.name, source:'MY_LIBRARY', rightsCategory: rights, rightsDeclared: declared, copyrightCheck: 'Not Checked', battleEligible: rights !== 'Commercial / Copyrighted Music', permissions: defaultPermissions(), stems:false, localAudioPersisted:false, audioMissing:false };
-        applyTrackPatchLocal(track, { ...(bpmKey.bpm ? { bpm:bpmKey.bpm } : {}), ...(bpmKey.key ? { key:bpmKey.key } : {}) });
+        applyTrackPatchLocal(track, { ...(bpmKey.bpm ? { bpm:bpmKey.bpm, ...(bpmSource ? { bpmSource } : {}) } : {}), ...(bpmKey.key ? { key:bpmKey.key } : {}) });
         state.library.push(track);
         await attachLibraryAudioBlob(track.id, f);
         persist();
@@ -11426,6 +11486,7 @@ deckRuntimeManager = StudioModules.deckRuntime.create({
   recordLibraryTrackUsageLocal,
   persistStudioDeckState,
   setStudioRuleStatus,
+  saveDetectedBpm,
   getLibraryCrateById,
   allLibraryCrates,
   resolveCrateTrackIds,
@@ -11828,6 +11889,9 @@ const studioRecordingManager = StudioModules.recording.create({
   getRecordingDestination: () => deckRuntimeManager && deckRuntimeManager.getRecordingDestination(),
   getMediaRecorder: () => window.MediaRecorder,
   getMasterLevels: () => deckRuntimeManager && deckRuntimeManager.masterLevels ? deckRuntimeManager.masterLevels() : null,
+  getBattleLimitMs: () => { const s = activeStudioBattleSession(); return window.DJBattleStudioPro ? window.DJBattleStudioPro.battleRecordingLimitMs(s) : null; },
+  studioPro: window.DJBattleStudioPro,
+  computePeaks: (channels, n) => deckRuntimeManager && deckRuntimeManager.computePeaks ? deckRuntimeManager.computePeaks(channels, n) : [],
   getTracklist: (start, end) => deckRuntimeManager && deckRuntimeManager.tracklistBetween ? deckRuntimeManager.tracklistBetween(start, end) : [],
   formatTracklistTime: ms => window.DJBattleDeckRuntime && window.DJBattleDeckRuntime.formatTracklistTime ? window.DJBattleDeckRuntime.formatTracklistTime(ms) : String(ms),
   activeStudioBattleSession,
