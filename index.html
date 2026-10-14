@@ -3,7 +3,22 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="icon" href="data:," />
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+  <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon-64.png" />
+  <link rel="apple-touch-icon" href="assets/favicon-64.png" />
+  <meta name="theme-color" content="#0b0f14" />
+  <meta name="description" content="Battle other DJs, get AI-judged scores and climb the rankings." />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="DJ Battle" />
+  <meta property="og:title" content="DJ Battle — Battle Studio" />
+  <meta property="og:description" content="Battle other DJs, get AI-judged scores and climb the rankings." />
+  <meta property="og:image" content="assets/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="DJ Battle — Battle Studio" />
+  <meta name="twitter:description" content="Battle other DJs, get AI-judged scores and climb the rankings." />
+  <meta name="twitter:image" content="assets/og-image.png" />
   <title>DJ Battle — Battle Studio</title>
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="battle-room.css" />
@@ -25,18 +40,18 @@
 <body>
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="brand">
+      <div class="brand" id="brand-home" role="button" tabindex="0" title="Go to Battle Home" aria-label="Go to Battle Home">
         <div class="brand-mark">DB</div>
         <div><strong>DJ BATTLE</strong><span>Battle • Community • Studio</span></div>
       </div>
       <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Collapse sidebar" title="Collapse sidebar">Collapse</button>
       <nav id="nav">
+        <button class="nav-btn" data-view="dashboard" title="Battle Home"><b>HM</b><span>Home</span></button>
         <button class="nav-btn active" data-view="battles" title="Battles"><b>BT</b><span>Battles</span></button>
         <button class="nav-btn" data-view="studio" title="Battle Studio"><b>ST</b><span>Battle Studio</span></button>
         <button class="nav-btn" data-view="library" title="Music Library"><b>ML</b><span>Music Library</span></button>
         <button class="nav-btn" data-view="community" title="Community"><b>CM</b><span>Community</span></button>
         <button class="nav-btn" data-view="rankings" title="Rankings"><b>RK</b><span>Rankings</span></button>
-        <button class="nav-btn" data-view="tour" title="Virtual Tour"><b>VT</b><span>Virtual Tour</span></button>
         <button class="nav-btn" data-view="activity" title="Activity"><b>AC</b><span>Activity</span><span id="notification-count-pill">0</span></button>
         <button class="nav-btn" data-view="profile" title="Profile"><b>PR</b><span>Profile</span></button>
         <button class="nav-btn" data-view="settings" title="Settings"><b>SE</b><span>Settings</span></button>
@@ -72,10 +87,11 @@
             <p>Get assigned tracks, race the clock, submit your performance, and let AI + the community decide who won.</p>
             <div class="hero-actions"><button class="primary" data-view-target="battles">Enter a Battle</button><button class="ghost" data-view-target="studio">Open Battle Studio</button></div>
           </div>
-          <div class="score-orbit">
-            <div class="score-ring"><span>AI</span><strong>91</strong><small>/100</small></div>
-            <div class="orbit-tag top">Phrasing 19/20</div><div class="orbit-tag right">Timing 18/20</div><div class="orbit-tag bottom">Creativity 17/20</div>
+          <div class="score-orbit" id="hero-score" data-state="empty">
+            <div class="score-ring"><span id="hero-score-label">AI</span><strong id="hero-score-value">--</strong><small id="hero-score-unit">No battles yet</small></div>
+            <div class="orbit-tag top" id="hero-score-title">Your latest score shows here</div><div class="orbit-tag bottom" id="hero-score-date">Enter a battle to get judged</div>
           </div>
+          <div class="hero-score-actions" id="hero-score-actions" hidden></div>
         </div>
 
         <div class="section-head"><div><span class="eyebrow">ACTIVE NOW</span><h3>Featured Battles</h3></div><button class="text-btn" data-view-target="battles">View all →</button></div>
@@ -118,8 +134,8 @@
           <div class="panel upload-panel">
             <div><span class="eyebrow">SUBMISSION</span><h3 id="br-upload-title">Upload your battle mix</h3></div>
             <div style="margin-top:10px"><input type="file" id="br-upload-file" accept="audio/*"></div>
-            <div style="margin-top:10px"><div class="progress" id="br-upload-progress"><i style="width:0%"></i></div><small id="br-upload-status" style="color:var(--muted)">No file selected</small></div>
-            <div style="margin-top:12px;display:flex;gap:8px"><button class="primary" id="br-upload-btn">Upload Securely</button><button class="ghost" id="br-submit-btn">Retry Upload</button></div>
+            <div style="margin-top:10px"><div class="progress" id="br-upload-progress"><i style="width:0%"></i></div><div class="upload-progress-meta"><small id="br-upload-status" style="color:var(--muted)">No file selected</small><strong id="br-upload-percent" class="upload-percent"></strong></div></div>
+            <div style="margin-top:12px;display:flex;gap:8px"><button class="primary" id="br-upload-btn">Upload Securely</button><button class="ghost" id="br-upload-cancel" type="button" hidden>Cancel</button><button class="ghost" id="br-submit-btn" type="button" hidden>Retry upload</button></div>
             <div id="br-judge-placeholder" style="margin-top:12px"></div>
           </div>
         </div>
@@ -290,7 +306,11 @@
           </aside>
           <section class="library-panel library-browser" id="library-browser">
             <div class="library-console">
-              <input id="global-search" placeholder="Search title, artist, genre, BPM or key" />
+              <div class="library-search-wrap">
+                <input id="global-search" type="search" aria-label="Search library" aria-describedby="library-search-count" placeholder="Search title, artist, genre, BPM or key" />
+                <button type="button" id="library-search-clear" class="library-search-clear" aria-label="Clear search" title="Clear search (Esc)" hidden>&times;</button>
+              </div>
+              <span id="library-search-count" class="library-search-count" aria-live="polite"></span>
               <select id="library-sort-field" aria-label="Sort music library">
                 <option value="title">Title</option>
                 <option value="artist">Artist</option>
@@ -303,6 +323,7 @@
               <button class="ghost" id="library-sort-direction" type="button">ASC</button>
               <label class="library-toggle">Compatible<input type="checkbox" id="library-compatible-only"></label>
             </div>
+            <div id="library-filter-chips" class="library-filter-chips" aria-label="Active library filters" hidden></div>
             <div class="library-status-strip" id="library-status-strip"></div>
             <div class="table-wrap library-table-wrap"><table><thead><tr><th>Art</th><th>Track</th><th>Artist</th><th>Source</th><th>Genre</th><th>BPM</th><th>Key</th><th>Rights</th><th>Actions</th></tr></thead><tbody id="library-table"></tbody></table></div>
           </section>
@@ -462,6 +483,7 @@
 
       <section id="profile" class="view">
         <div class="profile-hero"><div class="avatar huge" id="profile-hero-avatar">G</div><div><span class="eyebrow accent">DJ PROFILE</span><h2><span id="profile-hero-name">Guest</span> <span id="profile-belt-hero" class="belt-badge">White</span></h2><p id="profile-hero-tagline">Guest • Local DJ profile saved in this browser</p><div class="profile-actions"><button class="primary" id="edit-profile-button" type="button">Edit Profile</button><button class="ghost" id="share-profile-button" type="button">Share</button></div><div style="margin-top:8px"><button class="primary" id="take-belt-test">Take Belt Test</button></div></div><div class="profile-score"><strong>0</strong><span>Battle Rating</span></div></div>
+        <div id="profile-rating-history" class="panel rating-history"></div>
         <div class="stats profile-stats"><div><strong>0</strong><span>Wins</span></div><div><strong>0</strong><span>Losses</span></div><div><strong>0</strong><span>Uploads</span></div><div><strong>0</strong><span>Judge XP</span></div><div><strong>0</strong><span>Followers</span></div></div>
         <div class="panel" id="promotion-history-panel" style="margin-top:16px"><div class="section-head compact"><div><span class="eyebrow">ACHIEVEMENTS</span><h3>Promotion History</h3></div><button class="text-btn" id="refresh-promotions">Refresh</button></div><div id="promotion-history-list" style="display:grid;gap:8px;margin-top:8px"></div></div>
         <div class="profile-tabs"><button class="active" data-profile-tab="music">Music</button><button data-profile-tab="history">Battle History</button><button data-profile-tab="progression">Progression History</button><button data-profile-tab="challenges">Challenges <span id="challenge-count-pill">0</span></button><button data-profile-tab="relationships">Relationships</button><button data-profile-tab="feed">Feed</button><button data-profile-tab="opponents">Opponents</button><button data-profile-tab="preferences">Preferences</button><button data-profile-tab="mixes">Mixes</button><button data-profile-tab="battles">Battles</button><button data-profile-tab="posts">Posts</button><button data-profile-tab="achievements">Achievements</button></div><div id="profile-media" class="card-grid"></div>
@@ -522,6 +544,7 @@
   <script src="api_client.js"></script>
   <script src="submission_upload.js"></script>
   <script src="battle_modes.js"></script>
+  <script src="studio/studio_pro.js"></script>
   <script src="studio/studio_recording.js"></script>
   <script src="studio/controller_mapping.js"></script>
   <script src="studio/audio_setup.js"></script>
