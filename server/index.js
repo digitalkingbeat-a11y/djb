@@ -29,7 +29,18 @@ const BeltPromotion = require('./belt_promotion');
 const ProfileAvatar = require('./profile_avatar');
 const { createAvatarDirectory, avatarResponseMiddleware } = require('./avatar_directory');
 const { attachFreeOffers, listSellerStoreListings, prepareFreeDownloadFile } = require('./marketplace_free_beats');
-const { savePracticeSession, listPracticeSessions } = require('./practice_sessions');
+const { savePracticeSession, listPracticeSessions, renamePracticeSession, deletePracticeSession } = require('./practice_sessions');
+const { createEmailSender, createFreeEmailVerificationGateway, freeEmailConfirmationsStatus } = require('./email_sender');
+const {
+  applyConnectAccountUpdate,
+  checkoutReturnUrls,
+  createStripeConnectClient,
+  listSellerSales,
+  refreshSellerAccount,
+  salesConfigStatus,
+  setListingPrice,
+  startSellerOnboarding
+} = require('./marketplace_sales');
 const { getOrCreateBattleEntry, createDraftSubmission, getOwnedMixSubmission, issueUploadAuthorization, completeUpload, getSubmissionJudgingResult, MIX_BUCKET } = require('./battle_submission');
 const { reconcileBattleAwards } = require('./battle_award_ledger');
 const {
@@ -157,7 +168,8 @@ const {
   issueMarketplaceDownloadAccess,
   listMarketplaceSellerAccounts,
   listOwnedMarketplaceOrders,
-  upsertMarketplaceSellerAccount
+  upsertMarketplaceSellerAccount,
+  verifyStripeSignature
 } = require('./marketplace_commerce');
 const {
   checkMarketplaceFreeEmailSchemaReadiness,
@@ -242,13 +254,21 @@ function marketplaceProviderAdapter(provider){
     webhookSecret: normalized === 'stripe' ? process.env.STRIPE_WEBHOOK_SECRET : process.env.PAYPAL_WEBHOOK_ID,
     clientId: normalized === 'paypal' ? process.env.PAYPAL_CLIENT_ID : '',
     clientSecret: normalized === 'paypal' ? process.env.PAYPAL_CLIENT_SECRET : '',
-    successUrl: process.env.MARKETPLACE_CHECKOUT_SUCCESS_URL || process.env.MARKETPLACE_STRIPE_SUCCESS_URL,
-    cancelUrl: process.env.MARKETPLACE_CHECKOUT_CANCEL_URL || process.env.MARKETPLACE_STRIPE_CANCEL_URL
+    successUrl: checkoutReturnUrls(process.env).successUrl,
+    cancelUrl: checkoutReturnUrls(process.env).cancelUrl
   });
 }
 
+// Outgoing email (fan confirmation links). EMAIL_PROVIDER=resend|sendgrid with RESEND_API_KEY or
+// SENDGRID_API_KEY, EMAIL_FROM and APP_PUBLIC_URL; anything missing = safe no-op that only logs.
+const emailSender = createEmailSender({ env:process.env });
+
 function freeEmailVerificationAdapter(){
-  return createFreeEmailVerificationAdapter();
+  return createFreeEmailVerificationAdapter({ gateway:createFreeEmailVerificationGateway(emailSender, { env:process.env }) });
+}
+
+function stripeConnectClient(){
+  return createStripeConnectClient({ secretKey:process.env.STRIPE_SECRET_KEY });
 }
 
 function createConfiguredSubmissionJudgeRunner(){
@@ -944,6 +964,38 @@ app.post('/api/practiceSessions', requireAuth, async (req, res) => {
   }
 });
 
+app.patch('/api/practiceSessions/:sessionId', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  if(!guardProtectedWrite(req, res, 'practiceSessionRename', { payload:{ userId:req.authUser.id, sessionId:req.params.sessionId }, fingerprintReplay:false, idempotencyReplay:false })) return;
+  try{
+    const result = await renamePracticeSession(supabaseService, req.authUser.id, req.params.sessionId, req.body || {});
+    if(result.forbidden) return res.status(403).json({ error:'Cannot rename another DJ\'s practice session' });
+    if(result.validationError) return res.status(422).json({ error:result.validationError });
+    if(result.notFound) return res.status(404).json({ error:'Practice session not found' });
+    if(result.error) throw result.error;
+    return res.json({ success:true, session:result.session });
+  }catch(err){
+    console.error('practice session rename error', err);
+    return res.status(500).json({ error:'Practice session rename failed' });
+  }
+});
+
+app.delete('/api/practiceSessions/:sessionId', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  if(!guardProtectedWrite(req, res, 'practiceSessionDelete', { payload:{ userId:req.authUser.id, sessionId:req.params.sessionId }, fingerprintReplay:false, idempotencyReplay:false })) return;
+  try{
+    const result = await deletePracticeSession(supabaseService, req.authUser.id, req.params.sessionId);
+    if(result.forbidden) return res.status(403).json({ error:'Cannot delete another DJ\'s practice session' });
+    if(result.validationError) return res.status(422).json({ error:result.validationError });
+    if(result.notFound) return res.status(404).json({ error:'Practice session not found' });
+    if(result.error) throw result.error;
+    return res.json({ success:true, deleted:true, id:result.id });
+  }catch(err){
+    console.error('practice session delete error', err);
+    return res.status(500).json({ error:'Practice session delete failed' });
+  }
+});
+
 // Practice recordings already saved to the library (for replays on the Practice page).
 app.get('/api/musicLibrary/practiceRecordings', requireAuth, async (req, res) => {
   if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
@@ -1371,12 +1423,12 @@ app.post('/api/marketplace/freeEmail/verify', async (req, res) => {
   if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
   if(!guardProtectedWrite(req, res, 'marketplaceFreeEmailVerify', { payload: { leadId:req.body && req.body.leadId }, fingerprintReplay:false })) return;
   try{
-    const result = await verifyFreeEmailLead(supabaseService, req.body || {});
+    const result = await verifyFreeEmailLead(supabaseService, req.body || {}, new Date(), { exposeDownloadAccessToken:true });
     if(result.forbidden) return res.status(403).json({ error:'Free-email verification is invalid' });
     if(result.unavailable) return res.status(404).json({ error:'Free-email lead is unavailable' });
     if(result.validationError) return res.status(422).json({ error:result.validationError });
     if(result.error) throw result.error;
-    return res.json({ success:true, duplicate:Boolean(result.duplicate), verified:Boolean(result.verified), lead:result.lead, entitlement:result.entitlement || null, offer:result.offer || null });
+    return res.json({ success:true, duplicate:Boolean(result.duplicate), verified:Boolean(result.verified), lead:result.lead, entitlement:result.entitlement || null, offer:result.offer || null, downloadAccessToken:result.downloadAccessToken || null });
   }catch(err){
     console.error('marketplace free email verify error', err);
     return res.status(500).json({ error:'Marketplace free-email verification failed' });
@@ -1424,7 +1476,7 @@ app.get('/api/marketplace/myListings', requireAuth, async (req, res) => {
     const result = await listSellerStoreListings(supabaseService, req.authUser.id);
     if(result.validationError) return res.status(422).json({ error:result.validationError });
     if(result.error) throw result.error;
-    return res.json({ success:true, listings:result.listings, leadsUnavailable:Boolean(result.leadsUnavailable) });
+    return res.json({ success:true, listings:result.listings, totals:result.totals || null, leadsUnavailable:Boolean(result.leadsUnavailable) });
   }catch(err){
     console.error('marketplace my listings error', err);
     return res.status(500).json({ error:'Marketplace listings request failed' });
@@ -1441,6 +1493,78 @@ app.get('/api/marketplace/freeEmail/leads', requireAuth, async (req, res) => {
   }catch(err){
     console.error('marketplace free email leads error', err);
     return res.status(500).json({ error:'Marketplace free-email lead request failed' });
+  }
+});
+
+// Public: is paid selling / are confirmation emails switched on? Booleans and setting names only.
+app.get('/api/marketplace/storeConfig', async (req, res) => {
+  const sales = salesConfigStatus(process.env);
+  const email = freeEmailConfirmationsStatus(process.env);
+  return res.json({
+    success:true,
+    paidSales:{ configured:sales.paidSalesConfigured, checkoutConfigured:sales.checkoutConfigured, webhookConfigured:sales.webhookConfigured, connectConfigured:sales.connectConfigured, platformFeePercent:sales.platformFeePercent, missing:sales.missing },
+    emailConfirmations:{ configured:email.configured, provider:email.configured ? email.provider : null, missing:email.missing }
+  });
+});
+
+app.patch('/api/marketplace/listings/:listingId/price', requireAuth, async (req, res) => {
+  const validation = validateRouteIdentifier(req.params.listingId, 'listingId');
+  if(validation.error) return rejectProtectedWriteError(res, validation);
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  if(!guardProtectedWrite(req, res, 'marketplaceListingPrice', { payload:{ userId:req.authUser.id, listingId:validation.value.listingId, priceCents:req.body && req.body.priceCents }, fingerprintReplay:false })) return;
+  try{
+    const result = await setListingPrice(supabaseService, req.authUser.id, validation.value.listingId, req.body || {});
+    if(result.forbidden) return res.status(403).json({ error:'Cannot price another seller\'s listing' });
+    if(result.unavailable) return res.status(404).json({ error:'Marketplace listing is unavailable' });
+    if(result.validationError) return res.status(422).json({ error:result.validationError, code:result.code || null });
+    if(result.error) throw result.error;
+    return res.json({ success:true, listing:result.listing, freeOfferStatus:result.freeOfferStatus || null });
+  }catch(err){
+    console.error('marketplace listing price error', err);
+    return res.status(500).json({ error:'Listing price update failed' });
+  }
+});
+
+// Seller self-onboarding with Stripe Connect (Express). Returns Stripe's hosted onboarding link.
+app.post('/api/marketplace/sellerAccounts/onboard', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  if(!guardProtectedWrite(req, res, 'marketplaceSellerOnboard', { payload:{ userId:req.authUser.id }, fingerprintReplay:false, idempotencyReplay:false })) return;
+  try{
+    const result = await startSellerOnboarding(supabaseService, stripeConnectClient(), req.authUser.id, { email:req.authUser.email }, new Date(), process.env);
+    if(result.providerUnavailable) return res.status(503).json({ error:'Paid sales aren\'t set up on the server yet', code:'stripe_unconfigured' });
+    if(result.validationError) return res.status(422).json({ error:result.validationError });
+    if(result.error) throw result.error;
+    return res.json({ success:true, onboardingUrl:result.onboardingUrl, account:result.account });
+  }catch(err){
+    console.error('marketplace seller onboarding error', err);
+    return res.status(500).json({ error:'Stripe onboarding could not start' });
+  }
+});
+
+app.post('/api/marketplace/sellerAccounts/refresh', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  if(!guardProtectedWrite(req, res, 'marketplaceSellerRefresh', { payload:{ userId:req.authUser.id }, fingerprintReplay:false, idempotencyReplay:false })) return;
+  try{
+    const result = await refreshSellerAccount(supabaseService, stripeConnectClient(), req.authUser.id);
+    if(result.validationError) return res.status(422).json({ error:result.validationError });
+    if(result.error) throw result.error;
+    return res.json({ success:true, account:result.account || null });
+  }catch(err){
+    console.error('marketplace seller refresh error', err);
+    return res.status(500).json({ error:'Seller account status could not be refreshed' });
+  }
+});
+
+app.get('/api/marketplace/sales', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await listSellerSales(supabaseService, req.authUser.id);
+    if(result.validationError) return res.status(422).json({ error:result.validationError });
+    if(result.error) throw result.error;
+    return res.json({ success:true, orders:result.orders, totals:result.totals });
+  }catch(err){
+    console.error('marketplace seller sales error', err);
+    return res.status(500).json({ error:'Sales request failed' });
   }
 });
 
@@ -1533,6 +1657,17 @@ app.post('/api/marketplace/webhooks/:provider', async (req, res) => {
   if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
   try{
     const provider = marketplaceProviderAdapter(req.params.provider);
+    // Stripe Connect "account.updated": keep the seller's charges/payouts status current.
+    if(req.params.provider === 'stripe' && req.body && req.body.type === 'account.updated'){
+      const signature = req.get('stripe-signature') || '';
+      const secrets = [process.env.STRIPE_WEBHOOK_SECRET, process.env.STRIPE_CONNECT_WEBHOOK_SECRET].filter(Boolean);
+      if(!secrets.length) return res.status(503).json({ error:'Marketplace payment provider webhook verification is not configured' });
+      if(!secrets.some(secret => verifyStripeSignature(req.rawBody || '', signature, secret))) return res.status(400).json({ error:'Marketplace payment event verification failed' });
+      const update = await applyConnectAccountUpdate(supabaseService, req.body);
+      if(update.validationError) return res.status(422).json({ error:update.validationError });
+      if(update.error) throw update.error;
+      return res.json({ success:true, sellerAccountUpdated:Boolean(update.updated), unknownAccount:Boolean(update.unknownAccount) });
+    }
     const result = await handleMarketplacePaymentEvent(supabaseService, provider, req.body || {}, new Date(), {
       rawBody:req.rawBody || '',
       signature:req.get('stripe-signature') || req.get('paypal-transmission-sig') || '',
