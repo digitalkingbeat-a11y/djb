@@ -27,7 +27,7 @@ test('tap tempo averages taps and resets after 2s idle', () => {
 });
 
 test('upload modal and track editor expose BPM, key and tap tempo', () => {
-  assert.match(app, /Genre<input id="meta-genre" placeholder="Genre"><\/label>\$\{bpmKeyFieldsHtml\('meta'\)\}/);
+  assert.match(app, /Genre<input id="meta-genre" placeholder="Genre"[^>]*><\/label>\$\{bpmKeyFieldsHtml\('meta'\)\}/);
   assert.match(app, /wireTapTempo\('meta'\)/);
   assert.match(app, /applyTrackPatchLocal\(track, \{ \.\.\.\(bpmKey\.bpm/);
   assert.match(app, /bpmKeyFieldsHtml\('edit', track\)/);

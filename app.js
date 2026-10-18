@@ -7484,7 +7484,7 @@ function readBpmKeyFields(prefix){
   const keyRaw = String(document.getElementById(`${prefix}-key`)?.value || '').trim().slice(0,12);
   return { bpm: bpmRaw >= 40 && bpmRaw <= 220 ? Math.round(bpmRaw * 10) / 10 : null, key: keyRaw || null };
 }
-function handleLibraryFilesWithMeta(files){
+function handleLibraryFilesWithMeta(files, prefillMap){
   const incoming = Array.from(files || []);
   const list = [];
   const skipped = [];
@@ -7496,7 +7496,8 @@ function handleLibraryFilesWithMeta(files){
   function next(){
     if(list.length===0){ persist(); persistPlatform(); renderLibrary(); renderPlatformLibrary(); renderStreamingServices(); return; }
     const f = list.shift();
-    openModal(`<span class="eyebrow accent">UPLOAD TRACK</span><h3>Upload ${esc(f.name)}</h3><div class="form-grid"><label>Title<input id="meta-title" value="${esc(f.name.replace(/\.[^/.]+$/, ''))}"></label><label>Artist<input id="meta-artist" placeholder="Artist"></label><label>Genre<input id="meta-genre" placeholder="Genre"></label>${bpmKeyFieldsHtml('meta')}<label>Rights Category<select id="meta-rights"><option>Original / I Own the Rights</option><option>Licensed / I Have Permission</option><option>Royalty-Free / Cleared</option><option>Commercial / Copyrighted Music</option><option>Unsure</option></select></label><label class="toggle-row">I confirm that I own the necessary rights to this music or have permission to upload and use it on this platform.<input type="checkbox" id="meta-declare"></label></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" id="meta-save">Upload</button></div>`);
+    const pre = prefillMap && typeof prefillMap.get === 'function' ? prefillMap.get(f) : null;
+    openModal(`<span class="eyebrow accent">UPLOAD TRACK</span><h3>Upload ${esc(f.name)}</h3><div class="form-grid">${pre && pre.artwork ? `<div class="dd-prefill-art"><img id="meta-art-preview" src="${esc(pre.artwork)}" alt="Cover art from file tags"><small>Cover art from the file's tags</small></div>` : ''}${pre && pre.source ? `<p class="dd-prefill-note" id="meta-prefill-note">${pre.source === 'tags' ? 'Title and artist filled in from the file\'s tags. Edit if needed.' : 'Title and artist guessed from the file name. Edit if needed.'}</p>` : ''}<label>Title<input id="meta-title" value="${esc(pre && pre.title ? pre.title : f.name.replace(/\.[^/.]+$/, ''))}"></label><label>Artist<input id="meta-artist" placeholder="Artist" value="${esc(pre && pre.artist || '')}"></label><label>Genre<input id="meta-genre" placeholder="Genre" value="${esc(pre && pre.genre || '')}"></label>${bpmKeyFieldsHtml('meta')}<label>Rights Category<select id="meta-rights"><option>Original / I Own the Rights</option><option>Licensed / I Have Permission</option><option>Royalty-Free / Cleared</option><option>Commercial / Copyrighted Music</option><option>Unsure</option></select></label><label class="toggle-row">I confirm that I own the necessary rights to this music or have permission to upload and use it on this platform.<input type="checkbox" id="meta-declare"></label></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" id="meta-save">Upload</button></div>`);
     setTimeout(()=>{
       wireTapTempo('meta');
       const metaBpm = document.getElementById('meta-bpm');
@@ -7531,7 +7532,7 @@ function handleLibraryFilesWithMeta(files){
           return;
         }
         const realDuration = await readAudioDuration(f);
-        const track = { id: 'u-'+Date.now(), title, name: title, artist, uploader: (document.getElementById('profile-name')?.textContent||'You'), album:null, artwork:null, artworkDataUrl:null, genre, bpm:'--', key:'--', duration: realDuration || '--', uploadDate: new Date().toISOString(), size: f.size||0, fileName: f.name, source:'MY_LIBRARY', rightsCategory: rights, rightsDeclared: declared, copyrightCheck: 'Not Checked', battleEligible: rights !== 'Commercial / Copyrighted Music', permissions: defaultPermissions(), stems:false, localAudioPersisted:false, audioMissing:false };
+        const track = { id: 'u-'+Date.now(), title, name: title, artist, uploader: (document.getElementById('profile-name')?.textContent||'You'), album:null, artwork:(pre && pre.artwork) || null, artworkDataUrl:(pre && pre.artwork) || null, genre, bpm:'--', key:'--', duration: realDuration || '--', uploadDate: new Date().toISOString(), size: f.size||0, fileName: f.name, source:'MY_LIBRARY', rightsCategory: rights, rightsDeclared: declared, copyrightCheck: 'Not Checked', battleEligible: rights !== 'Commercial / Copyrighted Music', permissions: defaultPermissions(), stems:false, localAudioPersisted:false, audioMissing:false };
         applyTrackPatchLocal(track, { ...(bpmKey.bpm ? { bpm:bpmKey.bpm, ...(bpmSource ? { bpmSource } : {}) } : {}), ...(bpmKey.key ? { key:bpmKey.key } : {}) });
         state.library.push(track);
         await attachLibraryAudioBlob(track.id, f);
@@ -13878,4 +13879,172 @@ Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), {
   discoveryState: () => state,
   discoveryBattles: () => battles,
   setDiscoveryBattles: rows => { battles = rows; }
+});
+
+
+// ---- Drag and drop audio files (Library upload + Studio decks) ----
+const DD_AUDIO_EXT = /\.(mp3|wav|aiff?|flac|m4a|aac|ogg|oga|opus|webm|wma|alac)$/i;
+function isAudioFile(file){
+  if(!file) return false;
+  const type = String(file.type || '').toLowerCase();
+  if(type.startsWith('audio/')) return true;
+  if(type && !type.startsWith('application/octet-stream')) return type === 'video/webm' && DD_AUDIO_EXT.test(file.name || '');
+  return DD_AUDIO_EXT.test(String(file.name || ''));
+}
+function parseArtistTitleFromFilename(name){
+  const base = String(name || '').replace(/\.[^/.]+$/, '').replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+  const m = base.match(/^(.+?)\s+[-–—]\s+(.+)$/);
+  if(m) return { artist:m[1].trim(), title:m[2].trim() };
+  return { artist:'', title:base };
+}
+function ddDecodeText(bytes, enc){
+  try{
+    if(enc === 1 || enc === 2){
+      let le = true, start = 0;
+      if(enc === 1 && bytes.length >= 2){ if(bytes[0] === 0xFE && bytes[1] === 0xFF){ le = false; start = 2; } else if(bytes[0] === 0xFF && bytes[1] === 0xFE){ start = 2; } }
+      if(enc === 2) le = false;
+      let out = '';
+      for(let i = start; i + 1 < bytes.length; i += 2){ const c = le ? bytes[i] | (bytes[i+1] << 8) : (bytes[i] << 8) | bytes[i+1]; if(c === 0) break; out += String.fromCharCode(c); }
+      return out.trim();
+    }
+    if(enc === 3 && typeof TextDecoder !== 'undefined') return new TextDecoder('utf-8').decode(bytes).replace(/\0[\s\S]*$/, '').trim();
+    let out = ''; for(let i = 0; i < bytes.length && bytes[i] !== 0; i++) out += String.fromCharCode(bytes[i]); return out.trim();
+  }catch(e){ return ''; }
+}
+function ddBytesToBase64(bytes){
+  let bin = ''; const chunk = 0x8000;
+  for(let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
+  return typeof btoa === 'function' ? btoa(bin) : Buffer.from(bin, 'binary').toString('base64');
+}
+// Reads ID3v2.2/2.3/2.4 (title, artist, genre, cover) with ID3v1 fallback.
+function parseId3Tags(buffer){
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer || []);
+  const out = {};
+  if(bytes.length >= 10 && bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33){
+    const ver = bytes[3];
+    const flags = bytes[5];
+    const size = ((bytes[6] & 0x7f) << 21) | ((bytes[7] & 0x7f) << 14) | ((bytes[8] & 0x7f) << 7) | (bytes[9] & 0x7f);
+    let pos = 10;
+    if(flags & 0x40 && ver >= 3){ const ext = ver === 4 ? (((bytes[10]&0x7f)<<21)|((bytes[11]&0x7f)<<14)|((bytes[12]&0x7f)<<7)|(bytes[13]&0x7f)) : ((bytes[10]<<24)|(bytes[11]<<16)|(bytes[12]<<8)|bytes[13]) + 4; pos += ext; }
+    const end = Math.min(bytes.length, 10 + size);
+    const idLen = ver === 2 ? 3 : 4, hdr = ver === 2 ? 6 : 10;
+    const map = ver === 2 ? { TT2:'title', TP1:'artist', TCO:'genre', PIC:'pic' } : { TIT2:'title', TPE1:'artist', TCON:'genre', APIC:'pic' };
+    while(pos + hdr <= end){
+      const id = String.fromCharCode.apply(null, Array.from(bytes.subarray(pos, pos + idLen)));
+      if(!/^[A-Z0-9]+$/.test(id)) break;
+      let fsize;
+      if(ver === 2) fsize = (bytes[pos+3]<<16)|(bytes[pos+4]<<8)|bytes[pos+5];
+      else if(ver === 4) fsize = ((bytes[pos+4]&0x7f)<<21)|((bytes[pos+5]&0x7f)<<14)|((bytes[pos+6]&0x7f)<<7)|(bytes[pos+7]&0x7f);
+      else fsize = ((bytes[pos+4]<<24)|(bytes[pos+5]<<16)|(bytes[pos+6]<<8)|bytes[pos+7]) >>> 0;
+      const body = bytes.subarray(pos + hdr, Math.min(end, pos + hdr + fsize));
+      const key = map[id];
+      if(key && body.length){
+        const enc = body[0];
+        if(key === 'pic'){
+          let i = 1, mime = '';
+          if(ver === 2){ const fmt = String.fromCharCode(body[1], body[2], body[3]).toUpperCase(); mime = fmt === 'PNG' ? 'image/png' : 'image/jpeg'; i = 4; }
+          else { while(i < body.length && body[i] !== 0) mime += String.fromCharCode(body[i++]); i++; if(!mime.includes('/')) mime = 'image/' + (mime.toLowerCase() || 'jpeg'); }
+          i++; // picture type
+          if(enc === 1 || enc === 2){ while(i + 1 < body.length && !(body[i] === 0 && body[i+1] === 0)) i += 2; i += 2; }
+          else { while(i < body.length && body[i] !== 0) i++; i++; }
+          const img = body.subarray(i);
+          if(img.length && img.length < 2 * 1024 * 1024 && !out.artwork) out.artwork = `data:${mime};base64,${ddBytesToBase64(img)}`;
+        } else {
+          let v = ddDecodeText(body.subarray(1), enc);
+          if(key === 'genre') v = v.replace(/^\((\d+)\)/, '').trim();
+          if(v && !out[key]) out[key] = v;
+        }
+      }
+      pos += hdr + fsize;
+    }
+  }
+  if((!out.title || !out.artist) && bytes.length >= 128){
+    const t = bytes.subarray(bytes.length - 128);
+    if(t[0] === 0x54 && t[1] === 0x41 && t[2] === 0x47){
+      const title = ddDecodeText(t.subarray(3, 33), 0), artist = ddDecodeText(t.subarray(33, 63), 0);
+      if(title && !out.title) out.title = title;
+      if(artist && !out.artist) out.artist = artist;
+    }
+  }
+  return out;
+}
+async function readFileForTags(file){
+  if(!file) return new Uint8Array(0);
+  const read = blob => typeof blob.arrayBuffer === 'function' ? blob.arrayBuffer() : new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsArrayBuffer(blob); });
+  const max = 4 * 1024 * 1024;
+  if(!file.size || file.size <= max) return new Uint8Array(await read(file));
+  const head = new Uint8Array(await read(file.slice(0, max)));
+  const tail = new Uint8Array(await read(file.slice(file.size - 128)));
+  const merged = new Uint8Array(head.length + tail.length); merged.set(head); merged.set(tail, head.length); return merged;
+}
+async function extractAudioFileMetadata(file){
+  let tags = {};
+  try{ tags = parseId3Tags(await readFileForTags(file)); }catch(e){ tags = {}; }
+  const fromName = parseArtistTitleFromFilename(file && file.name);
+  if(tags.title || tags.artist) return { title:tags.title || fromName.title, artist:tags.artist || fromName.artist, genre:tags.genre || '', artwork:tags.artwork || null, source:'tags' };
+  return { title:fromName.title, artist:fromName.artist, genre:'', artwork:tags.artwork || null, source:'filename' };
+}
+function splitDroppedFiles(fileList){
+  const audio = [], rejected = [];
+  Array.from(fileList || []).forEach(f => (isAudioFile(f) ? audio : rejected).push(f));
+  return { audio, rejected };
+}
+function dragHasFiles(event){
+  const types = event && event.dataTransfer && event.dataTransfer.types;
+  return !!types && Array.from(types).includes('Files');
+}
+async function handleLibraryDrop(fileList){
+  const { audio, rejected } = splitDroppedFiles(fileList);
+  if(rejected.length) showAppToast('Not an audio file', `Skipped ${rejected.length} file(s): ${rejected.map(f => f.name).join(', ')}. Drop MP3, WAV, AIFF, FLAC, M4A or OGG.`);
+  if(!audio.length) return { ok:false, accepted:0, rejected:rejected.length };
+  const map = new Map();
+  for(const f of audio) map.set(f, await extractAudioFileMetadata(f));
+  handleLibraryFilesWithMeta(audio, map);
+  return { ok:true, accepted:audio.length, rejected:rejected.length };
+}
+function handleDeckDrop(deck, fileList){
+  const { audio, rejected } = splitDroppedFiles(fileList);
+  if(!audio.length){ showAppToast('Not an audio file', rejected.length ? `${rejected[0].name} can't be loaded onto a deck. Drop an audio file.` : 'Drop an audio file.'); return { ok:false }; }
+  if(!deckRuntimeManager || typeof deckRuntimeManager.loadLocalFileToDeck !== 'function') return { ok:false, error:'Deck runtime unavailable.' };
+  const result = deckRuntimeManager.loadLocalFileToDeck(deck, audio[0]);
+  if(result && result.ok){
+    const label = String(deck).toUpperCase();
+    showAppToast(`Loaded on Deck ${label}`, audio.length > 1 ? `${audio[0].name} (only the first file is used)` : audio[0].name);
+    extractAudioFileMetadata(audio[0]).then(meta => {
+      const nameEl = document.getElementById(`name-${deck}`);
+      if(nameEl && meta.title) nameEl.textContent = meta.artist ? `${meta.artist} - ${meta.title}` : meta.title;
+      if(state.studioDecks && state.studioDecks[deck] && state.studioDecks[deck].local){ state.studioDecks[deck].title = meta.title || state.studioDecks[deck].title; state.studioDecks[deck].artist = meta.artist || ''; }
+    }).catch(() => {});
+  }
+  return result;
+}
+function wireDropZone(el, onFiles, label){
+  if(!el || el.dataset.dropWired) return;
+  el.dataset.dropWired = '1';
+  let depth = 0;
+  const on = () => { el.classList.add('drop-active'); el.setAttribute('data-drop-label', label); };
+  const off = () => { depth = 0; el.classList.remove('drop-active'); };
+  el.addEventListener('dragenter', e => { if(!dragHasFiles(e)) return; e.preventDefault(); depth++; on(); });
+  el.addEventListener('dragover', e => { if(!dragHasFiles(e)) return; e.preventDefault(); if(e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; on(); });
+  el.addEventListener('dragleave', e => { if(!dragHasFiles(e)) return; depth = Math.max(0, depth - 1); if(!depth) off(); });
+  el.addEventListener('drop', e => { if(!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return; e.preventDefault(); e.stopPropagation(); off(); onFiles(e.dataTransfer.files); });
+}
+function wireDragAndDrop(){
+  wireDropZone(document.getElementById('library'), files => handleLibraryDrop(files), 'Drop audio to upload');
+  document.querySelectorAll('#studio [data-deck]').forEach(el => {
+    const deck = el.dataset.deck;
+    if(deck === 'a' || deck === 'b') wireDropZone(el, files => handleDeckDrop(deck, files), `Drop to load Deck ${deck.toUpperCase()}`);
+  });
+}
+// Stop the browser from navigating to a file dropped outside a zone.
+window.addEventListener('dragover', e => { if(dragHasFiles(e)) e.preventDefault(); });
+window.addEventListener('drop', e => { if(dragHasFiles(e)) e.preventDefault(); });
+wireDragAndDrop();
+if(typeof MutationObserver !== 'undefined'){
+  const studioEl = document.getElementById('studio');
+  if(studioEl) new MutationObserver(() => wireDragAndDrop()).observe(studioEl, { childList:true, subtree:true });
+}
+
+Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), {
+  isAudioFile, parseArtistTitleFromFilename, parseId3Tags, extractAudioFileMetadata, splitDroppedFiles, handleLibraryDrop, handleDeckDrop, wireDragAndDrop
 });

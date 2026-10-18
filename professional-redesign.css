@@ -1787,3 +1787,11 @@ a.mention-link:hover{text-decoration:underline}
 .genre-empty{color:var(--muted);margin:8px 0 0}
 .remind-btn.on{border-color:var(--accent);color:var(--accent)}
 .reminder-toast{display:grid;gap:6px}
+
+/* Drag and drop audio */
+.drop-active{ position:relative; outline:3px dashed var(--accent, #7c5cff) !important; outline-offset:-6px; background-image:linear-gradient(rgba(124,92,255,.12), rgba(124,92,255,.12)) !important; }
+.drop-active::after{ content:attr(data-drop-label); position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); padding:12px 20px; border-radius:12px; background:rgba(15,15,25,.92); color:#fff; font-weight:700; font-size:1.05rem; pointer-events:none; z-index:50; box-shadow:0 8px 30px rgba(0,0,0,.4); }
+.dd-prefill-art{ display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+.dd-prefill-art img{ width:64px; height:64px; object-fit:cover; border-radius:8px; }
+.dd-prefill-note{ color:var(--muted, #aaa); font-size:.85rem; margin:0 0 8px; }
+@media (prefers-reduced-motion: reduce){ .drop-active::after{ transition:none; } }
