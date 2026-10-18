@@ -14923,7 +14923,7 @@ function installStorePracticeViews(){
     const section = document.createElement('section');
     section.id = 'store';
     section.className = 'view';
-    section.innerHTML = `<div class="product-page-head"><div><span class="eyebrow accent">BEAT STORE</span><h2>Free beats from DJs</h2><p>Grab a free beat or sample pack by entering your email. The producer gets your email so they can keep you posted. Paid sales aren't available yet.</p></div><div class="store-head-actions"><button class="ghost compact" id="store-refresh" type="button">Refresh</button><button class="primary compact" id="store-create" type="button">List a free beat</button></div></div><div class="store-status" id="store-status" aria-live="polite"></div><div class="store-grid" id="store-grid"></div><div class="store-more"><button class="ghost small hidden" id="store-load-more" type="button">Load More</button></div><section class="panel store-mine hidden" id="store-mine"><span class="eyebrow">YOUR LISTINGS</span><h3>Your free beats</h3><div id="store-mine-list"></div></section>`;
+    section.innerHTML = `<div class="product-page-head"><div><span class="eyebrow accent">BEAT STORE</span><h2>Beats from DJs</h2><p>Grab a free beat or sample pack by entering your email, or buy one straight from the producer. Free downloads share your email with the producer so they can keep you posted.</p></div><div class="store-head-actions"><button class="ghost compact" id="store-refresh" type="button">Refresh</button><button class="primary compact" id="store-create" type="button">List a free beat</button></div></div><div class="store-status" id="store-status" aria-live="polite"></div><div class="store-grid" id="store-grid"></div><div class="store-more"><button class="ghost small hidden" id="store-load-more" type="button">Load More</button></div><section class="panel store-mine hidden" id="store-mine"><span class="eyebrow">YOUR LISTINGS</span><div class="store-mine-head"><h3>Your beats</h3><button class="ghost small" type="button" id="store-export-fans">Download fan list</button></div><div class="store-totals" id="store-totals"></div><div class="store-seller" id="store-seller"></div><div id="store-mine-list"></div></section>`;
     main.insertBefore(section, document.getElementById('operations') || null);
   }
   if(!document.getElementById('practice')){
@@ -14941,7 +14941,7 @@ wireNewNavButtons();
 
 const MARKETPLACE_ALLOWED_RIGHTS = ['original', 'licensed', 'royalty_free', 'platform_cleared'];
 const BEAT_STORE_CLAIMS_KEY = 'djBattleBeatStoreClaims';
-state.beatStore = { status:'idle', listings:[], pagination:{ page:1, hasMore:false }, mine:[], mineStatus:'idle', leads:{}, error:'', loadedAt:null };
+state.beatStore = { status:'idle', listings:[], pagination:{ page:1, hasMore:false }, mine:[], mineStatus:'idle', mineTotals:null, leads:{}, error:'', loadedAt:null, config:null, seller:{ status:'idle', account:null, sales:null, error:'' } };
 
 function beatStoreClaims(){ return safeParse(BEAT_STORE_CLAIMS_KEY, {}) || {}; }
 function saveBeatStoreClaim(listingId, claim){
@@ -14968,14 +14968,27 @@ function beatStoreCardHtml(listing){
   const product = listing.product || {};
   const facts = [product.genre || listing.genre, product.bpm ? `${product.bpm} BPM` : '', product.key || '', product.type === 'sample_pack' ? 'Sample pack' : product.type === 'loop_pack' ? 'Loop pack' : 'Beat'].filter(Boolean).join(' • ');
   const claim = beatStoreClaims()[listing.id];
-  const free = listing.freeDownload;
-  const action = free
-    ? `<button class="primary small" type="button" data-store-claim="${esc(listing.id)}">${claim && claim.downloadAccessToken ? 'Download again' : 'Get it free'}</button>`
-    : `<span class="store-tag">Preview only</span>`;
+  const price = Number(listing.displayPriceCents) || 0;
+  const free = price > 0 ? null : listing.freeDownload;
+  const purchase = beatStorePurchases()[listing.id];
+  const paidReady = beatStorePaidSalesReady();
+  let action;
+  if(price > 0){
+    action = purchase && purchase.paid
+      ? `<button class="primary small" type="button" data-store-paid-download="${esc(listing.id)}">Download</button>`
+      : `<button class="primary small" type="button" data-store-buy="${esc(listing.id)}" ${paidReady ? '' : 'disabled title="Paid sales aren\'t set up on the server yet"'}>Buy ${esc(formatStorePrice(price, listing.currency))}</button>`;
+  }else{
+    action = free
+      ? (claim && claim.pendingVerification && !claim.downloadAccessToken
+        ? `<span class="store-tag store-tag--pending" title="Open the link we emailed to ${esc(claim.email || 'you')}">Check your email</span>`
+        : `<button class="primary small" type="button" data-store-claim="${esc(listing.id)}">${claim && claim.downloadAccessToken ? 'Download again' : 'Get it free'}</button>`)
+      : `<span class="store-tag">Preview only</span>`;
+  }
+  const priceLabel = price > 0 ? (paidReady ? formatStorePrice(price, listing.currency) : `${formatStorePrice(price, listing.currency)} • sales not set up yet`) : free ? 'FREE for email' : 'Not for sale yet';
   return `<article class="store-card" data-store-listing="${esc(listing.id)}">
     <div class="store-art" aria-hidden="true">${esc((listing.title || 'B').slice(0, 1).toUpperCase())}</div>
     <div class="store-body"><strong>${esc(listing.title || 'Untitled beat')}</strong><small>${esc(facts)}</small>${listing.description ? `<p>${esc(listing.description)}</p>` : ''}
-    <div class="store-card-foot"><span class="store-price">${free ? 'FREE for email' : 'Not for sale yet'}</span>${action}</div></div>
+    <div class="store-card-foot"><span class="store-price">${esc(priceLabel)}</span>${action}</div></div>
   </article>`;
 }
 function renderBeatStorePage(){
@@ -15003,6 +15016,8 @@ function renderBeatStorePage(){
   else if(store.status === 'ready') grid.innerHTML = `<div class="store-empty"><strong>No free beats yet</strong><p>${djbSignedIn() ? 'Be the first: list a beat you made with "List a free beat".' : 'Check back soon, or sign in and list one of yours.'}</p></div>`;
   else grid.innerHTML = '';
   grid.querySelectorAll('[data-store-claim]').forEach(btn => { btn.onclick = () => openBeatStoreClaim(btn.dataset.storeClaim); });
+  grid.querySelectorAll('[data-store-buy]').forEach(btn => { btn.onclick = () => buyBeat(btn.dataset.storeBuy).catch(err => showErrorToast(err)); });
+  grid.querySelectorAll('[data-store-paid-download]').forEach(btn => { btn.onclick = () => downloadPurchasedBeat(btn.dataset.storePaidDownload).catch(err => showErrorToast(err)); });
   const more = document.getElementById('store-load-more');
   if(more){ more.classList.toggle('hidden', !store.pagination.hasMore); more.onclick = () => loadBeatStore({ append:true }); }
   renderBeatStoreMine();
@@ -15014,17 +15029,25 @@ function renderBeatStoreMine(){
   const store = state.beatStore;
   panel.classList.toggle('hidden', !djbSignedIn());
   if(!djbSignedIn()) return;
+  renderBeatStoreSeller();
+  renderBeatStoreTotals();
+  const exportBtn = document.getElementById('store-export-fans');
+  if(exportBtn){ exportBtn.disabled = !store.mine.length; exportBtn.onclick = () => exportFanList().catch(err => showErrorToast(err)); }
   if(store.mineStatus === 'loading'){ list.innerHTML = '<p class="muted">Loading your listings…</p>'; return; }
   if(store.mineStatus === 'failed'){ list.innerHTML = `<p class="muted">${esc(store.mineError || 'Your listings could not be loaded.')}</p>`; return; }
   if(!store.mine.length){ list.innerHTML = '<p class="muted">You haven\'t listed anything yet.</p>'; return; }
   list.innerHTML = store.mine.map(listing => {
     const leads = store.leads[listing.id];
     const leadsHtml = leads ? (leads.length
-      ? `<ul class="store-leads">${leads.map(lead => `<li><span>${esc(lead.email)}</span><small>${esc(lead.marketingConsentStatus === 'accepted' ? 'OK to email about new beats' : 'Download only')} • ${relativeTimeHtml(lead.claimedAt || lead.createdAt)}</small></li>`).join('')}</ul>`
+      ? `<ul class="store-leads">${leads.map(lead => `<li><span>${esc(lead.email)}</span><small>${esc(lead.marketingConsentStatus === 'accepted' ? 'OK to email about new beats' : 'Download only')} • <span class="store-confirm store-confirm--${esc(fanConfirmState(lead))}">${esc(fanConfirmLabel(lead))}</span> • ${relativeTimeHtml(lead.claimedAt || lead.createdAt)}</small></li>`).join('')}</ul>`
       : '<p class="muted">No one has claimed this yet.</p>') : '';
-    return `<div class="store-mine-row" data-store-mine="${esc(listing.id)}"><div><strong>${esc(listing.title)}</strong><small>${esc(listing.freeDownload ? 'Free for email' : 'Not downloadable yet')} • ${esc(listing.status)}</small></div><div class="store-claim-count"><b>${esc(listing.claimCount || 0)}</b><span>claim${listing.claimCount === 1 ? '' : 's'}</span></div><button class="ghost small" type="button" data-store-leads="${esc(listing.id)}">${leads ? 'Hide emails' : 'See emails'}</button>${leadsHtml}</div>`;
+    const price = Number(listing.displayPriceCents) || 0;
+    const mode = price > 0 ? `For sale at ${formatStorePrice(price, listing.currency)}` : listing.freeDownload ? 'Free for email' : 'Not downloadable yet';
+    const unconfirmed = Number(listing.unconfirmedCount) || 0;
+    return `<div class="store-mine-row" data-store-mine="${esc(listing.id)}"><div><strong>${esc(listing.title)}</strong><small>${esc(mode)} • ${esc(listing.status)}${unconfirmed ? ` • ${esc(unconfirmed)} unconfirmed email${unconfirmed === 1 ? '' : 's'}` : ''}</small></div><div class="store-claim-count"><b>${esc(listing.claimCount || 0)}</b><span>claim${listing.claimCount === 1 ? '' : 's'}</span></div><div class="store-claim-count" data-store-downloads="${esc(listing.id)}"><b>${esc(listing.downloadCount || 0)}</b><span>download${listing.downloadCount === 1 ? '' : 's'}</span></div><div class="store-mine-actions"><button class="ghost small" type="button" data-store-price="${esc(listing.id)}">${price > 0 ? 'Change price' : 'Sell it'}</button><button class="ghost small" type="button" data-store-leads="${esc(listing.id)}">${leads ? 'Hide emails' : 'See emails'}</button></div>${leadsHtml}</div>`;
   }).join('');
   list.querySelectorAll('[data-store-leads]').forEach(btn => { btn.onclick = () => toggleBeatStoreLeads(btn.dataset.storeLeads); });
+  list.querySelectorAll('[data-store-price]').forEach(btn => { btn.onclick = () => openListingPrice(btn.dataset.storePrice); });
 }
 async function toggleBeatStoreLeads(listingId){
   if(state.beatStore.leads[listingId]){ delete state.beatStore.leads[listingId]; renderBeatStoreMine(); return; }
@@ -15052,7 +15075,8 @@ async function loadBeatStore(options = {}){
   store.pagination = { page, ...(response.data && response.data.pagination || {}), hasMore:Boolean(response.data && response.data.pagination && response.data.pagination.hasMore) };
   store.status = 'ready';
   store.loadedAt = Date.now();
-  if(djbSignedIn() && !options.append) await loadBeatStoreMine();
+  if(!options.append) await loadBeatStoreConfig();
+  if(djbSignedIn() && !options.append) await Promise.all([loadBeatStoreMine(), loadSellerStatus()]);
   renderBeatStorePage();
   return response;
 }
@@ -15062,6 +15086,7 @@ async function loadBeatStoreMine(){
   const response = await djbRequest('/api/marketplace/myListings');
   if(response.error){ store.mineStatus = 'failed'; store.mineError = `Your listings could not be loaded: ${djbServerErrorText(response, 'request failed')}`; return response; }
   store.mine = response.data && response.data.listings || [];
+  store.mineTotals = response.data && response.data.totals || null;
   store.mineStatus = 'ready';
   return response;
 }
@@ -15144,7 +15169,8 @@ async function createFreeBeatListing({ trackId, title, description } = {}){
     listingId:listing.id,
     enabled:true,
     allowedFiles:[file.data.file],
-    verificationRequired:false,
+    // Confirmation emails on the server = every fan email is confirmed before the download unlocks.
+    verificationRequired:beatStoreEmailConfirmationsReady(),
     downloadConsentRequired:true,
     marketingConsentRequired:false,
     consentText:'Send me this free download. The producer will see my email address.',
@@ -15178,6 +15204,7 @@ function openBeatStoreClaim(listingId){
     const modal = document.getElementById('modal');
     if(modal && modal.open) modal.close();
     renderBeatStorePage();
+    if(result.verificationRequired) showCheckYourEmail(listingId, email, Boolean(result.deliveryConfigured));
   };
   return true;
 }
@@ -15194,7 +15221,7 @@ async function claimFreeBeat(listingId, { email, marketing = false } = {}){
   if(data.verificationRequired){
     saveBeatStoreClaim(listingId, { leadId:lead.id, email, claimedAt:new Date().toISOString(), pendingVerification:true });
     showAppToast('Check your email', data.deliveryConfigured ? 'Confirm your email to unlock the download.' : 'This producer asked for email confirmation, but confirmation emails aren\'t set up on the server yet.');
-    return { verificationRequired:true };
+    return { verificationRequired:true, deliveryConfigured:Boolean(data.deliveryConfigured), email };
   }
   if(!data.downloadAccessToken){
     const saved = beatStoreClaims()[listingId];
@@ -15300,7 +15327,10 @@ function serviceWorkerAllowed(loc = window.location){
 function registerAppServiceWorker(nav = typeof navigator !== 'undefined' ? navigator : null, loc = window.location){
   if(!nav || !nav.serviceWorker || typeof nav.serviceWorker.register !== 'function') return Promise.resolve({ skipped:'unsupported' });
   if(!serviceWorkerAllowed(loc)) return Promise.resolve({ skipped:'insecure' });
-  return nav.serviceWorker.register('sw.js', { scope:'./' }).then(registration => ({ registered:true, registration })).catch(err => ({ error:err && err.message || 'register failed' }));
+  return nav.serviceWorker.register('sw.js', { scope:'./' }).then(registration => {
+    watchForAppUpdate(registration, nav);
+    return { registered:true, registration };
+  }).catch(err => ({ error:err && err.message || 'register failed' }));
 }
 function appIsInstalled(){
   try{ return Boolean((window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || (window.navigator && window.navigator.standalone)); }catch(e){ return false; }
@@ -15408,7 +15438,9 @@ function mergedPracticeSessions(){
     const local = { id:entry.id, title:entry.title, type:entry.type, genre:entry.genre, source:entry.source || (entry.resultKey ? 'battle' : 'practice'), score:Number(entry.score) || 0, maxScore:entry.maxScore || (entry.resultKey ? 100 : 180), breakdownItems:practiceBreakdownItems(entry.breakdown), recordedAt:entry.recordedAt, recordingTrackId:entry.recordingTrackId || null, local:true };
     byId.set(entry.id, existing ? { ...local, ...existing, local:true, recordingTrackId:existing.recordingTrackId || local.recordingTrackId } : local);
   });
-  return Array.from(byId.values()).sort((a, b) => (Date.parse(b.recordedAt) || 0) - (Date.parse(a.recordedAt) || 0));
+  // Sessions waiting out their Undo window are hidden (and left out of the chart).
+  const hidden = state.practicePendingDeletes || {};
+  return Array.from(byId.values()).filter(session => !hidden[session.id]).sort((a, b) => (Date.parse(b.recordedAt) || 0) - (Date.parse(a.recordedAt) || 0));
 }
 function practiceRecordingFor(session){
   const candidates = [...(state.practiceLog.recordings || []), ...(state.library || []).filter(track => track && track.sourceType === 'practice_recording')];
@@ -15454,7 +15486,12 @@ function practiceRowHtml(session){
   const recording = practiceRecordingFor(session);
   const chips = session.breakdownItems.slice(0, 9).map(item => `<span class="practice-chip">${esc(item.label)} <b>${esc(Math.round(item.score * 10) / 10)}</b>/${esc(item.max)}</span>`).join('');
   const where = session.onAccount ? 'Saved to your account' : djbSignedIn() ? 'This browser (syncing)' : 'This browser only';
-  return `<article class="practice-row" data-practice-session="${esc(session.id)}"><div class="practice-row-main"><strong>${esc(session.title || 'Practice session')}</strong><small>${relativeTimeHtml(session.recordedAt)} • ${esc(session.type || 'Practice')} • ${esc(session.genre || 'Global')} • ${esc(where)}</small><div class="practice-chips">${chips}</div></div><div class="practice-score"><b>${esc(session.score)}</b><span>/${esc(session.maxScore)}</span></div>${recording ? `<button class="ghost small" type="button" data-practice-replay="${esc(session.id)}">Replay</button>` : '<span class="practice-no-replay" title="No recording was saved with this session">No recording</span>'}</article>`;
+  const editing = state.practiceRenaming === session.id;
+  const titleHtml = editing
+    ? `<form class="practice-rename" data-practice-rename-form="${esc(session.id)}"><input type="text" maxlength="160" aria-label="Session name" data-practice-rename-input value="${esc(session.title || 'Practice session')}"><button class="primary small" type="submit">Save</button><button class="ghost small" type="button" data-practice-rename-cancel>Cancel</button></form>`
+    : `<strong>${esc(session.title || 'Practice session')}</strong>`;
+  const tools = editing ? '' : `<div class="practice-row-tools"><button class="ghost small" type="button" data-practice-rename="${esc(session.id)}">Rename</button><button class="ghost small danger-text" type="button" data-practice-delete="${esc(session.id)}">Delete</button></div>`;
+  return `<article class="practice-row" data-practice-session="${esc(session.id)}"><div class="practice-row-main">${titleHtml}<small>${relativeTimeHtml(session.recordedAt)} • ${esc(session.type || 'Practice')} • ${esc(session.genre || 'Global')} • ${esc(where)}</small><div class="practice-chips">${chips}</div></div><div class="practice-score"><b>${esc(session.score)}</b><span>/${esc(session.maxScore)}</span></div>${recording ? `<button class="ghost small" type="button" data-practice-replay="${esc(session.id)}">Replay</button>` : '<span class="practice-no-replay" title="No recording was saved with this session">No recording</span>'}${tools}</article>`;
 }
 function renderPracticePage(){
   const list = document.getElementById('practice-list');
@@ -15476,6 +15513,7 @@ function renderPracticePage(){
   const visible = sessions.slice(0, log.shown);
   list.innerHTML = visible.length ? visible.map(practiceRowHtml).join('') : '<div class="practice-empty"><strong>No practice sessions yet</strong><p>Start a practice battle and save the rating. It will show up here.</p></div>';
   list.querySelectorAll('[data-practice-replay]').forEach(btn => { btn.onclick = () => replayPracticeSession(btn.dataset.practiceReplay); });
+  wirePracticeRowTools(list);
   const more = document.getElementById('practice-load-more');
   if(more){
     more.classList.toggle('hidden', !(sessions.length > log.shown || log.hasMore));
@@ -15547,4 +15585,586 @@ Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), {
   normalizePracticeEntry, persistPracticeHistory, practiceBreakdownItems, practiceSessionPayload, syncPracticeSessionToAccount, mergedPracticeSessions,
   practiceChartSeries, renderPracticePage, loadPracticeLog, replayPracticeSession, savePracticeResult, getPracticeLogState: () => state.practiceLog,
   PRACTICE_HISTORY_CAP, updateAuthUI: typeof updateAuthUI === 'function' ? updateAuthUI : undefined
+});
+
+
+// ===================================================================================
+// Oct 18 (c): paid beats (Stripe), confirmed fan emails, "Update ready" bar,
+// rename/delete practice sessions, fan list export + download counts.
+// ===================================================================================
+
+/* ------------------------------- 1. Paid beats (Stripe) ------------------------------ */
+
+const BEAT_STORE_PURCHASES_KEY = 'djBattleBeatStorePurchases';
+// Overridable in tests so nothing ever really navigates to Stripe.
+let storeNavigate = url => { window.location.assign(url); };
+function setStoreNavigate(fn){ storeNavigate = typeof fn === 'function' ? fn : storeNavigate; }
+
+function beatStorePurchases(){ return safeParse(BEAT_STORE_PURCHASES_KEY, {}) || {}; }
+function saveBeatStorePurchase(listingId, purchase){
+  if(!listingId) return null;
+  const all = beatStorePurchases();
+  all[listingId] = { ...(all[listingId] || {}), ...purchase };
+  try{ localStorage.setItem(BEAT_STORE_PURCHASES_KEY, JSON.stringify(all)); }catch(e){}
+  return all[listingId];
+}
+function purchaseForOrder(orderId){
+  const all = beatStorePurchases();
+  const listingId = Object.keys(all).find(key => all[key] && all[key].orderId === orderId);
+  return listingId ? { listingId, ...all[listingId] } : null;
+}
+function formatStorePrice(cents, currency = 'USD'){
+  const amount = (Number(cents) || 0) / 100;
+  try{ return new Intl.NumberFormat('en-US', { style:'currency', currency:String(currency || 'USD').toUpperCase() }).format(amount); }catch(e){ return `$${amount.toFixed(2)}`; }
+}
+function priceCentsFromInput(value){
+  const text = String(value == null ? '' : value).trim().replace(/^\$/, '');
+  if(text === '') return 0;
+  if(!/^\d{1,4}(\.\d{1,2})?$/.test(text)) return NaN;
+  return Math.round(Number(text) * 100);
+}
+function beatStorePaidSalesReady(){ const c = state.beatStore.config; return Boolean(c && c.paidSales && c.paidSales.configured); }
+function beatStoreEmailConfirmationsReady(){ const c = state.beatStore.config; return Boolean(c && c.emailConfirmations && c.emailConfirmations.configured); }
+function isStripeHostedUrl(url){
+  try{ const u = new URL(String(url || '')); return u.protocol === 'https:' && /(^|\.)stripe\.com$/i.test(u.hostname); }catch(e){ return false; }
+}
+
+async function loadBeatStoreConfig(){
+  const response = await djbRequest('/api/marketplace/storeConfig');
+  state.beatStore.config = response.error
+    ? { paidSales:{ configured:false, missing:[] }, emailConfirmations:{ configured:false, missing:[] }, unreachable:true }
+    : response.data || {};
+  return state.beatStore.config;
+}
+async function loadSellerStatus(){
+  const seller = state.beatStore.seller;
+  if(!djbSignedIn()) return seller;
+  seller.status = 'loading';
+  const [accounts, sales] = await Promise.all([djbRequest('/api/marketplace/sellerAccounts/status'), djbRequest('/api/marketplace/sales')]);
+  if(accounts.error && accounts.status !== 404){ seller.status = 'failed'; seller.error = djbServerErrorText(accounts, 'Seller status unavailable'); }
+  else{
+    seller.status = 'ready';
+    seller.account = (accounts.data && accounts.data.accounts || []).find(a => a && a.provider === 'stripe') || null;
+  }
+  seller.sales = sales.error ? null : { orders:sales.data && sales.data.orders || [], totals:sales.data && sales.data.totals || null };
+  return seller;
+}
+function sellerCanBePaid(account){ return Boolean(account && account.accountStatus === 'connected' && account.chargesEnabled && account.payoutsEnabled); }
+function renderBeatStoreSeller(){
+  const box = document.getElementById('store-seller');
+  if(!box) return;
+  const store = state.beatStore;
+  const config = store.config || {};
+  if(!beatStorePaidSalesReady()){
+    const missing = config.paidSales && Array.isArray(config.paidSales.missing) ? config.paidSales.missing : [];
+    box.innerHTML = `<div class="store-seller-card store-seller-card--off" data-store-sales-off><strong>Paid sales aren't set up on the server yet</strong><p>Your free beats keep working. Selling beats switches on once the server has its Stripe settings.</p>${missing.length ? `<details><summary>What's missing (for the server owner)</summary><ul>${missing.map(name => `<li><code>${esc(name)}</code></li>`).join('')}</ul></details>` : ''}</div>`;
+    return;
+  }
+  const seller = store.seller;
+  const account = seller.account;
+  let head;
+  if(!account){
+    head = `<div class="store-seller-card"><strong>Get paid for your beats</strong><p>Connect a Stripe account so buyers' payments go straight to you. Stripe handles cards and payouts to your bank.</p><button class="primary small" type="button" id="store-connect-stripe">Connect Stripe</button></div>`;
+  }else if(!sellerCanBePaid(account)){
+    const due = Array.isArray(account.requirementsDue) ? account.requirementsDue.length : 0;
+    head = `<div class="store-seller-card store-seller-card--pending"><strong>Stripe needs a few more details</strong><p>${due ? `${esc(due)} item${due === 1 ? '' : 's'} left to fill in.` : 'Stripe is checking your details.'} Buyers can't check out until payouts are on.</p><div class="store-seller-actions"><button class="primary small" type="button" id="store-connect-stripe">Finish Stripe setup</button><button class="ghost small" type="button" id="store-refresh-stripe">Check status</button></div></div>`;
+  }else{
+    head = `<div class="store-seller-card store-seller-card--on"><strong>Stripe connected</strong><p>Payouts are on. Set a price on any beat below to start selling.</p></div>`;
+  }
+  const sales = seller.sales;
+  const totals = sales && sales.totals;
+  const titleFor = id => ((store.mine || []).find(row => row.id === id) || {}).title || 'Beat';
+  const salesHtml = totals ? `<div class="store-earnings" data-store-earnings><div><b>${esc(totals.paidOrders)}</b><span>sale${totals.paidOrders === 1 ? '' : 's'}</span></div><div><b>${esc(formatStorePrice(totals.grossCents, totals.currency))}</b><span>buyers paid</span></div><div><b>${esc(formatStorePrice(totals.earningsCents, totals.currency))}</b><span>your earnings</span></div>${totals.pendingOrders ? `<div><b>${esc(totals.pendingOrders)}</b><span>checking out</span></div>` : ''}</div>${(sales.orders || []).length ? `<ul class="store-orders">${sales.orders.slice(0, 8).map(order => `<li><span>${esc(titleFor(order.listingId))}</span><small>${esc(formatStorePrice(order.sellerAmountCents, order.currency))} to you • ${esc(order.paymentStatus === 'paid' ? 'Paid' : order.paymentStatus.replace(/_/g, ' '))} • ${relativeTimeHtml(order.paidAt || order.createdAt)}</small></li>`).join('')}</ul>` : '<p class="muted">No sales yet.</p>'}` : '';
+  box.innerHTML = head + salesHtml;
+  const connect = document.getElementById('store-connect-stripe');
+  if(connect) connect.onclick = () => startStripeOnboarding().catch(err => showErrorToast(err));
+  const refresh = document.getElementById('store-refresh-stripe');
+  if(refresh) refresh.onclick = () => refreshSellerStatus().catch(err => showErrorToast(err));
+}
+async function startStripeOnboarding(){
+  if(!djbSignedIn()){ appAlert('Sign in to connect Stripe.', 'Beat Store'); return { error:'signed out' }; }
+  const response = await djbRequest('/api/marketplace/sellerAccounts/onboard', { method:'POST', body:{} });
+  if(response.error){
+    const text = response.status === 503 ? 'Paid sales aren\'t set up on the server yet.' : `Couldn't start Stripe setup: ${djbServerErrorText(response, 'request failed')}`;
+    appAlert(text, 'Beat Store');
+    return { error:text };
+  }
+  const url = response.data && response.data.onboardingUrl;
+  if(!isStripeHostedUrl(url)){ appAlert('The server didn\'t return a Stripe link.', 'Beat Store'); return { error:'unsafe url' }; }
+  storeNavigate(url);
+  return { redirected:true, url };
+}
+async function refreshSellerStatus(){
+  const response = await djbRequest('/api/marketplace/sellerAccounts/refresh', { method:'POST', body:{} });
+  if(!response.error) state.beatStore.seller.account = response.data && response.data.account || null;
+  await loadSellerStatus();
+  renderBeatStoreMine();
+  const account = state.beatStore.seller.account;
+  showAppToast(sellerCanBePaid(account) ? 'Stripe connected' : 'Stripe setup', sellerCanBePaid(account) ? 'You can sell beats now.' : 'Stripe still needs a few details before payouts turn on.');
+  return account;
+}
+
+function openListingPrice(listingId){
+  const listing = (state.beatStore.mine || []).find(row => row.id === listingId);
+  if(!listing){ appAlert('That listing isn\'t loaded.', 'Beat Store'); return null; }
+  const ready = beatStorePaidSalesReady();
+  const current = Number(listing.displayPriceCents) || 0;
+  const feePercent = Number(state.beatStore.config && state.beatStore.config.paidSales && state.beatStore.config.paidSales.platformFeePercent);
+  const fee = Number.isFinite(feePercent) ? feePercent : 10;
+  const sellerReady = sellerCanBePaid(state.beatStore.seller.account);
+  openModal(`<span class="eyebrow accent">SELL A BEAT</span><h3>${esc(listing.title)}</h3>
+    ${ready ? '' : '<p class="store-sales-off" data-store-price-off><strong>Paid sales aren\'t set up on the server yet.</strong> You can keep this beat free for now.</p>'}
+    <p style="color:var(--muted)">Set a price and buyers pay by card through Stripe. Leave it at 0 to keep it a free-for-email download. Only music marked Original, Licensed, Royalty-free or Platform-cleared can be sold, and buyers get the MP3 (your WAVs and stems stay private).</p>
+    <label>Price (US dollars)<input id="store-price-input" inputmode="decimal" maxlength="8" value="${esc(current ? (current / 100).toFixed(2) : '')}" placeholder="9.99"></label>
+    <p class="store-price-split" id="store-price-split"></p>
+    ${ready && !sellerReady ? '<p class="store-price-warn">Buyers can\'t check out until you connect Stripe (button above your listings).</p>' : ''}
+    <p class="store-create-error" id="store-price-error" role="alert"></p>
+    <div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="store-price-save">Save price</button></div>`);
+  const input = document.getElementById('store-price-input');
+  const split = document.getElementById('store-price-split');
+  const save = document.getElementById('store-price-save');
+  const update = () => {
+    const cents = priceCentsFromInput(input.value);
+    if(!Number.isFinite(cents)){ split.textContent = 'Enter a price like 9.99'; save.disabled = true; return; }
+    if(cents === 0){ split.textContent = 'Free: fans download it for their email.'; save.disabled = false; return; }
+    const yours = cents - Math.round(cents * fee / 100);
+    split.textContent = `Buyers pay ${formatStorePrice(cents)}. DJ Battle keeps ${fee}%, so you get ${formatStorePrice(yours)} per sale.`;
+    save.disabled = !ready;
+  };
+  input.oninput = update;
+  update();
+  save.onclick = async () => {
+    const cents = priceCentsFromInput(input.value);
+    save.disabled = true;
+    const result = await setBeatPrice(listingId, cents);
+    if(result.error){ document.getElementById('store-price-error').textContent = result.error; update(); return; }
+    const modal = document.getElementById('modal');
+    if(modal && modal.open) modal.close();
+    showAppToast(cents > 0 ? 'Price saved' : 'Back to free', cents > 0 ? `${listing.title} is for sale at ${formatStorePrice(cents)}.` : `${listing.title} is a free download again.`);
+    loadBeatStore({ reset:true }).catch(() => {});
+  };
+  return true;
+}
+async function setBeatPrice(listingId, cents){
+  if(!Number.isFinite(cents) || cents < 0) return { error:'Enter a price like 9.99.' };
+  if(cents > 0 && cents < 99) return { error:'The lowest price is $0.99. Use 0 to keep it free.' };
+  if(cents > 0 && !beatStorePaidSalesReady()) return { error:'Paid sales aren\'t set up on the server yet.' };
+  const response = await djbRequest(`/api/marketplace/listings/${encodeURIComponent(listingId)}/price`, { method:'PATCH', body:{ priceCents:cents, currency:'USD' } });
+  if(response.error) return { error:djbServerErrorText(response, 'Couldn\'t save the price.') };
+  const updated = response.data && response.data.listing;
+  state.beatStore.mine = (state.beatStore.mine || []).map(row => row.id === listingId ? { ...row, displayPriceCents:cents, ...(updated ? { displayPriceCents:updated.displayPriceCents, currency:updated.currency } : {}) } : row);
+  renderBeatStoreMine();
+  return { listing:updated || null };
+}
+
+async function buyBeat(listingId){
+  const listing = state.beatStore.listings.find(row => row.id === listingId);
+  const price = listing && Number(listing.displayPriceCents) || 0;
+  if(!listing || price <= 0){ appAlert('This beat isn\'t for sale.', 'Beat Store'); return { error:'not for sale' }; }
+  if(!beatStorePaidSalesReady()){ appAlert('Paid sales aren\'t set up on the server yet.', 'Beat Store'); return { error:'unconfigured' }; }
+  if(!djbSignedIn()){ appAlert('Sign in to buy beats, so your download stays tied to your account.', 'Beat Store'); return { error:'signed out' }; }
+  if(djbOffline()){ appAlert('You\'re offline. Connect to buy.', 'Beat Store'); return { error:'offline' }; }
+  const response = await djbRequest('/api/marketplace/checkout', { method:'POST', body:{ listingId, provider:'stripe', clientPriceCents:price, currency:listing.currency || 'USD', idempotencyKey:`buy-${listingId}-${Date.now().toString(36)}` } });
+  if(response.error){
+    const text = response.status === 503 ? 'Paid sales aren\'t set up on the server yet.'
+      : response.status === 409 ? 'This producer hasn\'t finished setting up payouts yet, so it can\'t be bought right now.'
+        : response.status === 422 ? `Couldn't start checkout: ${djbServerErrorText(response, 'the price changed')}. Refresh and try again.`
+          : `Couldn't start checkout: ${djbServerErrorText(response, 'request failed')}`;
+    appAlert(text, 'Beat Store');
+    return { error:text };
+  }
+  const order = response.data && response.data.order || {};
+  const url = response.data && response.data.checkout && response.data.checkout.redirectUrl;
+  if(!isStripeHostedUrl(url)){ appAlert('The server didn\'t return a Stripe checkout link.', 'Beat Store'); return { error:'unsafe url' }; }
+  saveBeatStorePurchase(listingId, { orderId:order.id, title:listing.title, startedAt:new Date().toISOString(), paid:false });
+  storeNavigate(url);
+  return { redirected:true, url, orderId:order.id };
+}
+
+const storeDelay = ms => new Promise(resolve => { const t = setTimeout(resolve, ms); if(t && typeof t.unref === 'function') t.unref(); });
+async function checkOrderPaid(orderId, { tries = 6, waitMs = 2000 } = {}){
+  for(let attempt = 0; attempt < tries; attempt++){
+    if(djbSignedIn()){
+      const response = await djbRequest('/api/marketplace/orders');
+      const order = !response.error && (response.data && response.data.orders || []).find(row => row.id === orderId);
+      if(order && order.paymentStatus === 'paid') return { paid:true, order };
+      if(order && ['failed', 'canceled', 'refunded'].includes(order.paymentStatus)) return { failed:true, order };
+    }
+    if(attempt < tries - 1) await storeDelay(waitMs);
+  }
+  return { pending:true };
+}
+async function openCheckoutSuccess(orderId, options = {}){
+  const purchase = purchaseForOrder(orderId);
+  const title = purchase && purchase.title || 'your beat';
+  openModal(`<span class="eyebrow accent">PAYMENT</span><h3>Thanks for buying ${esc(title)}!</h3><div class="checkout-result" id="checkout-result" data-checkout-state="checking"><p>Confirming your payment with Stripe…</p></div><div class="modal-actions"><button class="ghost" value="cancel">Close</button></div>`);
+  const result = await checkOrderPaid(orderId, options);
+  const box = document.getElementById('checkout-result');
+  if(!box) return result;
+  if(result.paid){
+    if(purchase) saveBeatStorePurchase(purchase.listingId, { paid:true, paidAt:new Date().toISOString() });
+    else if(result.order && result.order.listingId) saveBeatStorePurchase(result.order.listingId, { orderId, paid:true, title });
+    box.dataset.checkoutState = 'paid';
+    box.innerHTML = `<p class="checkout-ok">Payment received. Your download is ready.</p><button class="primary" type="button" id="checkout-download">Download ${esc(title)}</button><p class="muted">You can download it again later from the beat's card in the Beat Store.</p>`;
+    document.getElementById('checkout-download').onclick = () => downloadPurchasedBeat(null, orderId).catch(err => showErrorToast(err));
+  }else if(result.failed){
+    box.dataset.checkoutState = 'failed';
+    box.innerHTML = `<p class="checkout-bad">Stripe says this payment didn't go through (${esc(result.order.paymentStatus)}). You weren't given the download.</p>`;
+  }else{
+    box.dataset.checkoutState = 'pending';
+    box.innerHTML = '<p>Stripe is still confirming your payment. This usually takes a few seconds.</p><button class="ghost" type="button" id="checkout-check-again">Check again</button>';
+    document.getElementById('checkout-check-again').onclick = () => openCheckoutSuccess(orderId, options);
+  }
+  renderBeatStorePage();
+  return result;
+}
+function openCheckoutCanceled(orderId){
+  const purchase = orderId && purchaseForOrder(orderId);
+  openModal(`<span class="eyebrow accent">CHECKOUT</span><h3>Checkout canceled</h3><div class="checkout-result" data-checkout-state="canceled"><p>You weren't charged${purchase && purchase.title ? ` for ${esc(purchase.title)}` : ''}. You can buy it any time from the Beat Store.</p></div><div class="modal-actions"><button class="primary" value="cancel">Back to the Beat Store</button></div>`);
+  return { canceled:true };
+}
+async function downloadPurchasedBeat(listingId, orderId){
+  const purchase = listingId ? beatStorePurchases()[listingId] : purchaseForOrder(orderId);
+  const id = orderId || purchase && purchase.orderId;
+  if(!id){ appAlert('No purchase found for this beat on this device.', 'Beat Store'); return { error:'no order' }; }
+  const response = await djbRequest('/api/marketplace/downloads/access', { method:'POST', body:{ orderId:id } });
+  if(response.error){
+    const text = response.status === 403 ? 'This download isn\'t available (the payment may not be confirmed yet, or the download limit was reached).' : `Download unavailable: ${djbServerErrorText(response, 'request failed')}`;
+    appAlert(text, 'Beat Store');
+    return { error:text };
+  }
+  const access = response.data && response.data.downloadAccess || {};
+  if(!/^https:\/\//i.test(String(access.url || ''))){ appAlert('The server didn\'t return a safe download link.', 'Beat Store'); return { error:'unsafe url' }; }
+  const link = document.createElement('a');
+  link.href = access.url; link.download = access.file && access.file.filename || 'beat.mp3'; link.rel = 'noopener'; link.target = '_blank';
+  document.body.appendChild(link);
+  try{ link.click(); }catch(e){}
+  link.remove();
+  showAppToast('Download started', access.file && access.file.filename || 'Your beat is downloading.');
+  return { downloaded:true, url:access.url };
+}
+
+/* ------------------------------ 2. Confirmed fan emails ------------------------------ */
+
+function showCheckYourEmail(listingId, email, delivered){
+  const listing = state.beatStore.listings.find(row => row.id === listingId) || {};
+  openModal(`<span class="eyebrow accent">CHECK YOUR EMAIL</span><h3>Confirm your email to download</h3><div class="check-email" data-check-email="${delivered ? 'sent' : 'unsent'}">${delivered
+    ? `<p>We sent a link to <strong>${esc(email)}</strong>. Open it on this device to confirm your email and download <strong>${esc(listing.title || 'the beat')}</strong>.</p><p class="muted">Not there? Check spam or promotions. The link only works once.</p>`
+    : `<p>This producer asks fans to confirm their email, but the server can't send emails yet, so the download can't unlock right now.</p>`}</div><div class="modal-actions"><button class="primary" value="cancel">OK</button></div>`);
+  return true;
+}
+function fanConfirmState(lead){
+  const status = lead && lead.verificationStatus;
+  if(status === 'verified') return 'confirmed';
+  if(status === 'pending') return 'pending';
+  return 'unconfirmed';
+}
+function fanConfirmLabel(lead){
+  const stateName = fanConfirmState(lead);
+  return stateName === 'confirmed' ? 'Confirmed email' : stateName === 'pending' ? 'Waiting for confirmation' : 'Unconfirmed email';
+}
+function stripReturnParams(names, loc = window.location){
+  try{
+    const url = new URL(loc.href);
+    names.forEach(name => url.searchParams.delete(name));
+    const search = url.searchParams.toString();
+    window.history.replaceState(window.history.state, '', `${url.pathname}${search ? `?${search}` : ''}${url.hash || '#store'}`);
+  }catch(e){}
+}
+async function handleBeatConfirmLink(params){
+  const leadId = params.get('lead');
+  const token = params.get('token');
+  stripReturnParams(['beatConfirm', 'lead', 'token']);
+  if(!leadId || !token) return { error:'missing' };
+  const response = await djbRequest('/api/marketplace/freeEmail/verify', { method:'POST', body:{ leadId, verificationToken:token } });
+  if(response.error){
+    const text = response.status === 403 ? 'This confirmation link isn\'t valid any more. It may have been used already.' : `Couldn't confirm your email: ${djbServerErrorText(response, 'request failed')}`;
+    appAlert(text, 'Beat Store');
+    return { error:text };
+  }
+  const data = response.data || {};
+  const lead = data.lead || {};
+  const listingId = lead.listingId || (data.offer && data.offer.listingId);
+  if(!data.downloadAccessToken){
+    const saved = listingId && beatStoreClaims()[listingId];
+    if(saved && saved.downloadAccessToken) return downloadClaimedBeat(listingId);
+    appAlert('Your email is already confirmed. Download the beat from the device where you first confirmed it.', 'Beat Store');
+    return { duplicate:true };
+  }
+  saveBeatStoreClaim(listingId, { leadId:lead.id || leadId, downloadAccessToken:data.downloadAccessToken, email:lead.email, pendingVerification:false, confirmedAt:new Date().toISOString() });
+  showAppToast('Email confirmed', 'Thanks! Your download is starting.');
+  renderBeatStorePage();
+  return downloadClaimedBeat(listingId);
+}
+
+/* ------------------------------ 5. Fan list export ------------------------------ */
+
+// Every cell is quoted; cells that a spreadsheet would run as a formula get a leading quote.
+function csvCell(value){
+  let text = String(value == null ? '' : value).replace(/\r\n?/g, '\n');
+  if(/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+function buildFanListCsv(leads, titleById = {}){
+  const header = ['Beat', 'Email', 'Opted in to new-beat emails', 'Confirmed', 'Claimed date'];
+  const rows = (leads || []).map(lead => [
+    titleById[lead.listingId] || lead.listingId || '',
+    lead.email || '',
+    lead.marketingConsentStatus === 'accepted' ? 'Yes' : 'No',
+    fanConfirmState(lead) === 'confirmed' ? 'Confirmed' : fanConfirmState(lead) === 'pending' ? 'Waiting' : 'Unconfirmed',
+    lead.claimedAt || lead.createdAt ? new Date(lead.claimedAt || lead.createdAt).toISOString().slice(0, 10) : ''
+  ]);
+  return [header, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
+}
+function renderBeatStoreTotals(){
+  const box = document.getElementById('store-totals');
+  if(!box) return;
+  const store = state.beatStore;
+  const mine = store.mine || [];
+  if(!mine.length){ box.innerHTML = ''; return; }
+  const t = store.mineTotals || mine.reduce((sum, row) => ({ claims:sum.claims + (row.claimCount || 0), downloads:sum.downloads + (row.downloadCount || 0), optedIn:sum.optedIn + (row.optedInCount || 0), unconfirmed:sum.unconfirmed + (row.unconfirmedCount || 0) }), { claims:0, downloads:0, optedIn:0, unconfirmed:0 });
+  const item = (n, label) => `<div><b>${esc(n || 0)}</b><span>${esc(label)}</span></div>`;
+  box.innerHTML = `<div class="store-totals-row" data-store-totals>${item(mine.length, mine.length === 1 ? 'beat' : 'beats')}${item(t.claims, 'claims')}${item(t.downloads, 'downloads')}${item(t.optedIn, 'OK to email')}${item(t.unconfirmed, 'unconfirmed')}</div>`;
+}
+async function exportFanList(){
+  const response = await djbRequest('/api/marketplace/freeEmail/leads?limit=500');
+  if(response.error){ appAlert(`Couldn't load your fan list: ${djbServerErrorText(response, 'request failed')}`, 'Beat Store'); return { error:true }; }
+  const leads = response.data && response.data.leads || [];
+  if(!leads.length){ showAppToast('No fans yet', 'Nobody has claimed one of your beats yet.'); return { empty:true, csv:buildFanListCsv([]) }; }
+  const titleById = Object.fromEntries((state.beatStore.mine || []).map(row => [row.id, row.title]));
+  const csv = buildFanListCsv(leads, titleById);
+  const name = `djbattle-fan-list-${new Date().toISOString().slice(0, 10)}.csv`;
+  try{
+    const blob = new Blob(['\ufeff' + csv], { type:'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url; link.download = name;
+    document.body.appendChild(link);
+    try{ link.click(); }catch(e){}
+    link.remove();
+    setTimeout(() => { try{ URL.revokeObjectURL(url); }catch(e){} }, 1000);
+  }catch(e){}
+  showAppToast('Fan list downloaded', `${leads.length} email${leads.length === 1 ? '' : 's'} saved to ${name}.`);
+  return { csv, count:leads.length, name };
+}
+
+/* ------------------------------ 3. "Update ready" bar ------------------------------ */
+
+const appUpdate = { registration:null, shown:false, requested:false, reloaded:false };
+let appReload = () => { window.location.reload(); };
+function setAppReload(fn){ if(typeof fn === 'function') appReload = fn; }
+function reloadForUpdateOnce(){
+  if(appUpdate.reloaded) return false;
+  appUpdate.reloaded = true;
+  appReload();
+  return true;
+}
+function watchForAppUpdate(registration, nav = navigator){
+  if(!registration) return null;
+  appUpdate.registration = registration;
+  const sw = nav && nav.serviceWorker;
+  if(registration.waiting && sw && sw.controller) showUpdateBar(registration);
+  if(typeof registration.addEventListener === 'function'){
+    registration.addEventListener('updatefound', () => {
+      const worker = registration.installing;
+      if(!worker || typeof worker.addEventListener !== 'function') return;
+      worker.addEventListener('statechange', () => {
+        if(worker.state === 'installed' && sw && sw.controller) showUpdateBar(registration);
+      });
+    });
+  }
+  if(sw && typeof sw.addEventListener === 'function' && !sw.__djbControllerWatch){
+    sw.__djbControllerWatch = true;
+    // Only reload when the DJ tapped the bar, and only once: no reload loops.
+    sw.addEventListener('controllerchange', () => { if(appUpdate.requested) reloadForUpdateOnce(); });
+  }
+  if(typeof document !== 'undefined' && !document.__djbUpdateCheck){
+    document.__djbUpdateCheck = true;
+    document.addEventListener('visibilitychange', () => {
+      if(document.visibilityState === 'visible' && appUpdate.registration && typeof appUpdate.registration.update === 'function'){
+        try{ const r = appUpdate.registration.update(); if(r && typeof r.catch === 'function') r.catch(() => {}); }catch(e){}
+      }
+    });
+  }
+  return registration;
+}
+function showUpdateBar(registration){
+  appUpdate.registration = registration || appUpdate.registration;
+  let bar = document.getElementById('app-update-bar');
+  if(!bar){
+    bar = document.createElement('div');
+    bar.id = 'app-update-bar';
+    bar.className = 'app-update-bar';
+    bar.setAttribute('role', 'status');
+    bar.innerHTML = '<button type="button" id="app-update-apply">Update ready — tap to refresh</button><button type="button" class="app-update-later" id="app-update-later" aria-label="Later">Later</button>';
+    document.body.appendChild(bar);
+    document.getElementById('app-update-apply').onclick = () => applyAppUpdate();
+    document.getElementById('app-update-later').onclick = () => { bar.remove(); };
+  }
+  appUpdate.shown = true;
+  return bar;
+}
+function applyAppUpdate(){
+  if(appUpdate.requested) return { already:true };
+  appUpdate.requested = true;
+  const bar = document.getElementById('app-update-apply');
+  if(bar){ bar.disabled = true; bar.textContent = 'Updating…'; }
+  const waiting = appUpdate.registration && appUpdate.registration.waiting;
+  if(waiting && typeof waiting.postMessage === 'function'){
+    waiting.postMessage({ type:'SKIP_WAITING' });
+    // If the new worker never takes over (rare), still refresh once.
+    const t = setTimeout(() => reloadForUpdateOnce(), 4000);
+    if(t && typeof t.unref === 'function') t.unref();
+    return { messaged:true };
+  }
+  reloadForUpdateOnce();
+  return { reloaded:true };
+}
+
+/* ------------------------- 4. Rename / delete practice sessions ------------------------- */
+
+const PRACTICE_UNDO_MS = 6000;
+state.practiceRenaming = null;
+state.practicePendingDeletes = {};
+function wirePracticeRowTools(list){
+  list.querySelectorAll('[data-practice-rename]').forEach(btn => {
+    btn.onclick = () => {
+      state.practiceRenaming = btn.dataset.practiceRename;
+      renderPracticePage();
+      const input = document.querySelector('[data-practice-rename-input]');
+      if(input){ input.focus(); try{ input.select(); }catch(e){} }
+    };
+  });
+  list.querySelectorAll('[data-practice-rename-form]').forEach(form => {
+    const id = form.dataset.practiceRenameForm;
+    const input = form.querySelector('[data-practice-rename-input]');
+    form.onsubmit = event => { event.preventDefault(); renamePracticeSession(id, input.value).catch(err => showErrorToast(err)); };
+    const cancel = form.querySelector('[data-practice-rename-cancel]');
+    if(cancel) cancel.onclick = () => { state.practiceRenaming = null; renderPracticePage(); };
+    if(input) input.onkeydown = event => { if(event.key === 'Escape'){ state.practiceRenaming = null; renderPracticePage(); } };
+  });
+  list.querySelectorAll('[data-practice-delete]').forEach(btn => { btn.onclick = () => deletePracticeSessionWithUndo(btn.dataset.practiceDelete); });
+}
+function setPracticeTitleEverywhere(id, title){
+  let changed = false;
+  (state.practiceHistory || []).forEach(entry => { if(normalizePracticeEntry(entry).id === id){ entry.title = title; if(!entry.id) entry.id = id; changed = true; } });
+  if(changed) persistPracticeHistory();
+  (state.practiceLog.server || []).forEach(row => { if(row.id === id) row.title = title; });
+}
+async function renamePracticeSession(id, rawTitle){
+  const title = String(rawTitle || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+  const session = mergedPracticeSessions().find(item => item.id === id);
+  if(!session) return { error:'not found' };
+  if(!title){ showAppToast('Name needed', 'Give the session a name, or press Cancel.'); return { error:'empty' }; }
+  const previous = session.title;
+  setPracticeTitleEverywhere(id, title);
+  state.practiceRenaming = null;
+  renderPracticePage();
+  if(session.onAccount && djbSignedIn() && djbApi()){
+    const response = await djbRequest(`/api/practiceSessions/${encodeURIComponent(id)}`, { method:'PATCH', body:{ title } });
+    if(response.error && response.status !== 404){
+      setPracticeTitleEverywhere(id, previous);
+      renderPracticePage();
+      showErrorToast(`Couldn't rename it: ${djbServerErrorText(response, 'request failed')}`, () => renamePracticeSession(id, title));
+      return { error:true };
+    }
+  }
+  showAppToast('Renamed', title);
+  return { renamed:true, title };
+}
+function deletePracticeSessionWithUndo(id, { undoMs = PRACTICE_UNDO_MS } = {}){
+  const session = mergedPracticeSessions().find(item => item.id === id);
+  if(!session) return { error:'not found' };
+  const timer = setTimeout(() => { commitPracticeDelete(id).catch(() => {}); }, undoMs);
+  state.practicePendingDeletes[id] = { session, timer };
+  if(state.practiceRenaming === id) state.practiceRenaming = null;
+  renderPracticePage();
+  let rack = document.getElementById('notification-toast-rack');
+  if(!rack){ rack = document.createElement('div'); rack.id = 'notification-toast-rack'; rack.className = 'notification-toast-rack'; document.body.appendChild(rack); }
+  const toast = document.createElement('div');
+  toast.className = 'notification-toast practice-undo-toast';
+  toast.setAttribute('role', 'status');
+  toast.dataset.practiceUndoToast = id;
+  toast.innerHTML = `<strong>Session deleted</strong><small>${esc(session.title || 'Practice session')}</small><button type="button" class="toast-retry" data-practice-undo="${esc(id)}">Undo</button>`;
+  rack.appendChild(toast);
+  toast.querySelector('[data-practice-undo]').onclick = () => undoPracticeDelete(id);
+  const hide = setTimeout(() => toast.remove(), undoMs);
+  if(hide && typeof hide.unref === 'function') hide.unref();
+  return { pending:true, toast };
+}
+function undoPracticeDelete(id){
+  const pending = state.practicePendingDeletes[id];
+  if(!pending) return { error:'too late' };
+  clearTimeout(pending.timer);
+  delete state.practicePendingDeletes[id];
+  document.querySelectorAll('[data-practice-undo-toast]').forEach(el => { if(el.dataset.practiceUndoToast === id) el.remove(); });
+  renderPracticePage();
+  showAppToast('Restored', pending.session.title || 'Practice session');
+  return { restored:true };
+}
+async function commitPracticeDelete(id){
+  const pending = state.practicePendingDeletes[id];
+  if(!pending) return { skipped:true };
+  clearTimeout(pending.timer);
+  const removedLocal = (state.practiceHistory || []).filter(entry => normalizePracticeEntry(entry).id === id);
+  const removedServer = (state.practiceLog.server || []).filter(row => row.id === id);
+  state.practiceHistory = (state.practiceHistory || []).filter(entry => normalizePracticeEntry(entry).id !== id);
+  persistPracticeHistory();
+  state.practiceLog.server = (state.practiceLog.server || []).filter(row => row.id !== id);
+  delete state.practicePendingDeletes[id];
+  document.querySelectorAll('[data-practice-undo-toast]').forEach(el => { if(el.dataset.practiceUndoToast === id) el.remove(); });
+  renderPracticePage();
+  if((pending.session.onAccount || removedServer.length) && djbSignedIn() && djbApi()){
+    const response = await djbRequest(`/api/practiceSessions/${encodeURIComponent(id)}`, { method:'DELETE' });
+    if(response.error && response.status !== 404){
+      state.practiceHistory = removedLocal.concat(state.practiceHistory || []);
+      persistPracticeHistory();
+      state.practiceLog.server = removedServer.concat(state.practiceLog.server || []);
+      renderPracticePage();
+      showErrorToast(`Couldn't delete it from your account: ${djbServerErrorText(response, 'request failed')}`, () => { state.practicePendingDeletes[id] = { session:pending.session, timer:null }; return commitPracticeDelete(id); });
+      return { error:true };
+    }
+  }
+  return { deleted:true };
+}
+if(typeof window !== 'undefined' && window.addEventListener){
+  // Leaving the page during the Undo window still deletes (Undo was not pressed).
+  window.addEventListener('pagehide', () => { Object.keys(state.practicePendingDeletes || {}).forEach(id => { commitPracticeDelete(id).catch(() => {}); }); });
+}
+
+/* ------------------------------ Return links on load ------------------------------ */
+
+// Stripe Checkout (?checkout=success|cancel&order=…), Stripe Connect (?stripeConnect=return)
+// and fan email confirmation (?beatConfirm=1&lead=…&token=…) all land back here.
+async function handleStoreReturnLinks(loc = window.location){
+  let params;
+  try{ params = new URLSearchParams(loc.search || ''); }catch(e){ return { skipped:true }; }
+  const checkout = params.get('checkout');
+  const connect = params.get('stripeConnect');
+  const confirm = params.get('beatConfirm');
+  if(!checkout && !connect && !confirm) return { skipped:true };
+  if(activeViewId() !== 'store') switchView('store', { fromHistory:true });
+  if(!state.beatStore.config) await loadBeatStoreConfig();
+  if(confirm) return { confirm:await handleBeatConfirmLink(params) };
+  if(checkout){
+    const orderId = params.get('order') || '';
+    stripReturnParams(['checkout', 'order', 'session_id']);
+    if(checkout === 'success' && orderId) return { checkout:await openCheckoutSuccess(orderId) };
+    return { checkout:openCheckoutCanceled(orderId) };
+  }
+  stripReturnParams(['stripeConnect']);
+  // Wait briefly for sign-in to restore before asking Stripe for the new status.
+  for(let i = 0; i < 10 && !djbSignedIn(); i++) await storeDelay(300);
+  if(!djbSignedIn()) return { connect:'signed-out' };
+  return { connect:await refreshSellerStatus() };
+}
+if(typeof window !== 'undefined' && !window.__DJBattleSkipReturnLinks) handleStoreReturnLinks().catch(err => console.warn('Store return link failed', err));
+
+Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), {
+  loadBeatStoreConfig, loadSellerStatus, renderBeatStoreSeller, startStripeOnboarding, refreshSellerStatus, openListingPrice, setBeatPrice, buyBeat,
+  checkOrderPaid, openCheckoutSuccess, openCheckoutCanceled, downloadPurchasedBeat, beatStorePurchases, saveBeatStorePurchase, formatStorePrice, priceCentsFromInput, isStripeHostedUrl,
+  setStoreNavigate, showCheckYourEmail, handleBeatConfirmLink, handleStoreReturnLinks, fanConfirmState, fanConfirmLabel,
+  csvCell, buildFanListCsv, exportFanList, renderBeatStoreTotals, renderBeatStoreMine,
+  watchForAppUpdate, showUpdateBar, applyAppUpdate, setAppReload, getAppUpdateState: () => appUpdate,
+  renamePracticeSession, deletePracticeSessionWithUndo, undoPracticeDelete, commitPracticeDelete, PRACTICE_UNDO_MS
 });

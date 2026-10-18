@@ -325,15 +325,23 @@ async function loadListingCommerceBundle(dataClient, listingId){
   return { listing:listing.row, product:product.row, rights:rights.row };
 }
 
+function audioFileKind(product, path){
+  const mime = cleanString(product.verified_mime_type || product.declared_mime_type || product.audio_mime_type, '', 80).toLowerCase();
+  if(/mpeg|mp3/.test(mime) || /\.mp3$/i.test(path)) return { ext:'mp3', mimeType:'audio/mpeg' };
+  if(/wav/.test(mime) || /\.wav$/i.test(path)) return { ext:'wav', mimeType:'audio/wav' };
+  return { ext:'webm', mimeType:'audio/webm' };
+}
+
 function buildAllowedFiles(product, rights){
   if(!rights.download_allowed) return [];
   const path = safeStoragePath(product.audio_storage_object_path);
   if(!path) return [];
+  const kind = audioFileKind(product, path);
   return [{
     id:'master-audio',
     type:'audio',
-    filename:`${cleanString(product.title, 'marketplace-audio', 120).replace(/[\\/:*?"<>|]+/g, '-')}.webm`,
-    mimeType:'audio/webm',
+    filename:`${cleanString(product.title, 'marketplace-audio', 120).replace(/[\\/:*?"<>|]+/g, '-')}.${kind.ext}`,
+    mimeType:kind.mimeType,
     storageBucket:product.audio_storage_bucket || MIX_BUCKET,
     storageObjectPath:path,
     size:null
@@ -470,6 +478,19 @@ function verifyStripeSignature(rawBody, signatureHeader, secret){
   });
 }
 
+// Adds order=<id> to a checkout return URL (before any #fragment) so the app's success and
+// cancel pages know which order to look up. Stripe's {CHECKOUT_SESSION_ID} placeholder is kept as-is.
+function withOrderReturnParam(url, orderId){
+  const text = cleanString(url, '', 1000);
+  const id = cleanIdentifier(orderId);
+  if(!text || !id) return text;
+  const hashAt = text.indexOf('#');
+  const base = hashAt >= 0 ? text.slice(0, hashAt) : text;
+  const hash = hashAt >= 0 ? text.slice(hashAt) : '';
+  if(/[?&]order=/.test(base)) return text;
+  return `${base}${base.includes('?') ? '&' : '?'}order=${encodeURIComponent(id)}${hash}`;
+}
+
 function createStripeConnectAdapter(config = {}){
   const gateway = config.gateway || null;
   const httpClient = config.httpClient || globalThis.fetch;
@@ -492,13 +513,15 @@ function createStripeConnectAdapter(config = {}){
     },
     async createCheckout(order, context = {}){
       if(!configured) return { unconfigured:true };
+      const orderSuccessUrl = withOrderReturnParam(successUrl, order.id);
+      const orderCancelUrl = withOrderReturnParam(cancelUrl, order.id);
       const payload = {
         mode:'payment',
         orderId: order.id,
         amountCents: order.gross_amount_cents,
         currency: order.currency,
-        successUrl,
-        cancelUrl,
+        successUrl: orderSuccessUrl,
+        cancelUrl: orderCancelUrl,
         stripeConnect: {
           connectedAccountId: context.sellerAccount.provider_account_id,
           applicationFeeAmount: order.platform_fee_cents,
@@ -518,8 +541,8 @@ function createStripeConnectAdapter(config = {}){
       const params = new URLSearchParams();
       params.append('mode', 'payment');
       params.append('client_reference_id', order.id);
-      params.append('success_url', successUrl);
-      params.append('cancel_url', cancelUrl);
+      params.append('success_url', orderSuccessUrl);
+      params.append('cancel_url', orderCancelUrl);
       params.append('line_items[0][price_data][currency]', String(order.currency).toLowerCase());
       params.append('line_items[0][price_data][product_data][name]', cleanString(context.product && context.product.title, 'Marketplace product', 160));
       params.append('line_items[0][price_data][unit_amount]', String(order.gross_amount_cents));
@@ -1158,5 +1181,7 @@ module.exports = {
   sanitizeCommerceOrderItem,
   sanitizePaymentEvent,
   sanitizeSellerAccount,
-  upsertMarketplaceSellerAccount
+  upsertMarketplaceSellerAccount,
+  verifyStripeSignature,
+  withOrderReturnParam
 };

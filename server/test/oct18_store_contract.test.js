@@ -282,7 +282,8 @@ describe('Free Beat Store (first marketplace slice)', () => {
     expect(serverSource).to.match(/app\.post\('\/api\/marketplace\/listings\/:listingId\/freeDownloadFile', requireAuth/);
     expect(serverSource).to.match(/app\.get\('\/api\/marketplace\/myListings', requireAuth/);
     expect(serverSource).to.include('await attachFreeOffers(supabaseService, result.listings);');
-    expect(serverSource.match(/exposeDownloadAccessToken:true/g)).to.have.length(2);
+    // Both claim routes, plus verify (Oct 18 c: a confirmed fan gets their download token back).
+    expect(serverSource.match(/exposeDownloadAccessToken:true/g)).to.have.length(3);
     expect(serverSource).to.not.include('exposeVerificationToken');
     expect(serverSource).to.not.match(/app\.post\('\/api\/marketplace\/checkout'[^\n]*\n[^\n]*freeBeat/);
   });

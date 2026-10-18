@@ -151,13 +151,43 @@ async function listSellerStoreListings(dataClient, userId){
   if(typeof leadQuery.limit === 'function') leadQuery = leadQuery.limit(2000);
   const leads = await leadQuery;
   const counts = new Map();
-  if(!leads.error) (leads.data || []).forEach(row => { if(String(row.seller_user_id) === owner) counts.set(String(row.listing_id), (counts.get(String(row.listing_id)) || 0) + 1); });
-  return {
-    listings:listings.map(row => ({
+  const bump = (listingId, field) => {
+    const entry = counts.get(listingId) || { claims:0, downloads:0, confirmed:0, unconfirmed:0, optedIn:0 };
+    entry[field] += 1;
+    counts.set(listingId, entry);
+  };
+  if(!leads.error) (leads.data || []).forEach(row => {
+    if(String(row.seller_user_id) !== owner) return;
+    const listingId = String(row.listing_id);
+    bump(listingId, 'claims');
+    if(row.download_status === 'downloaded' || row.downloaded_at) bump(listingId, 'downloads');
+    if(row.verification_status === 'verified') bump(listingId, 'confirmed');
+    else bump(listingId, 'unconfirmed');
+    if(row.marketing_consent_status === 'accepted') bump(listingId, 'optedIn');
+  });
+  const empty = { claims:0, downloads:0, confirmed:0, unconfirmed:0, optedIn:0 };
+  const rows = listings.map(row => {
+    const c = counts.get(String(row.id)) || empty;
+    return {
       ...sanitizeMarketplaceListing(row, { product:products.get(String(row.product_id)) || null, ownerView:true }),
       freeDownload:publicOfferSummary(offers.byListing.get(String(row.id))),
-      claimCount:counts.get(String(row.id)) || 0
-    })),
+      claimCount:c.claims,
+      downloadCount:c.downloads,
+      confirmedCount:c.confirmed,
+      unconfirmedCount:c.unconfirmed,
+      optedInCount:c.optedIn
+    };
+  });
+  const totals = rows.reduce((sum, row) => ({
+    claims:sum.claims + row.claimCount,
+    downloads:sum.downloads + row.downloadCount,
+    confirmed:sum.confirmed + row.confirmedCount,
+    unconfirmed:sum.unconfirmed + row.unconfirmedCount,
+    optedIn:sum.optedIn + row.optedInCount
+  }), { ...empty });
+  return {
+    listings:rows,
+    totals,
     leadsUnavailable:Boolean(leads.error)
   };
 }

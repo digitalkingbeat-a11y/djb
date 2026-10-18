@@ -131,6 +131,40 @@ async function listPracticeSessions(dataClient, userId, options = {}){
   return { sessions:page, pagination:{ limit, hasMore, nextBefore:hasMore && page.length ? page[page.length - 1].recordedAt : null } };
 }
 
+// Rename: only the title changes, and only on the signed-in DJ's own row.
+async function renamePracticeSession(dataClient, userId, clientSessionId, input = {}, now = new Date()){
+  const owner = cleanId(userId);
+  if(!owner) return { forbidden:true };
+  const clientId = cleanId(clientSessionId);
+  if(!clientId) return { validationError:'A practice session id is required' };
+  const title = cleanString(input.title, 160);
+  if(!title) return { validationError:'Give the session a name' };
+  const id = serverIdFor(owner, clientId);
+  const existing = await dataClient.from(PRACTICE_SESSION_TABLE).select('*').eq('id', id).eq('user_id', owner).limit(1);
+  if(existing.error) return { error:existing.error };
+  const found = (existing.data || []).find(row => String(row.user_id) === owner);
+  if(!found) return { notFound:true };
+  const updated = await dataClient.from(PRACTICE_SESSION_TABLE).update({ title, updated_at:now.toISOString() }).eq('id', id).eq('user_id', owner).select('*');
+  if(updated.error) return { error:updated.error };
+  return { renamed:true, session:sanitizePracticeSession((updated.data || [])[0] || { ...found, title }) };
+}
+
+// Delete: scoped to the owner, so another DJ's id simply isn't found.
+async function deletePracticeSession(dataClient, userId, clientSessionId){
+  const owner = cleanId(userId);
+  if(!owner) return { forbidden:true };
+  const clientId = cleanId(clientSessionId);
+  if(!clientId) return { validationError:'A practice session id is required' };
+  const id = serverIdFor(owner, clientId);
+  const existing = await dataClient.from(PRACTICE_SESSION_TABLE).select('*').eq('id', id).eq('user_id', owner).limit(1);
+  if(existing.error) return { error:existing.error };
+  const found = (existing.data || []).find(row => String(row.user_id) === owner);
+  if(!found) return { notFound:true };
+  const removed = await dataClient.from(PRACTICE_SESSION_TABLE).delete().eq('id', id).eq('user_id', owner);
+  if(removed && removed.error) return { error:removed.error };
+  return { deleted:true, id:clientId };
+}
+
 async function checkPracticeSessionSchemaReadiness(dataClient){
   if(!dataClient) return { ready:false, schema:PRACTICE_SESSION_SCHEMA, status:'unconfigured' };
   const result = await dataClient.from(PRACTICE_SESSION_TABLE).select('id').limit(1);
@@ -146,5 +180,7 @@ module.exports = {
   sanitizePracticeSessionInput,
   savePracticeSession,
   listPracticeSessions,
+  renamePracticeSession,
+  deletePracticeSession,
   checkPracticeSessionSchemaReadiness
 };

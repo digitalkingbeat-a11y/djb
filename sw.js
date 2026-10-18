@@ -1,7 +1,8 @@
 // DJ Battle service worker: caches the app shell so the app opens fast and shows a friendly
 // offline page instead of a blank screen. API, auth and any cross-origin (Supabase) traffic is
-// never cached. Bump CACHE_VERSION whenever the shell list changes; old caches are removed.
-const CACHE_VERSION = 'djb-shell-v1';
+// never cached. CACHE_VERSION is stamped by `npm run build` (scripts/stamp-sw-version.js) from a
+// hash of every shell file, so each change ships a new worker and the app shows "Update ready".
+const CACHE_VERSION = 'djb-shell-abb033b16ec5';
 const CACHE_PREFIX = 'djb-shell-';
 const OFFLINE_URL = 'offline.html';
 const SHELL_FILES = [
@@ -47,8 +48,14 @@ function cacheableResponse(response){
 if(typeof self !== 'undefined' && typeof self.addEventListener === 'function'){
   self.addEventListener('install', event => {
     event.waitUntil(caches.open(CACHE_VERSION)
-      .then(cache => Promise.all(SHELL_FILES.map(file => cache.add(new Request(file, { cache:'reload' })).catch(() => null))))
-      .then(() => self.skipWaiting()));
+      .then(cache => Promise.all(SHELL_FILES.map(file => cache.add(new Request(file, { cache:'reload' })).catch(() => null)))));
+    // No skipWaiting() here: a new version waits until the DJ taps "Update ready" (so a page
+    // never swaps files mid-battle). The very first install activates right away on its own.
+  });
+
+  // The app's "Update ready — tap to refresh" bar sends this.
+  self.addEventListener('message', event => {
+    if(event && event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
   });
 
   self.addEventListener('activate', event => {
