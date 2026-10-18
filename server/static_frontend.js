@@ -6,9 +6,11 @@ const fs = require('fs');
 const express = require('express');
 
 const DEFAULT_FRONTEND_ROOT = path.join(__dirname, '..');
-const ROOT_FILE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*\.(html|css|js)$/;
-const ASSET_DIRECTORIES = new Set(['studio', 'judge']);
+const ROOT_FILE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*\.(html|css|js|webmanifest)$/;
+const ASSET_DIRECTORIES = new Set(['studio', 'judge', 'assets']);
 const ASSET_FILE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*\.js$/;
+// Icons and images for the home-screen install (manifest) and link previews.
+const IMAGE_ASSET_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*\.(png|svg)$/;
 
 function isServableFrontendPath(requestPath){
   const value = String(requestPath || '');
@@ -17,6 +19,7 @@ function isServableFrontendPath(requestPath){
   const parts = value.replace(/^\/+/, '').split('/');
   if(parts.some(part => !part || part === '.' || part === '..')) return false;
   if(parts.length === 1) return ROOT_FILE_PATTERN.test(parts[0]);
+  if(parts.length === 2 && parts[0] === 'assets') return IMAGE_ASSET_PATTERN.test(parts[1]);
   if(parts.length === 2) return ASSET_DIRECTORIES.has(parts[0]) && ASSET_FILE_PATTERN.test(parts[1]);
   return false;
 }
@@ -37,7 +40,11 @@ function createFrontendRouter(options = {}){
     if(!absolute.startsWith(root + path.sep)) return next();
     fs.stat(absolute, (err, stats) => {
       if(err || !stats.isFile()) return next();
-      return res.sendFile(absolute, { dotfiles:'deny', headers:{ 'Cache-Control':'no-cache' } });
+      const headers = { 'Cache-Control':'no-cache' };
+      if(relative.endsWith('.webmanifest')) headers['Content-Type'] = 'application/manifest+json';
+      // The service worker controls the whole app, so it must never be cached by the browser.
+      if(relative === 'sw.js') headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+      return res.sendFile(absolute, { dotfiles:'deny', headers });
     });
   });
   return router;

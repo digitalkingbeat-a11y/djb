@@ -1905,3 +1905,71 @@ a.mention-link:hover{text-decoration:underline}
 .edit-profile-photo-status{color:var(--accent)!important}
 .ranking-avatar{width:28px;height:28px;min-width:28px;font-size:11px;display:inline-grid;place-items:center;border-radius:50%;margin-right:4px;vertical-align:middle}
 .sample-you-cell{display:flex;align-items:center;gap:8px}
+
+/* ---- Oct 18 (b): other DJs' photos in rows ---- */
+.row-avatar,.comment-avatar{width:32px;height:32px;min-width:32px;font-size:12px;display:inline-grid;place-items:center;border-radius:50%;margin-right:8px;vertical-align:middle}
+.comment-avatar{width:26px;height:26px;min-width:26px;font-size:10px}
+.dj-row-with-avatar{display:flex;align-items:flex-start;gap:4px}
+.community-comment-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.public-profile-title{display:flex;align-items:center;gap:12px}
+.public-profile-avatar{width:56px;height:56px;min-width:56px;font-size:18px;display:inline-grid;place-items:center;border-radius:50%}
+
+/* ---- Beat Store ---- */
+.store-head-actions{display:flex;gap:8px;flex-wrap:wrap}
+.store-status{color:var(--muted);margin:4px 0 14px;min-height:1.2em}
+.store-status--warn,.practice-status--warn{color:#ffb020}
+.store-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.store-card{display:flex;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px}
+.store-art{width:64px;height:64px;min-width:64px;border-radius:10px;display:grid;place-items:center;font:900 26px/1 system-ui;color:#0b0f14;background:linear-gradient(135deg,var(--accent),#4dd8ff)}
+.store-body{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}
+.store-body small{color:var(--muted)}
+.store-body p{margin:2px 0;color:var(--muted);font-size:.9em;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.store-card-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:auto;padding-top:6px}
+.store-price{font-weight:800;color:var(--accent);font-size:.85em;letter-spacing:.04em}
+.store-tag{font-size:.8em;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:3px 9px}
+.store-empty,.practice-empty,.safety-empty{grid-column:1/-1;border:1px dashed var(--line);border-radius:var(--radius);padding:22px;text-align:center;color:var(--muted)}
+.store-empty strong,.practice-empty strong,.safety-empty strong{display:block;color:var(--text);margin-bottom:4px}
+.store-more{display:flex;justify-content:center;margin:12px 0}
+.store-mine{margin-top:18px}
+.store-mine-row{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;border-top:1px solid var(--line);padding:10px 0}
+.store-mine-row small{display:block;color:var(--muted)}
+.store-claim-count{text-align:center}.store-claim-count b{display:block;font-size:1.3em;color:var(--accent)}.store-claim-count span{font-size:.75em;color:var(--muted)}
+.store-leads{grid-column:1/-1;list-style:none;margin:0;padding:0;display:grid;gap:4px}
+.store-leads li{display:flex;justify-content:space-between;gap:10px;background:#0a0e14;border-radius:6px;padding:6px 10px}
+.store-leads small{color:var(--muted)}
+.store-track-list{display:grid;gap:6px;max-height:260px;overflow:auto;margin:10px 0}
+.store-track-option{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:6px;padding:8px 10px;cursor:pointer}
+.store-track-option span{display:flex;flex-direction:column}
+.store-track-option small{color:var(--muted)}
+.store-track-option.is-blocked{opacity:.75;cursor:not-allowed}
+.store-track-why{color:#ffb020;font-style:normal;font-size:.85em}
+.store-attest{display:flex;gap:8px;align-items:flex-start;margin:8px 0}
+.store-create-error{color:var(--danger);min-height:1em;margin:4px 0}
+
+/* ---- Blocked & muted ---- */
+.settings-safety-list h4{margin:12px 0 6px;font-size:.85em;letter-spacing:.06em;color:var(--muted);text-transform:uppercase}
+.safety-row{display:flex;align-items:center;gap:6px;border-top:1px solid var(--line);padding:8px 0}
+.safety-row > div:not(.avatar){flex:1;min-width:0}
+.safety-row small{display:block;color:var(--muted)}
+.safety-empty{padding:14px}
+.install-steps,.install-done{color:var(--muted)}
+.install-done{color:var(--accent)}
+
+/* ---- Practice log ---- */
+.practice-status{color:var(--muted);margin:4px 0 14px;min-height:1.2em}
+.practice-chart-panel{margin-bottom:16px}
+.practice-chart-svg{width:100%;height:auto;max-height:300px;display:block}
+.practice-grid{stroke:var(--line);stroke-width:1}
+.practice-axis{fill:var(--muted);font:11px system-ui}
+.practice-legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;font-size:.85em;color:var(--muted)}
+.practice-legend-item{display:inline-flex;align-items:center;gap:6px}
+.practice-legend-item i{width:12px;height:4px;border-radius:2px;display:inline-block}
+.practice-list{display:grid;gap:8px;margin:10px 0}
+.practice-row{display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px;background:var(--panel)}
+.practice-row-main small{display:block;color:var(--muted)}
+.practice-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.practice-chip{font-size:.75em;border:1px solid var(--line);border-radius:999px;padding:2px 8px;color:var(--muted)}
+.practice-chip b{color:var(--text)}
+.practice-score b{font-size:1.4em;color:var(--accent)}.practice-score span{color:var(--muted)}
+.practice-no-replay{font-size:.8em;color:var(--muted)}
+@media (max-width:640px){.practice-row{grid-template-columns:1fr auto}.practice-row > button,.practice-no-replay{grid-column:1/-1}.store-mine-row{grid-template-columns:1fr auto}}

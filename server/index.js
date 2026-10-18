@@ -27,6 +27,9 @@ const { getFFmpegCapability, publicFFmpegCapabilityStatus } = require('./ffmpeg_
 const { requireAuthenticatedUser, requireConfiguredDataClient, requireOwnedUserId, requireOwnedUserIds, requireOperatorUser, getOwnedBeltAttempt, getOwnedBeltTest } = require('./auth');
 const BeltPromotion = require('./belt_promotion');
 const ProfileAvatar = require('./profile_avatar');
+const { createAvatarDirectory, avatarResponseMiddleware } = require('./avatar_directory');
+const { attachFreeOffers, listSellerStoreListings, prepareFreeDownloadFile } = require('./marketplace_free_beats');
+const { savePracticeSession, listPracticeSessions } = require('./practice_sessions');
 const { getOrCreateBattleEntry, createDraftSubmission, getOwnedMixSubmission, issueUploadAuthorization, completeUpload, getSubmissionJudgingResult, MIX_BUCKET } = require('./battle_submission');
 const { reconcileBattleAwards } = require('./battle_award_ledger');
 const {
@@ -60,6 +63,10 @@ const {
   countOwnedNotifications,
   createDjBlock,
   createNotificationMute,
+  listOwnedBlocks,
+  removeOwnedBlock,
+  listOwnedMutes,
+  removeOwnedMute,
   countOwnedDjChallenges,
   declineDjChallenge,
   getChallengeInteractionEligibility,
@@ -109,6 +116,8 @@ const {
 const { getCrowdVoteSummary, recordCrowdVote } = require('./battle_crowd_votes');
 const {
   LIBRARY_ARTWORK_BUCKET,
+  LIBRARY_TRACK_TABLE,
+  sanitizeLibraryTrack,
   checkMusicLibrarySchemaReadiness,
   checkMusicLibraryOrganizationSchemaReadiness,
   createLibraryTrack,
@@ -213,6 +222,18 @@ function createOptionalSupabaseClient(label, url, key){
 const supabase = createOptionalSupabaseClient('Public', SUPABASE_URL, SUPABASE_KEY);
 const supabaseService = createOptionalSupabaseClient('Service', SUPABASE_URL, SUPABASE_SERVICE_KEY);
 const requireAuth = requireAuthenticatedUser(supabase);
+// Other DJs' photos on public payloads (rankings, posts, comments, follow lists, battle rooms, challenges).
+const avatarDirectory = supabaseService ? createAvatarDirectory({
+  dataClient:supabaseService,
+  authAdmin:supabaseService.auth && supabaseService.auth.admin,
+  storage:supabaseService.storage && supabaseService.storage.from(ProfileAvatar.PROFILE_AVATAR_BUCKET)
+}) : null;
+const AVATAR_ENRICHED_ROUTES = [
+  '/api/publicProfiles', '/api/publicLeaderboards', '/api/relationshipLeaderboards', '/api/publicRankings', '/api/myRankings',
+  '/api/community/feed', '/api/community/myFeed', '/api/community/publicProfiles', '/api/community/posts',
+  '/api/relationships', '/api/activityFeed', '/api/opponentHistory', '/api/challenges', '/api/battles',
+  '/api/publicBattles', '/api/publicBattleResults', '/api/blocks', '/api/notificationMutes'
+];
 
 function marketplaceProviderAdapter(provider){
   const normalized = String(provider || '').trim().toLowerCase();
@@ -284,6 +305,7 @@ app.use((err, req, res, next) => {
   }
   return next(err);
 });
+app.use(AVATAR_ENRICHED_ROUTES, avatarResponseMiddleware(avatarDirectory));
 
 function publicViewVisitor(req){
   return {
@@ -893,6 +915,50 @@ app.put('/api/musicLibrary/crates/:crateId/tracks', requireAuth, async (req, res
   }
 });
 
+// Practice log on the account (SQL 030). Saving is idempotent on the browser's session id.
+app.get('/api/practiceSessions', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await listPracticeSessions(supabaseService, req.authUser.id, { limit:req.query && req.query.limit, before:req.query && req.query.before });
+    if(result.forbidden) return res.status(403).json({ error:'Practice log is unavailable' });
+    if(result.error) throw result.error;
+    return res.json({ success:true, sessions:result.sessions, pagination:result.pagination });
+  }catch(err){
+    console.error('practice sessions list error', err);
+    return res.status(500).json({ error:'Practice log request failed' });
+  }
+});
+
+app.post('/api/practiceSessions', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  if(!guardProtectedWrite(req, res, 'practiceSessionSave', { payload:{ userId:req.authUser.id, clientSessionId:req.body && (req.body.clientSessionId || req.body.id) }, fingerprintReplay:false, idempotencyReplay:false })) return;
+  try{
+    const result = await savePracticeSession(supabaseService, req.authUser.id, req.body || {});
+    if(result.forbidden) return res.status(403).json({ error:'Cannot save another DJ\'s practice session' });
+    if(result.validationError) return res.status(422).json({ error:result.validationError });
+    if(result.error) throw result.error;
+    return res.status(result.created ? 201 : 200).json({ success:true, duplicate:Boolean(result.duplicate), session:result.session });
+  }catch(err){
+    console.error('practice session save error', err);
+    return res.status(500).json({ error:'Practice session save failed' });
+  }
+});
+
+// Practice recordings already saved to the library (for replays on the Practice page).
+app.get('/api/musicLibrary/practiceRecordings', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const limit = Math.max(1, Math.min(100, Number(req.query && req.query.limit) || 100));
+    const result = await supabaseService.from(LIBRARY_TRACK_TABLE).select('*').eq('user_id', req.authUser.id).eq('source_type', 'practice_recording').limit(limit);
+    if(result.error) throw result.error;
+    const tracks = (result.data || []).filter(row => String(row.user_id) === String(req.authUser.id) && !row.archived_at).map(row => sanitizeLibraryTrack(row));
+    return res.json({ success:true, tracks });
+  }catch(err){
+    console.error('practice recordings list error', err);
+    return res.status(500).json({ error:'Practice recordings request failed' });
+  }
+});
+
 app.post('/api/musicLibrary/practiceRecordings', requireAuth, async (req, res) => {
   if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
   if(!guardProtectedWrite(req, res, 'musicLibraryPracticeRecording', { payload: { userId:req.authUser.id, sourceSubmissionId:req.body && (req.body.sourceSubmissionId || req.body.linkedSubmissionId) }, fingerprintReplay:false })) return;
@@ -1050,6 +1116,7 @@ app.post('/api/profile/completeAvatarUpload', requireAuth, async (req, res) => {
     if(result.forbidden) return res.status(403).json({ error:'Cannot complete a photo upload for another user' });
     if(result.verificationFailed) return res.status(422).json({ error:'Uploaded photo did not match the allowed type or size' });
     if(result.error) throw result.error;
+    if(avatarDirectory) avatarDirectory.remember(req.authUser.id, result.avatarUrl);
     return res.json({ success:true, avatarUrl:result.avatarUrl });
   }catch(err){
     console.error('profile avatar complete error', err);
@@ -1063,6 +1130,7 @@ app.delete('/api/profile/avatar', requireAuth, async (req, res) => {
     const result = await ProfileAvatar.removeAvatar(supabaseService.storage.from(ProfileAvatar.PROFILE_AVATAR_BUCKET), supabaseService.auth && supabaseService.auth.admin, req.authUser.id);
     if(result.forbidden) return res.status(403).json({ error:'Cannot remove another user\'s photo' });
     if(result.error) throw result.error;
+    if(avatarDirectory) avatarDirectory.remember(req.authUser.id, null);
     return res.json({ success:true });
   }catch(err){
     console.error('profile avatar remove error', err);
@@ -1145,6 +1213,7 @@ app.get('/api/marketplace/catalog', async (req, res) => {
       genre:req.query && req.query.genre
     });
     if(result.error) throw result.error;
+    await attachFreeOffers(supabaseService, result.listings);
     return res.json({ success:true, listings:result.listings, pagination:result.pagination });
   }catch(err){
     console.error('marketplace catalog error', err);
@@ -1270,12 +1339,12 @@ app.post('/api/marketplace/freeEmail/claims', async (req, res) => {
   if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
   if(!guardProtectedWrite(req, res, 'marketplaceFreeEmailClaim', { payload: { listingId:req.body && req.body.listingId, email:req.body && req.body.email, source:req.body && req.body.source }, fingerprintReplay:false })) return;
   try{
-    const result = await claimFreeEmailDownload(supabaseService, freeEmailVerificationAdapter(), null, req.body || {});
+    const result = await claimFreeEmailDownload(supabaseService, freeEmailVerificationAdapter(), null, req.body || {}, new Date(), { exposeDownloadAccessToken:true });
     if(result.rateLimited) return res.status(429).json({ error:'Too many free download claim attempts' });
     if(result.unavailable) return res.status(404).json({ error:'Free-email offer is unavailable' });
     if(result.validationError) return res.status(422).json({ error:result.validationError });
     if(result.error) throw result.error;
-    return res.status(result.duplicate ? 200 : 201).json({ success:true, duplicate:Boolean(result.duplicate), verificationRequired:Boolean(result.verificationRequired), deliveryConfigured:result.deliveryConfigured, deliveryStatus:result.deliveryStatus || null, lead:result.lead, entitlement:result.entitlement || null, offer:result.offer || null });
+    return res.status(result.duplicate ? 200 : 201).json({ success:true, duplicate:Boolean(result.duplicate), verificationRequired:Boolean(result.verificationRequired), deliveryConfigured:result.deliveryConfigured, deliveryStatus:result.deliveryStatus || null, lead:result.lead, entitlement:result.entitlement || null, offer:result.offer || null, downloadAccessToken:result.downloadAccessToken || null });
   }catch(err){
     console.error('marketplace free email claim error', err);
     return res.status(500).json({ error:'Marketplace free-email claim failed' });
@@ -1286,12 +1355,12 @@ app.post('/api/marketplace/freeEmail/claims/authenticated', requireAuth, async (
   if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
   if(!guardProtectedWrite(req, res, 'marketplaceFreeEmailClaimAuthenticated', { payload: { userId:req.authUser.id, listingId:req.body && req.body.listingId, email:req.body && req.body.email, source:req.body && req.body.source }, fingerprintReplay:false })) return;
   try{
-    const result = await claimFreeEmailDownload(supabaseService, freeEmailVerificationAdapter(), req.authUser.id, req.body || {});
+    const result = await claimFreeEmailDownload(supabaseService, freeEmailVerificationAdapter(), req.authUser.id, req.body || {}, new Date(), { exposeDownloadAccessToken:true });
     if(result.rateLimited) return res.status(429).json({ error:'Too many free download claim attempts' });
     if(result.unavailable) return res.status(404).json({ error:'Free-email offer is unavailable' });
     if(result.validationError) return res.status(422).json({ error:result.validationError });
     if(result.error) throw result.error;
-    return res.status(result.duplicate ? 200 : 201).json({ success:true, duplicate:Boolean(result.duplicate), verificationRequired:Boolean(result.verificationRequired), deliveryConfigured:result.deliveryConfigured, deliveryStatus:result.deliveryStatus || null, lead:result.lead, entitlement:result.entitlement || null, offer:result.offer || null });
+    return res.status(result.duplicate ? 200 : 201).json({ success:true, duplicate:Boolean(result.duplicate), verificationRequired:Boolean(result.verificationRequired), deliveryConfigured:result.deliveryConfigured, deliveryStatus:result.deliveryStatus || null, lead:result.lead, entitlement:result.entitlement || null, offer:result.offer || null, downloadAccessToken:result.downloadAccessToken || null });
   }catch(err){
     console.error('marketplace free email authenticated claim error', err);
     return res.status(500).json({ error:'Marketplace free-email claim failed' });
@@ -1327,6 +1396,38 @@ app.post('/api/marketplace/freeEmail/downloads/access', async (req, res) => {
   }catch(err){
     console.error('marketplace free email download access error', err);
     return res.status(500).json({ error:'Marketplace free-email download access failed' });
+  }
+});
+
+// Free Beat Store: copy the listing's MP3 into the free-download area, then the app posts it to /freeEmail/offers.
+app.post('/api/marketplace/listings/:listingId/freeDownloadFile', requireAuth, async (req, res) => {
+  const validation = validateRouteIdentifier(req.params.listingId, 'listingId');
+  if(validation.error) return rejectProtectedWriteError(res, validation);
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  if(!guardProtectedWrite(req, res, 'marketplaceFreeDownloadFile', { payload:{ userId:req.authUser.id, listingId:validation.value.listingId }, fingerprintReplay:false })) return;
+  try{
+    const result = await prepareFreeDownloadFile(supabaseService, supabaseService.storage.from(MIX_BUCKET), req.authUser.id, validation.value.listingId);
+    if(result.forbidden) return res.status(403).json({ error:'Cannot share another seller\'s listing' });
+    if(result.unavailable) return res.status(404).json({ error:'Marketplace listing is unavailable' });
+    if(result.validationError) return res.status(422).json({ error:result.validationError, code:result.code || null });
+    if(result.error) throw result.error;
+    return res.json({ success:true, file:result.file });
+  }catch(err){
+    console.error('marketplace free download file error', err);
+    return res.status(500).json({ error:'Free download file preparation failed' });
+  }
+});
+
+app.get('/api/marketplace/myListings', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await listSellerStoreListings(supabaseService, req.authUser.id);
+    if(result.validationError) return res.status(422).json({ error:result.validationError });
+    if(result.error) throw result.error;
+    return res.json({ success:true, listings:result.listings, leadsUnavailable:Boolean(result.leadsUnavailable) });
+  }catch(err){
+    console.error('marketplace my listings error', err);
+    return res.status(500).json({ error:'Marketplace listings request failed' });
   }
 });
 
@@ -2620,6 +2721,67 @@ app.post('/api/notificationMutes', requireAuth, async (req, res) => {
   }catch(err){
     console.error('muteDjNotifications error', err);
     return res.status(500).json({ error:'Notification mute request failed' });
+  }
+});
+
+// Blocked & muted list: the signed-in DJ's own blocks and mutes only.
+app.get('/api/blocks', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await listOwnedBlocks(supabaseService, req.authUser.id);
+    if(result.validationError) return res.status(422).json({ error:result.validationError });
+    if(result.error) throw result.error;
+    return res.json({ success:true, blocks:result.blocks });
+  }catch(err){
+    console.error('list blocks error', err);
+    return res.status(500).json({ error:'Blocked DJ list request failed' });
+  }
+});
+
+app.delete('/api/blocks/:blockId', requireAuth, async (req, res) => {
+  const validation = validateRouteIdentifier(req.params.blockId, 'blockId');
+  if(validation.error) return rejectProtectedWriteError(res, validation);
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  if(!guardProtectedWrite(req, res, 'unblockDjInteraction', { payload:{ userId:req.authUser.id, blockId:validation.value.blockId }, fingerprintReplay:false, idempotencyReplay:false })) return;
+  try{
+    const result = await removeOwnedBlock(supabaseService, req.authUser.id, validation.value.blockId);
+    if(result.notFound) return res.status(404).json({ error:'Block not found' });
+    if(result.validationError) return res.status(422).json({ error:result.validationError });
+    if(result.error) throw result.error;
+    return res.json({ success:true, block:result.block, duplicate:Boolean(result.duplicate) });
+  }catch(err){
+    console.error('unblock error', err);
+    return res.status(500).json({ error:'Unblock request failed' });
+  }
+});
+
+app.get('/api/notificationMutes', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await listOwnedMutes(supabaseService, req.authUser.id);
+    if(result.validationError) return res.status(422).json({ error:result.validationError });
+    if(result.error) throw result.error;
+    return res.json({ success:true, mutes:result.mutes });
+  }catch(err){
+    console.error('list mutes error', err);
+    return res.status(500).json({ error:'Muted DJ list request failed' });
+  }
+});
+
+app.delete('/api/notificationMutes/:muteId', requireAuth, async (req, res) => {
+  const validation = validateRouteIdentifier(req.params.muteId, 'muteId');
+  if(validation.error) return rejectProtectedWriteError(res, validation);
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  if(!guardProtectedWrite(req, res, 'unmuteDjNotifications', { payload:{ userId:req.authUser.id, muteId:validation.value.muteId }, fingerprintReplay:false, idempotencyReplay:false })) return;
+  try{
+    const result = await removeOwnedMute(supabaseService, req.authUser.id, validation.value.muteId);
+    if(result.notFound) return res.status(404).json({ error:'Mute not found' });
+    if(result.validationError) return res.status(422).json({ error:result.validationError });
+    if(result.error) throw result.error;
+    return res.json({ success:true, mute:result.mute, duplicate:Boolean(result.duplicate) });
+  }catch(err){
+    console.error('unmute error', err);
+    return res.status(500).json({ error:'Unmute request failed' });
   }
 });
 
