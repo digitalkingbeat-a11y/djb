@@ -158,7 +158,10 @@ test('Battle Studio recording moves STOP to REVIEW and blocks unsafe navigation'
     return false;
   };
   assert.equal(hooks.switchView('library'), false);
-  assert.equal(confirmCalls, 1);
+  assert.equal(confirmCalls, 0, 'browser confirm is never used');
+  assert.ok(document.querySelector('.app-confirm-overlay--danger [data-app-confirm-ok]'), 'in-app danger confirm shown');
+  document.querySelector('[data-app-confirm-cancel]').click();
+  await tick();
   assert.equal(document.getElementById('studio').classList.contains('active'), true);
 
   const stopped = hooks.stopStudioRecording();

@@ -680,6 +680,7 @@ async function createCommunityPost(dataClient, userId, input = {}, now = new Dat
   };
   const inserted = await dataClient.from(COMMUNITY_POSTS_TABLE).insert([payload]).select('*').single();
   if(inserted.error) return { error:inserted.error };
+  await emitMentionNotifications(dataClient, { actorUserId:userId, bodyText, mentionedProfileIds:input.mentionedProfileIds, post:inserted.data, now });
   const profile = await profileForUser(dataClient, userId);
   return { post:sanitizePost(inserted.data, { viewerUserId:userId, authorProfile:profile.profile, attachments:attachments.attachments }), created:true };
 }
@@ -856,6 +857,7 @@ async function createCommunityComment(dataClient, userId, input = {}, now = new 
   };
   const inserted = await dataClient.from(COMMUNITY_COMMENTS_TABLE).insert([payload]).select('*').single();
   if(inserted.error) return { error:inserted.error };
+  await emitMentionNotifications(dataClient, { actorUserId:userId, bodyText, mentionedProfileIds:input.mentionedProfileIds, post:found.post, comment:inserted.data, now });
   await emitCommunityNotification(dataClient, {
     recipientUserId:parentCommentId ? null : found.post.user_id,
     actorUserId:userId,
@@ -1216,12 +1218,47 @@ async function moderateCommunityTarget(dataClient, operatorUserId, input = {}, n
   return { action:sanitizeModerationAction(inserted.data), target:updateResult && updateResult.data || existingTarget.post || existingTarget.comment || null, report };
 }
 
+function mentionHandle(value){
+  return String(value || '').toLowerCase().replace(/[^a-z0-9_]/g, '');
+}
+
+function extractMentionHandles(bodyText){
+  const handles = new Set();
+  String(bodyText || '').replace(/(^|[^A-Za-z0-9_@])@([A-Za-z0-9_]{2,32})/g, (match, lead, handle) => { handles.add(mentionHandle(handle)); return match; });
+  return [...handles];
+}
+
+async function emitMentionNotifications(dataClient, input = {}){
+  try{
+    const handles = extractMentionHandles(input.bodyText);
+    const explicit = (Array.isArray(input.mentionedProfileIds) ? input.mentionedProfileIds : []).map(id => cleanString(id, 96)).filter(Boolean).slice(0, 10);
+    if(!handles.length && !explicit.length) return { skipped:true, sent:0 };
+    const profiles = await fetchProfiles(dataClient);
+    if(profiles.error) return profiles;
+    const recipients = new Set();
+    explicit.forEach(id => { const found = profiles.byPublic.get(String(id)); if(found && found.row && found.row.user_id) recipients.add(String(found.row.user_id)); });
+    if(handles.length){
+      profiles.byUser.forEach((entry, userId) => {
+        if(entry.profile && entry.profile.profileVisibility !== 'private' && handles.includes(mentionHandle(entry.profile.displayName))) recipients.add(String(userId));
+      });
+    }
+    let sent = 0;
+    for(const recipientUserId of [...recipients].slice(0, 10)){
+      const result = await emitCommunityNotification(dataClient, { recipientUserId, actorUserId:input.actorUserId, type:'mention_received', post:input.post, comment:input.comment, now:input.now });
+      if(result && result.created) sent += 1;
+    }
+    return { sent };
+  }catch(error){
+    return { error };
+  }
+}
+
 async function emitCommunityNotification(dataClient, input = {}){
   const recipientUserId = cleanString(input.recipientUserId, 128);
   const actorUserId = cleanString(input.actorUserId, 128);
   if(!recipientUserId || !actorUserId || recipientUserId === actorUserId) return { skipped:true };
   const type = cleanString(input.type, 80);
-  if(!['comment_received', 'reply_received', 'reaction_received', 'moderation_update'].includes(type)) return { skipped:true };
+  if(!['comment_received', 'reply_received', 'reaction_received', 'moderation_update', 'mention_received'].includes(type)) return { skipped:true };
   const actor = await profileForUser(dataClient, actorUserId);
   if(actor.error) return actor;
   const mutes = await tableQuery(dataClient, DJ_NOTIFICATION_MUTES_TABLE).eq('user_id', recipientUserId).limit(200);
@@ -1254,7 +1291,9 @@ async function emitCommunityNotification(dataClient, input = {}){
   if(existing.error && !optionalTableMissing(existing.error)) return { error:existing.error };
   if(existing.data && existing.data[0]) return { notification:existing.data[0], duplicate:true };
   const postTitle = cleanString(input.post && input.post.title, 140) || 'a community post';
-  const summary = type === 'reaction_received'
+  const summary = type === 'mention_received'
+    ? `${actor.profile.displayName || 'A DJ'} mentioned you in ${postTitle}.`
+    : type === 'reaction_received'
     ? `${actor.profile.displayName || 'A DJ'} reacted to ${postTitle}.`
     : type === 'reply_received'
       ? `${actor.profile.displayName || 'A DJ'} replied in ${postTitle}.`
@@ -1397,6 +1436,8 @@ module.exports = {
   checkCommunitySchemaReadiness,
   createCommunityComment,
   createCommunityPost,
+  emitMentionNotifications,
+  extractMentionHandles,
   deleteCommunityComment,
   deleteCommunityPost,
   listCommunityCategories,

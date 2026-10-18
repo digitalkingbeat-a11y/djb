@@ -397,12 +397,39 @@ function finalizeCategoryRows(category, rows){
   });
 }
 
+function normalizePeriod(value){
+  return String(value || '').toLowerCase() === 'month' ? 'month' : 'all';
+}
+
+function periodStartIso(period, now = new Date()){
+  if(normalizePeriod(period) !== 'month') return null;
+  const d = now instanceof Date ? now : new Date(now);
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)).toISOString();
+}
+
+function awardTimestamp(award){
+  return award && (award.applied_at || award.created_at || award.updated_at) || null;
+}
+
+// Keep only awards applied on or after the period start (no schema change needed).
+function filterAwardsByPeriod(awards, period, now = new Date()){
+  const start = periodStartIso(period, now);
+  if(!start) return awards;
+  const startMs = new Date(start).getTime();
+  return (awards || []).filter(award => {
+    const ms = new Date(awardTimestamp(award) || '').getTime();
+    return Number.isFinite(ms) && ms >= startMs;
+  });
+}
+
 async function buildLeaderboards(dataClient, options = {}){
   const awardsResult = await fetchAppliedAwards(dataClient, safeNumber(options.scanLimit, SCAN_LIMIT));
   if(awardsResult.error) return awardsResult;
   const profilesResult = await fetchProgressionProfiles(dataClient);
   if(profilesResult.error) return profilesResult;
-  const maps = aggregateAwards(awardsResult.awards, profilesResult.profiles);
+  const period = normalizePeriod(options.period);
+  const periodAwards = filterAwardsByPeriod(awardsResult.awards, period, options.now || new Date());
+  const maps = aggregateAwards(periodAwards, profilesResult.profiles);
   const categories = {};
   for(const [category, map] of Object.entries(maps)){
     const rows = finalizeCategoryRows(category, Array.from(map.values()));
@@ -423,7 +450,7 @@ async function buildLeaderboards(dataClient, options = {}){
       }, {})
     };
   }
-  return { categories, awardsScanned:awardsResult.awards.length, calculationVersion:LEADERBOARD_CALCULATION_VERSION };
+  return { categories, period, periodStart:periodStartIso(period, options.now || new Date()), awardsScanned:periodAwards.length, calculationVersion:LEADERBOARD_CALCULATION_VERSION };
 }
 
 function filterRows(rows, options = {}){
@@ -499,8 +526,11 @@ async function listPublicLeaderboards(dataClient, options = {}){
     filters:{
       country:safeString(options.country, 80) || 'all',
       belt:safeString(options.belt, 80) || 'all',
-      relationship:relationship.scope
+      relationship:relationship.scope,
+      period:built.period
     },
+    period:built.period,
+    periodStart:built.periodStart,
     pagination:{
       page,
       limit,
@@ -979,6 +1009,9 @@ module.exports = {
   LEADERBOARD_CALCULATION_VERSION,
   PUBLIC_LEADERBOARD_TABLE,
   buildLeaderboards,
+  filterAwardsByPeriod,
+  normalizePeriod,
+  periodStartIso,
   checkRankingDetailRateLimit,
   getOwnedRankingDetail,
   getOwnedRankingSummary,
