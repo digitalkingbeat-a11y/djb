@@ -2014,3 +2014,218 @@ a.mention-link:hover{text-decoration:underline}
 .practice-rename{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .practice-rename input{min-width:180px;flex:1}
 .danger-text{color:#ff6b7a!important}
+
+/* ==================================================================
+   Phone-friendly pass. Everything below is phone-only (<=760px) except
+   the two desktop-hidden helpers right here, so desktop is unchanged.
+   ================================================================== */
+.phone-section-toggle,
+.library-player-minimize{display:none}
+
+@media(max-width:760px){
+  /* 1. One-column page grids that are allowed to shrink to the phone width
+        (a plain 1fr track grows to its widest child and widens the whole page). */
+  .music-library-workstation,
+  .community-layout,
+  .rankings-shell,
+  .rankings-side,
+  .saved-searches{grid-template-columns:minmax(0,1fr)!important}
+  .music-library-workstation>*,
+  .community-layout>*,
+  .rankings-shell>*,
+  .rankings-side>*,
+  .saved-searches>*{min-width:0;max-width:100%}
+  .rankings-shell .table-wrap,
+  .rankings-side .table-wrap,
+  .table-wrap{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .saved-searches-head>*{min-width:0}
+
+  /* 2. Profile tabs scroll sideways inside their own strip. */
+  .profile-tabs{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;max-width:100%}
+  .profile-tabs::-webkit-scrollbar{display:none}
+  .profile-tabs>button{flex:0 0 auto;white-space:nowrap}
+  dialog{max-width:calc(100vw - 20px)}
+  dialog .modal-card{padding:20px 16px;max-height:calc(100dvh - 24px);overflow-y:auto}
+
+  /* 3. Community post buttons wrap onto a second line. */
+  .forum-post .post-foot,
+  .community-post .post-foot{flex-wrap:wrap;gap:6px}
+  .forum-post .post-head{flex-wrap:wrap}
+  .forum-post,.community-post{min-width:0;overflow-wrap:anywhere}
+
+  /* 4. Floating player sits just above the one-row menu, with room left for it. */
+  .library-player{left:8px;right:8px;bottom:calc(72px + env(safe-area-inset-bottom,0px));grid-template-columns:44px minmax(0,1fr) auto auto;min-height:60px;padding:8px 10px;gap:10px}
+  .library-player-minimize{display:inline-grid;place-items:center;min-width:44px;min-height:44px;padding:0;font-size:18px;line-height:1}
+  .library-player.is-minimized{left:auto;grid-template-columns:auto auto auto;min-height:0;padding:6px}
+  .library-player.is-minimized .library-player-main,
+  .library-player.is-minimized .library-player-readouts,
+  .library-player.is-minimized #library-player-progress{display:none}
+  .library-player.is-minimized .library-player-art{width:40px;height:40px}
+  body[data-view="battle-room"] .library-player{display:none}
+  .main{padding-bottom:calc(176px + env(safe-area-inset-bottom,0px))!important}
+  body.player-minimized .main,
+  body[data-view="battle-room"] .main{padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))!important}
+
+  /* 5. Recording Review buttons: a tidy 2x2 grid. */
+  .recording-review .modal-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .recording-review .modal-actions>button{width:100%;min-width:0;white-space:normal}
+
+  /* 6. Tap targets of at least 44px, and readable text. */
+  .main button,
+  dialog button,
+  .nav-more-sheet button,
+  .library-player button,
+  .small,
+  .text-btn,
+  .period-tab,
+  .room-chip,
+  .file-button{min-height:44px}
+  .text-btn{display:inline-flex;align-items:center;padding-top:0;padding-bottom:0}
+  .library-crates>button,
+  .library-mini-panel>button,
+  .library-playlist-list button,
+  .smart-crate-list button,
+  .forum-side>button{min-height:44px}
+  .main input:not([type=range]):not([type=checkbox]):not([type=radio]):not([type=file]):not([hidden]),
+  .main select,
+  .main textarea,
+  dialog input:not([type=range]):not([type=checkbox]):not([type=radio]):not([type=file]),
+  dialog select,
+  dialog textarea{min-height:44px;font-size:16px}
+  .main input[type=checkbox],
+  dialog input[type=checkbox],
+  .main input[type=radio],
+  dialog input[type=radio]{width:22px;height:22px}
+  .main label,
+  dialog label,
+  .form-grid label,
+  .challenge-filters label,
+  th,
+  .battle-meta span,
+  .status-grid span,
+  .stats span{font-size:12px}
+  .eyebrow,
+  .nav-short{font-size:11px}
+  .main small,
+  dialog small{font-size:12px}
+  .modal-close{min-width:44px;min-height:44px}
+
+  /* 7. Studio on phones. */
+  #studio-search,
+  #playlist-export-format,
+  #audio-input-select,
+  #recording-source-select,
+  #notification-filter{width:100%;min-height:44px;background:#0d1117;color:#fff;border:1px solid #2b3441;border-radius:9px;padding:8px 10px;font:inherit;font-size:16px}
+  .studio-browser-actions{display:flex;flex-wrap:wrap;gap:8px}
+  .studio-browser-actions #studio-search{flex:1 1 100%}
+  #audio-setup-panel label{display:grid;gap:6px;margin-top:10px;color:var(--muted)}
+  .mixer-head{display:flex;justify-content:center;gap:6px}
+  .mini-battle-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px}
+  #mini-battle-panel small{display:block;margin-top:4px}
+  .phone-section-toggle{display:flex;width:100%;justify-content:center;margin:8px 0}
+  .professional-mixer.phone-collapsed>.mixer-meter-stack,
+  .professional-mixer.phone-collapsed>.mixer-channels,
+  .professional-mixer.phone-collapsed>.master-level,
+  .professional-mixer.phone-collapsed>.headphone-panel,
+  #controller-panel.phone-collapsed>.status-grid,
+  #controller-panel.phone-collapsed>.midi-learn-panel{display:none!important}
+  /* Battle room: one belt label per DJ, and a real-looking file button. */
+  #br-dj1>.belt{display:none}
+  #br-upload-file,
+  #battle-room input[type=file]{width:100%;max-width:100%;color:var(--muted);font:inherit;font-size:14px}
+  #battle-room input[type=file]::file-selector-button,
+  dialog input[type=file]::file-selector-button{min-height:44px;margin-right:10px;padding:0 16px;border:1px solid var(--line);border-radius:10px;background:#151a22;color:#e9edf4;font:inherit;font-weight:700}
+
+  /* 8. Library and Studio track tables become cards on phones. */
+  .library-table-wrap,
+  .studio-table-wrap{overflow:visible;border:0;background:transparent}
+  .library-table-wrap table,
+  .studio-table-wrap table{min-width:0!important;width:100%}
+  .library-table-wrap thead,
+  .studio-table-wrap thead{display:none}
+  .library-table-wrap tbody,
+  .studio-table-wrap tbody{display:grid;gap:8px}
+  .library-table-wrap tr,
+  .studio-table-wrap tr{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+  .library-table-wrap td,
+  .studio-table-wrap td{display:block;padding:0;border:0;min-width:0}
+  .library-table-wrap td[colspan],
+  .studio-table-wrap td[colspan]{flex:1 1 100%}
+  /* Library row: art | title, then artist / source / genre / BPM / key / rights chips, then actions. */
+  .library-table-wrap td:nth-child(1){flex:0 0 48px}
+  .library-table-wrap td:nth-child(2){flex:1 1 calc(100% - 64px)}
+  .library-table-wrap td:nth-child(3){flex:1 1 100%;color:#dce1e8}
+  .library-table-wrap td:nth-child(n+4):nth-child(-n+8){flex:0 0 auto;font-size:12px;color:var(--muted)}
+  .library-table-wrap td:nth-child(4)::before{content:"Source ";color:#6f7887}
+  .library-table-wrap td:nth-child(5)::before{content:"Genre ";color:#6f7887}
+  .library-table-wrap td:nth-child(6)::before{content:"BPM ";color:#6f7887}
+  .library-table-wrap td:nth-child(8)::before{content:"Rights ";color:#6f7887}
+  .library-table-wrap td.track-actions{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+  .library-table-wrap td.track-actions button{flex:1 1 auto;min-width:56px}
+  /* Studio row: art | title, artist, chips, then the A / B load buttons. */
+  .studio-table-wrap td:nth-child(1){order:9;flex:1 1 100%;display:flex;gap:6px;margin-top:4px}
+  .studio-table-wrap td:nth-child(1) button{flex:1 1 0}
+  .studio-table-wrap td:nth-child(2){flex:0 0 48px}
+  .studio-table-wrap td:nth-child(3){flex:1 1 calc(100% - 64px)}
+  .studio-table-wrap td:nth-child(3) small{display:block}
+  .studio-table-wrap td:nth-child(4){flex:1 1 100%}
+  .studio-table-wrap td:nth-child(n+5){flex:0 0 auto;font-size:12px;color:var(--muted)}
+  .studio-table-wrap td:nth-child(5)::before{content:"BPM ";color:#6f7887}
+
+  /* Small print: nothing under 11px on phones. */
+  .sidebar nav .nav-btn>b,
+  .main .tag,
+  .main .battle-status-tag,
+  .battle-lobby-counts .tag,
+  .nav-more-item b,
+  .timer-card>span,
+  .deck-top>span,
+  .library-readout>span,
+  .key-badge,
+  .post-author-copy>span,
+  .post-head time,
+  .post-foot button>b,
+  .room-chip>b,
+  .activity-row>span,
+  .profile-score>span,
+  .main .key-badge,
+  .main .post-foot b,
+  .main .community-reaction b,
+  .main .forum-side>button b,
+  #community-category-rail button b,
+  #studio .professional-mixer output{font-size:11px}
+
+  /* Segmented tab strips scroll sideways instead of spilling off the page. */
+  .segmented,
+  .compact-tabs.no-wrap{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .segmented::-webkit-scrollbar{display:none}
+  .segmented>button{flex:0 0 auto;white-space:nowrap}
+
+  #battle-tabs{flex-wrap:wrap;overflow:visible}
+
+  /* Saved searches (Battles): name field and Save button share one full-width row. */
+  .saved-searches-head{flex-direction:column;align-items:stretch}
+  .saved-search-form{display:flex;flex-wrap:nowrap;gap:8px;width:100%;min-width:0}
+  .saved-search-form input{flex:1 1 auto;min-width:0;width:auto}
+  .saved-search-form button{flex:0 0 auto}
+
+  /* Bottom menu labels at 11px still fit "Community" on a 360px phone. */
+  .sidebar{padding-left:2px;padding-right:2px}
+  .sidebar nav .nav-btn,.nav-more-btn{padding-left:0;padding-right:0}
+  .nav-short{letter-spacing:-.02em}
+
+  /* Library search row: search on its own line, sort + direction + compatible below. */
+  .library-console{grid-template-columns:minmax(0,1fr) auto!important;gap:8px}
+  .library-console .library-search-wrap,
+  .library-console .library-search-count{grid-column:1/-1}
+  .library-console .library-toggle{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;min-height:44px}
+  #playlist-export-format{width:auto;flex:0 0 auto}
+
+  /* 9. Notifications: readable heading font on phones. */
+  .notification-row strong{font-family:inherit}
+}
+
+/* Studio keyboard shortcuts need a keyboard: hide the button on touch-only devices. */
+@media (hover:none) and (pointer:coarse){
+  #studio-shortcuts-button{display:none!important}
+}

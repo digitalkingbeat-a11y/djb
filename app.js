@@ -1042,7 +1042,7 @@ async function fetchLeaderboardLive(opts={}){
   }
 }
 
-const pageTitles={dashboard:'Battle Home',battles:'Battles',studio:'Battle Studio',library:'Music Library',community:'Community','verified-results':'Verified Results',rankings:'Rankings',notifications:'Activity',activity:'Activity',tour:'Virtual Tour',settings:'Settings',operations:'Judging Operations',profile:'Profile',store:'Beat Store',practice:'Practice Log'};
+const pageTitles={dashboard:'Battle Home',battles:'Battles',studio:'Battle Studio',library:'Music Library',community:'Community','verified-results':'Verified Results',rankings:'Rankings',notifications:'Notifications',activity:'Activity',tour:'Virtual Tour',settings:'Settings',operations:'Judging Operations',profile:'Profile',store:'Beat Store',practice:'Practice Log'};
 
 function sanitizedTrackForStorage(track){
   if(!track || typeof track !== 'object') return track;
@@ -1228,7 +1228,7 @@ function installProfessionalShell(){
       <div class="studio-grid professional-studio-grid">
         ${deckShellHtml('a', 'A')}
         <section class="mixer professional-mixer" aria-label="Mixer">
-          <div class="mixer-head"><span>MIXER</span><strong>MASTER</strong></div>
+          <div class="mixer-head"><span>MIXER</span> <strong>MASTER</strong></div>
           <div class="mixer-meter-stack"><div class="channel-meter"><span>A</span><i></i></div><div class="channel-meter master"><span>M</span><i></i></div><div class="channel-meter"><span>B</span><i></i></div></div>
           <div class="mixer-channels">
             <div class="mixer-channel">
@@ -1310,9 +1310,9 @@ function installProfessionalShell(){
           <p id="audio-setup-message">Browser output routing is not exposed here.</p>
         </section>
         <section class="panel compact-system-panel" id="mini-battle-panel">
-          <div class="mini-battle-line"><strong id="mini-dj1">${esc(currentUser().displayName)}</strong><span>VS</span><strong id="mini-dj2">Solo Mode</strong></div>
+          <div class="mini-battle-line"><strong id="mini-dj1">${esc(currentUser().displayName)}</strong> <span>VS</span> <strong id="mini-dj2">Solo Mode</strong></div>
           <div class="status-grid dense"><div><span>Mode</span><strong id="mini-mode">Practice</strong></div><div><span>Genre</span><strong id="mini-genre">Global</strong></div><div><span>Clock</span><strong id="mini-battle-clock">10:00</strong></div></div>
-          <small id="mini-meta2">AI high-score mode</small><small id="mini-meta1">${esc(playerCardMeta())}</small>
+          <small id="mini-meta2">AI high-score mode</small> <small id="mini-meta1">${esc(playerCardMeta())}</small>
         </section>
       </div>
       <div id="studio-library-drawer" class="studio-library-drawer hidden"></div>
@@ -1362,6 +1362,59 @@ function installAuxiliaryViews(){
 }
 
 installProfessionalShell();
+
+// ---- Phones: Mixer and Hardware start folded so the Studio isn't eight screens long. ----
+// The toggle buttons only show (and the folding only applies) at phone width; desktop is unchanged.
+function setupPhoneStudioSections(){
+  const sections = [
+    { el:document.querySelector('#studio .professional-mixer'), name:'mixer', head:'.mixer-head' },
+    { el:document.getElementById('controller-panel'), name:'hardware', head:'.section-head' }
+  ];
+  sections.forEach(({ el, name, head }) => {
+    if(!el || el.querySelector('.phone-section-toggle')) return;
+    el.classList.add('phone-collapsible', 'phone-collapsed');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ghost small phone-section-toggle';
+    btn.dataset.phoneSection = name;
+    const sync = () => {
+      const open = !el.classList.contains('phone-collapsed');
+      btn.setAttribute('aria-expanded', String(open));
+      btn.textContent = open ? `Hide full ${name}` : `Show full ${name}`;
+    };
+    btn.onclick = () => { el.classList.toggle('phone-collapsed'); sync(); };
+    sync();
+    const headEl = Array.from(el.children).find(child => child.matches(head));
+    if(headEl) headEl.insertAdjacentElement('afterend', btn); else el.insertBefore(btn, el.firstChild);
+  });
+}
+setupPhoneStudioSections();
+
+// ---- Floating track player: a minimize toggle (shown on phones) so it never hides the page. ----
+const LIBRARY_PLAYER_MINIMIZED_KEY = 'djBattlePlayerMinimized';
+function setLibraryPlayerMinimized(minimized, options = {}){
+  const player = document.getElementById('library-player');
+  const btn = document.getElementById('library-player-minimize');
+  const min = Boolean(minimized);
+  if(player) player.classList.toggle('is-minimized', min);
+  if(document.body) document.body.classList.toggle('player-minimized', min);
+  if(btn){
+    btn.setAttribute('aria-expanded', String(!min));
+    btn.setAttribute('aria-label', min ? 'Show the player' : 'Minimize the player');
+    btn.title = min ? 'Show the player' : 'Minimize the player';
+    btn.textContent = min ? '\u25B4' : '\u25BE';
+  }
+  if(options.persist !== false){ try{ window.localStorage.setItem(LIBRARY_PLAYER_MINIMIZED_KEY, min ? '1' : '0'); }catch(e){} }
+  return min;
+}
+function libraryPlayerMinimized(){ const p = document.getElementById('library-player'); return Boolean(p && p.classList.contains('is-minimized')); }
+(function initLibraryPlayerMinimize(){
+  const btn = document.getElementById('library-player-minimize');
+  let saved = false;
+  try{ saved = window.localStorage.getItem(LIBRARY_PLAYER_MINIMIZED_KEY) === '1'; }catch(e){}
+  setLibraryPlayerMinimized(saved, { persist:false });
+  if(btn) btn.onclick = () => setLibraryPlayerMinimized(!libraryPlayerMinimized());
+})();
 // ---- Address bar routing: every page lives at #<view> so Back/Forward, refresh and shared links work. ----
 const ROUTABLE_VIEWS = ['dashboard','battles','studio','library','community','verified-results','rankings','notifications','activity','settings','operations','profile','store','practice'];
 function viewFromHash(hash = window.location && window.location.hash){
@@ -1410,6 +1463,7 @@ function switchView(view, options = {}){
     }
   }
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===view));
+  if(document.body) document.body.dataset.view = view;
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
   if(!options.fromHistory) recordViewInUrl(view);
   if(typeof syncNavMoreState === 'function') syncNavMoreState();
@@ -7849,7 +7903,8 @@ function handleLibraryFilesWithMeta(files, prefillMap){
   }
   next();
 }
-document.getElementById('library-upload').onchange=e=>handleLibraryFilesWithMeta(e.target.files);
+// The file picker uses the same tag / "Artist - Title" autofill as drag-and-drop.
+document.getElementById('library-upload').onchange=e=>handleLibraryPickedFiles(e.target.files);
 document.getElementById('quick-upload').onclick=()=>{switchView('library');document.getElementById('library-upload').click();};
 
 function renderLibrary(){
@@ -11414,23 +11469,33 @@ async function loadDjNotifications(options = {}){
   return request;
 }
 
+// True for "the live server / sign-in isn't set up here" errors (not real failures).
+function isNotConnectedServerError(error){
+  return /not configured|supabase|sign in and server access|server access are required|isn't connected|can't reach|failed to fetch|network/i.test(String(error || ''));
+}
+
 function renderNotificationCenter(){
   const target = document.getElementById('notification-center');
   if(!target) return;
   target.className = 'challenge-console';
-  const status = state.djNotifications.status || 'idle';
+  const rawStatus = state.djNotifications.status || 'idle';
+  // "Not connected" (no live server / sign-in here) is not a failure: say so in plain words.
+  const notConnected = rawStatus === 'offline' || ((rawStatus === 'failed' || rawStatus === 'stale') && isNotConnectedServerError(state.djNotifications.error));
+  const status = notConnected ? 'not_connected' : rawStatus;
   const lamp = status === 'synced' ? 'green' : status === 'failed' ? 'red' : 'yellow';
   const filters = state.djNotifications.filters || {};
   const rows = state.djNotifications.rows || [];
-  const statusLine = state.djNotifications.error || (status === 'synced' ? `Synced ${notificationDate(state.djNotifications.lastSuccessfulAt)}` : status === 'idle' ? 'Server-backed challenge and battle notifications appear here after sign-in.' : readableComponentName(status));
+  const statusLine = notConnected
+    ? 'Your alerts show up here once you sign in to the live DJ Battle server. It isn\'t connected right now.'
+    : state.djNotifications.error || (status === 'synced' ? `Synced ${notificationDate(state.djNotifications.lastSuccessfulAt)}` : status === 'idle' ? 'Server-backed challenge and battle notifications appear here after sign-in.' : readableComponentName(status));
   const controls = `<div class="challenge-status-strip">
-    <div><span class="challenge-lamp ${lamp}"></span><strong>${esc(readableComponentName(status))}</strong><div class="challenge-meta">${esc(statusLine)}</div></div>
+    <div><span class="challenge-lamp ${lamp}"></span><strong>${esc(notConnected ? 'Not connected' : readableComponentName(status))}</strong><div class="challenge-meta">${esc(statusLine)}</div></div>
     <div class="challenge-actions"><button class="ghost small" id="notification-list-refresh" type="button">Refresh</button><button class="ghost small" id="notification-list-more" type="button" ${state.djNotifications.pagination.hasMore ? '' : 'disabled'}>Load More</button></div>
   </div>
   <div class="challenge-filters">
     <label>Filter<select id="notification-filter">${['all','unread','challenges','battles','relationships','archived'].map(value => `<option value="${value}" ${filters.filter === value ? 'selected' : ''}>${esc(readableComponentName(value))}</option>`).join('')}</select></label>
   </div>`;
-  const list = rows.length ? rows.map(notificationRowHtml).join('') : `<div class="challenge-row notification-row"><div><strong>No notifications</strong><div class="challenge-meta">No server-backed challenge activity has been delivered for this account.</div></div></div>`;
+  const list = rows.length ? rows.map(notificationRowHtml).join('') : `<div class="challenge-row notification-row notification-empty"><div><strong>No notifications yet</strong><div class="challenge-meta">${notConnected ? 'Challenges, battle updates and new followers will appear here when you\'re connected.' : 'No server-backed challenge activity has been delivered for this account.'}</div></div></div>`;
   target.innerHTML = controls + list;
   document.getElementById('notification-list-refresh')?.addEventListener('click', () => loadDjNotifications({ joinInFlight:false }).catch(err=>console.warn('Notification refresh failed', err)));
   document.getElementById('notification-list-more')?.addEventListener('click', () => loadDjNotifications({ append:true }).catch(err=>console.warn('Notification pagination failed', err)));
@@ -14819,6 +14884,10 @@ async function handleLibraryDrop(fileList){
   handleLibraryFilesWithMeta(audio, map);
   return { ok:true, accepted:audio.length, rejected:rejected.length };
 }
+// Files chosen with the Upload Tracks picker get the same treatment as dropped files.
+function handleLibraryPickedFiles(fileList){
+  return handleLibraryDrop(Array.from(fileList || []));
+}
 function handleDeckDrop(deck, fileList){
   const { audio, rejected } = splitDroppedFiles(fileList);
   if(!audio.length){ showAppToast('Not an audio file', rejected.length ? `${rejected[0].name} can't be loaded onto a deck. Drop an audio file.` : 'Drop an audio file.'); return { ok:false }; }
@@ -14863,7 +14932,7 @@ if(typeof MutationObserver !== 'undefined'){
 }
 
 Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), {
-  isAudioFile, parseArtistTitleFromFilename, parseId3Tags, extractAudioFileMetadata, splitDroppedFiles, handleLibraryDrop, handleDeckDrop, wireDragAndDrop
+  isAudioFile, parseArtistTitleFromFilename, parseId3Tags, extractAudioFileMetadata, splitDroppedFiles, handleLibraryDrop, handleLibraryPickedFiles, setupPhoneStudioSections, setLibraryPlayerMinimized, libraryPlayerMinimized, handleDeckDrop, wireDragAndDrop
 });
 
 Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), {
@@ -15065,8 +15134,8 @@ async function loadBeatStore(options = {}){
   renderBeatStorePage();
   const response = await djbRequest(`/api/marketplace/catalog?limit=24&page=${page}`);
   if(response.error){
-    store.status = response.status === 503 || response.status === 0 ? 'unavailable' : 'failed';
-    store.error = response.status === 0 ? 'Can\'t reach the server right now, so the Beat Store can\'t load.' : response.status === 503 ? 'The Beat Store isn\'t switched on yet. The server needs its marketplace database set up first.' : `The Beat Store could not be loaded: ${djbServerErrorText(response, 'request failed')}`;
+    store.status = response.status === 503 || response.status === 0 || response.status === 404 ? 'unavailable' : 'failed';
+    store.error = response.status === 0 ? 'Can\'t reach the server right now, so the Beat Store can\'t load.' : response.status === 503 ? 'The Beat Store isn\'t switched on yet. The server needs its marketplace database set up first.' : response.status === 404 ? 'The Beat Store isn\'t available on this server yet. Once the server is updated, beats will show up here.' : `The Beat Store could not be loaded: ${djbServerErrorText(response, 'request failed')}`;
     renderBeatStorePage();
     return response;
   }
