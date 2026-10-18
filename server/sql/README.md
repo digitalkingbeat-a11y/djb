@@ -21,3 +21,4 @@ Recommended next steps
 
 If you want, I can also produce the exact `supabase` CLI commands or an automated migration script next.
 - 028_create_battle_crowd_votes.sql — creates `battle_crowd_votes` (one winner pick per listener per finished battle; writes go through the server)
+- 029_create_profile_avatars_bucket.sql — creates the public `profile-avatars` storage bucket (512 KB JPG/PNG/WebP profile photos; uploads go through server-signed URLs)

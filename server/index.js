@@ -25,6 +25,8 @@ const { buildJudgeBreakdownPayload } = require('./analysis_storage');
 const { createFrontendRouter, shouldServeFrontend } = require('./static_frontend');
 const { getFFmpegCapability, publicFFmpegCapabilityStatus } = require('./ffmpeg_capability');
 const { requireAuthenticatedUser, requireConfiguredDataClient, requireOwnedUserId, requireOwnedUserIds, requireOperatorUser, getOwnedBeltAttempt, getOwnedBeltTest } = require('./auth');
+const BeltPromotion = require('./belt_promotion');
+const ProfileAvatar = require('./profile_avatar');
 const { getOrCreateBattleEntry, createDraftSubmission, getOwnedMixSubmission, issueUploadAuthorization, completeUpload, getSubmissionJudgingResult, MIX_BUCKET } = require('./battle_submission');
 const { reconcileBattleAwards } = require('./battle_award_ledger');
 const {
@@ -1022,6 +1024,49 @@ app.post('/api/musicLibrary/tracks/:trackId/artworkUploadAuthorization', require
   }catch(err){
     console.error('musicLibrary artwork upload auth error', err);
     return res.status(500).json({ error:'Music library artwork upload authorization failed' });
+  }
+});
+
+// Profile photo: modeled on the library artwork upload. The photo goes to the public "profile-avatars"
+// bucket (see sql/029) and its URL is saved on the user's Supabase metadata as avatar_url.
+app.post('/api/profile/avatarUploadAuthorization', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await ProfileAvatar.issueAvatarUploadAuthorization(supabaseService.storage.from(ProfileAvatar.PROFILE_AVATAR_BUCKET), req.authUser.id, req.body || {});
+    if(result.forbidden) return res.status(403).json({ error:'Cannot upload a photo for another user' });
+    if(result.validationError) return res.status(422).json({ error:result.validationError });
+    if(result.error) throw result.error;
+    return res.json({ success:true, bucket:result.bucket, uploadPath:result.uploadPath, uploadToken:result.uploadToken, expiresAt:result.expiresAt, maxBytes:result.maxBytes });
+  }catch(err){
+    console.error('profile avatar upload auth error', err);
+    return res.status(500).json({ error:'Profile photo upload authorization failed' });
+  }
+});
+
+app.post('/api/profile/completeAvatarUpload', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await ProfileAvatar.completeAvatarUpload(supabaseService.storage.from(ProfileAvatar.PROFILE_AVATAR_BUCKET), supabaseService.auth && supabaseService.auth.admin, req.authUser.id, req.body || {});
+    if(result.forbidden) return res.status(403).json({ error:'Cannot complete a photo upload for another user' });
+    if(result.verificationFailed) return res.status(422).json({ error:'Uploaded photo did not match the allowed type or size' });
+    if(result.error) throw result.error;
+    return res.json({ success:true, avatarUrl:result.avatarUrl });
+  }catch(err){
+    console.error('profile avatar complete error', err);
+    return res.status(500).json({ error:'Profile photo save failed' });
+  }
+});
+
+app.delete('/api/profile/avatar', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await ProfileAvatar.removeAvatar(supabaseService.storage.from(ProfileAvatar.PROFILE_AVATAR_BUCKET), supabaseService.auth && supabaseService.auth.admin, req.authUser.id);
+    if(result.forbidden) return res.status(403).json({ error:'Cannot remove another user\'s photo' });
+    if(result.error) throw result.error;
+    return res.json({ success:true });
+  }catch(err){
+    console.error('profile avatar remove error', err);
+    return res.status(500).json({ error:'Profile photo removal failed' });
   }
 });
 
@@ -2695,6 +2740,18 @@ app.post('/api/generateBeltTest', requireAuth, async (req, res) => {
   }catch(err){ console.error('generateBeltTest error', err); return res.status(500).json({ error: 'Belt test generation failed' }); }
 });
 
+// The signed-in DJ's current belt (White until a promotion test is passed) and the next one to test for.
+app.get('/api/myBelt', requireAuth, async (req, res) => {
+  const defs = loadBeltsDefinitions();
+  if(!defs) return res.status(500).json({ error: 'Belts definitions unavailable' });
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await BeltPromotion.getUserBelt(supabaseService, req.authUser.id, defs);
+    if(result.error) throw result.error;
+    return res.json({ success:true, belt: result.belt, stored: result.stored });
+  }catch(err){ console.error('myBelt error', err); return res.status(500).json({ error: 'Belt lookup failed' }); }
+});
+
 // Return belt attempts for the authenticated user
 app.get('/api/getBeltAttempts', requireAuth, async (req,res)=>{
   const userId = requireOwnedUserId(req, res, req.query.userId || req.query.user_id);
@@ -2733,11 +2790,33 @@ app.post('/api/submitBeltAttempt', requireAuth, async (req, res) => {
     if(testResult.error) throw testResult.error;
     if(testResult.forbidden) return res.status(403).json({ error: 'Cannot submit an attempt for this belt test' });
     const test = testResult.test;
-    // Insert attempt
-    const att = await supabaseService.from('belt_attempts').insert([{ user_id: userId, test_id: testId, score: Number(score), breakdown: breakdown || {} }]).select('*');
+    // One attempt per generated test, so a failed test can't be re-submitted with better numbers.
+    const prior = await supabaseService.from('belt_attempts').select('id').eq('test_id', testId).limit(1);
+    if(prior.error) throw prior.error;
+    if(Array.isArray(prior.data) && prior.data.length) return res.status(409).json({ error: 'This belt test was already submitted. Start a new test to try again.' });
+    const defs = loadBeltsDefinitions();
+    const passingScore = Number(test.passing_score || 0);
+    // The in-app tap test sends raw tap timings; the server grades them itself instead of trusting a score.
+    const serverScored = Boolean(breakdown && breakdown.method === BeltPromotion.TAP_METHOD);
+    const graded = serverScored ? BeltPromotion.scoreTapAttempt(test, breakdown, defs) : null;
+    const finalScore = graded ? graded.score : Number(score);
+    const storedBreakdown = { ...(breakdown || {}), beltCode: test.code, serverScored, grading: graded };
+    const att = await supabaseService.from('belt_attempts').insert([{ user_id: userId, test_id: testId, score: finalScore, passing_score: passingScore, breakdown: storedBreakdown }]).select('*');
     if(att.error) throw att.error;
-    const passed = Number(score) >= Number(test.passing_score || 0);
-    return res.json({ success:true, passed, award: null });
+    const passed = finalScore >= passingScore;
+    let award = null;
+    if(passed && serverScored && defs){
+      // Only the very next belt is awarded; skipping ahead stays a practice pass.
+      const current = await BeltPromotion.getUserBelt(supabaseService, userId, defs);
+      if(current.error) throw current.error;
+      const next = current.belt && current.belt.next;
+      if(next && String(next.code).toLowerCase() === String(test.code).toLowerCase()){
+        const awarded = await BeltPromotion.awardBelt(supabaseService, userId, next.code, { testId, score: finalScore, method: BeltPromotion.TAP_METHOD });
+        if(awarded.error) throw awarded.error;
+        award = { beltCode: next.code, beltName: next.name, awardedAt: awarded.awarded.awardedAt };
+      }
+    }
+    return res.json({ success:true, passed, score: finalScore, passingScore, beltCode: test.code, serverScored, grading: graded, award });
   }catch(err){ console.error('submitBeltAttempt error', err); return res.status(500).json({ error: 'Belt attempt submission failed' }); }
 });
 
