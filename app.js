@@ -420,12 +420,32 @@ function currentUser(){
   const local = readLocalProfile(base.id);
   if(local.displayName) base = { ...base, displayName:local.displayName, initials:local.initials || initialsForName(local.displayName), customized:true };
   else if(local.initials) base = { ...base, initials:local.initials, customized:true };
-  return base;
+  // Hometown and bio come from Edit Profile (browser-local), falling back to Supabase user metadata if set there.
+  const meta = sessionUser && sessionUser.user_metadata || {};
+  const hometown = local.hometown || String(meta.hometown || '').replace(/\s+/g, ' ').trim().slice(0, LOCAL_PROFILE_HOMETOWN_MAX);
+  const bio = local.bio || String(meta.bio || '').replace(/\s+/g, ' ').trim().slice(0, LOCAL_PROFILE_BIO_MAX);
+  return { ...base, hometown, bio };
+}
+
+// The DJ's real belt from local progress (White is the true starting belt for everyone).
+function currentBeltName(){
+  let saved = '';
+  try{ saved = localStorage.getItem('dj_battle_belt') || ''; }catch(e){ saved = ''; }
+  const shown = document.getElementById('profile-belt')?.textContent || '';
+  const name = String(saved || shown || 'White').replace(/\s*belt$/i, '').trim();
+  return name && name !== 'None' ? name : 'White';
+}
+
+// Player card line: "Hometown • Belt". Hometown is left out when the DJ has not set one; never faked.
+function playerCardMeta(user = currentUser(), belt = currentBeltName()){
+  return [user && user.hometown, belt ? `${belt} Belt` : ''].filter(Boolean).join(' • ');
 }
 
 const LOCAL_PROFILE_STORAGE_PREFIX = 'djBattleLocalProfile:';
 const LOCAL_PROFILE_NAME_MAX = 40;
 const LOCAL_PROFILE_INITIALS_MAX = 3;
+const LOCAL_PROFILE_HOMETOWN_MAX = 60;
+const LOCAL_PROFILE_BIO_MAX = 160;
 
 function readLocalProfile(userId){
   const saved = plainObject(safeParse(`${LOCAL_PROFILE_STORAGE_PREFIX}${userId}`, {}));
@@ -438,7 +458,11 @@ function normalizeLocalProfileInput(input = {}){
   const initials = String(input.initials || '').replace(/[^\p{L}\p{N}]/gu, '').toUpperCase();
   if(displayName.length > LOCAL_PROFILE_NAME_MAX) return { error:`Display name must be ${LOCAL_PROFILE_NAME_MAX} characters or fewer.` };
   if(initials.length > LOCAL_PROFILE_INITIALS_MAX) return { error:`Initials must be ${LOCAL_PROFILE_INITIALS_MAX} letters or numbers or fewer.` };
-  return { value:{ displayName, initials } };
+  const hometown = String(input.hometown || '').replace(/\s+/g, ' ').trim();
+  const bio = String(input.bio || '').replace(/\s+/g, ' ').trim();
+  if(hometown.length > LOCAL_PROFILE_HOMETOWN_MAX) return { error:`Hometown must be ${LOCAL_PROFILE_HOMETOWN_MAX} characters or fewer.` };
+  if(bio.length > LOCAL_PROFILE_BIO_MAX) return { error:`Bio must be ${LOCAL_PROFILE_BIO_MAX} characters or fewer.` };
+  return { value:{ displayName, initials, hometown, bio } };
 }
 
 function saveLocalProfile(input){
@@ -447,6 +471,8 @@ function saveLocalProfile(input){
   if(!normalized.value.displayName) return { error:'Enter a display name.' };
   const before = currentUser();
   const value = { displayName:normalized.value.displayName, initials:normalized.value.initials || initialsForName(normalized.value.displayName) };
+  if(normalized.value.hometown) value.hometown = normalized.value.hometown;
+  if(normalized.value.bio) value.bio = normalized.value.bio;
   localStorage.setItem(`${LOCAL_PROFILE_STORAGE_PREFIX}${before.id}`, JSON.stringify(value));
   const after = currentUser();
   // Keep this browser's own local posts in step with the new name.
@@ -463,7 +489,7 @@ function openEditProfileModal(){
   const scopeNote = user.signedIn
     ? 'Saved in this browser only. Your account profile on the server is not changed.'
     : 'Saved in this browser only. Sign in later to sync battles and results.';
-  openModal(`<span class="eyebrow accent">PROFILE</span><h3>Edit Profile</h3><p style="color:var(--muted)" id="edit-profile-scope">${esc(scopeNote)}</p><div class="form-grid"><label>Display name<input id="edit-profile-name" maxlength="${LOCAL_PROFILE_NAME_MAX}" autocomplete="nickname" value="${esc(user.displayName)}"></label><label>Initials (avatar)<input id="edit-profile-initials" maxlength="${LOCAL_PROFILE_INITIALS_MAX}" value="${esc(user.initials)}"></label></div><p id="edit-profile-error" class="hidden" role="alert" style="color:var(--danger)"></p><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="save-profile">Save Profile</button></div>`);
+  openModal(`<span class="eyebrow accent">PROFILE</span><h3>Edit Profile</h3><p style="color:var(--muted)" id="edit-profile-scope">${esc(scopeNote)}</p><div class="form-grid"><label>Display name<input id="edit-profile-name" maxlength="${LOCAL_PROFILE_NAME_MAX}" autocomplete="nickname" value="${esc(user.displayName)}"></label><label>Initials (avatar)<input id="edit-profile-initials" maxlength="${LOCAL_PROFILE_INITIALS_MAX}" value="${esc(user.initials)}"></label><label>Hometown <small style="color:var(--muted)">(optional, shown on your player card)</small><input id="edit-profile-hometown" maxlength="${LOCAL_PROFILE_HOMETOWN_MAX}" autocomplete="address-level2" placeholder="e.g. Atlanta, GA" value="${esc(user.hometown || '')}"></label><label class="full">Short bio <small style="color:var(--muted)">(optional)</small><textarea id="edit-profile-bio" maxlength="${LOCAL_PROFILE_BIO_MAX}" rows="2" placeholder="A line about your style">${esc(user.bio || '')}</textarea></label></div><p id="edit-profile-error" class="hidden" role="alert" style="color:var(--danger)"></p><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="save-profile">Save Profile</button></div>`);
   const nameInput = document.getElementById('edit-profile-name');
   const initialsInput = document.getElementById('edit-profile-initials');
   let initialsTouched = false;
@@ -471,7 +497,9 @@ function openEditProfileModal(){
   if(nameInput && initialsInput) nameInput.addEventListener('input', () => { if(!initialsTouched) initialsInput.value = initialsForName(nameInput.value); });
   const save = document.getElementById('save-profile');
   if(save) save.onclick = () => {
-    const result = saveLocalProfile({ displayName:nameInput ? nameInput.value : '', initials:initialsInput ? initialsInput.value : '' });
+    const hometownInput = document.getElementById('edit-profile-hometown');
+    const bioInput = document.getElementById('edit-profile-bio');
+    const result = saveLocalProfile({ displayName:nameInput ? nameInput.value : '', initials:initialsInput ? initialsInput.value : '', hometown:hometownInput ? hometownInput.value : '', bio:bioInput ? bioInput.value : '' });
     const errorNode = document.getElementById('edit-profile-error');
     if(result.error){
       if(errorNode){ errorNode.textContent = result.error; errorNode.classList.remove('hidden'); }
@@ -510,6 +538,15 @@ function renderCurrentUserUI(){
   setText('#br-dj1-name', user.displayName);
   setText('#br-dj1 .avatar', user.initials);
   setText('#mini-dj1', user.displayName);
+  const belt = currentBeltName();
+  setText('#br-dj1-meta', playerCardMeta(user, belt));
+  setText('#mini-meta1', playerCardMeta(user, belt));
+  setText('#br-dj1 .belt', belt);
+  const heroAbout = document.getElementById('profile-hero-about');
+  if(heroAbout){
+    heroAbout.textContent = [user.hometown, user.bio].filter(Boolean).join(' • ');
+    heroAbout.classList.toggle('hidden', !user.hometown && !user.bio);
+  }
   const chip = document.querySelector('.profile-chip');
   if(chip) chip.dataset.userState = user.signedIn ? 'signed-in' : 'guest';
   return user;
@@ -988,6 +1025,9 @@ function deckShellHtml(deck, label){
     </div>`;
 }
 
+// Phone bottom bar (narrow screens): these five stay in one row; everything else lives in the More sheet.
+const PHONE_NAV_PRIMARY = { battles:'Battles', studio:'Studio', library:'Library', community:'Community', profile:'Profile' };
+
 function installProfessionalShell(){
   const nav = document.getElementById('nav');
   if(nav){
@@ -1002,7 +1042,10 @@ function installProfessionalShell(){
       ['profile','PR','Profile'],
       ['settings','SE','Settings']
     ];
-    nav.innerHTML = items.map(([view, icon, label]) => `<button class="nav-btn ${view === 'battles' ? 'active' : ''}" data-view="${view}" title="${label}" type="button"><b>${icon}</b><span>${label}</span>${view === 'activity' ? '<span id="notification-count-pill">0</span>' : ''}</button>`).join('');
+    nav.innerHTML = items.map(([view, icon, label]) => {
+      const short = PHONE_NAV_PRIMARY[view];
+      return `<button class="nav-btn ${view === 'battles' ? 'active' : ''}" data-view="${view}" title="${label}" type="button"${short ? ` data-phone-primary="true"` : ''}><b>${icon}</b><span>${label}</span>${short ? `<small class="nav-short" aria-hidden="true">${short}</small>` : ''}${view === 'activity' ? '<span id="notification-count-pill">0</span>' : ''}</button>`;
+    }).join('') + `<button class="nav-more-btn" id="nav-more" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="nav-more-sheet" title="More pages"><b aria-hidden="true">&#8943;</b><small class="nav-short">More</small><span class="nav-more-dot hidden" id="nav-more-dot" aria-hidden="true"></span></button>`;
   }
   const sidebar = document.querySelector('.sidebar');
   if(sidebar && !document.getElementById('sidebar-toggle')){
@@ -1120,7 +1163,7 @@ function installProfessionalShell(){
         <section class="panel compact-system-panel" id="controller-panel">
           <div class="section-head compact"><div><span class="eyebrow">CONNECT CONTROLLER</span><h3>Hardware</h3></div><button class="ghost small" id="scan-midi" type="button">Scan MIDI</button></div>
           <div class="status-grid dense"><div><span>Controller</span><strong id="controller-name">No controller detected</strong></div><div><span>Status</span><strong id="controller-status">Disconnected</strong></div><div><span>MIDI Activity</span><strong id="midi-activity">Idle</strong></div><div><span>Mapping</span><strong id="mapping-status">Not mapped</strong></div></div>
-          <div id="controller-mapping-list" class="mapping-list"></div>
+          <div id="midi-learn-panel" class="midi-learn-panel" aria-label="MIDI Learn controller mapping"></div>
         </section>
         <section class="panel compact-system-panel" id="audio-setup-panel">
           <div class="section-head compact"><div><span class="eyebrow">AUDIO SETUP</span><h3>Inputs</h3></div><button class="ghost small" id="refresh-audio-devices" type="button">Refresh</button></div>
@@ -1132,7 +1175,7 @@ function installProfessionalShell(){
         <section class="panel compact-system-panel" id="mini-battle-panel">
           <div class="mini-battle-line"><strong id="mini-dj1">${esc(currentUser().displayName)}</strong><span>VS</span><strong id="mini-dj2">Solo Mode</strong></div>
           <div class="status-grid dense"><div><span>Mode</span><strong id="mini-mode">Practice</strong></div><div><span>Genre</span><strong id="mini-genre">Global</strong></div><div><span>Clock</span><strong id="mini-battle-clock">10:00</strong></div></div>
-          <small id="mini-meta2">AI high-score mode</small><small id="mini-meta1">White / Tampa</small>
+          <small id="mini-meta2">AI high-score mode</small><small id="mini-meta1">${esc(playerCardMeta())}</small>
         </section>
       </div>
       <div id="studio-library-drawer" class="studio-library-drawer hidden"></div>
@@ -1142,7 +1185,7 @@ function installProfessionalShell(){
         <div class="recording-tracklist" id="recording-tracklist" aria-live="polite"></div>
         <audio id="recording-review-audio" controls></audio>
         <div class="review-meta" id="recording-metadata"></div>
-        <div class="modal-actions"><button class="ghost" id="restart-recording" type="button">Restart Recording</button><button class="ghost" id="save-recording-draft" type="button">Save Draft</button><button class="primary" id="submit-recording" type="button">Submit Battle</button></div>
+        <div class="modal-actions"><button class="ghost" id="restart-recording" type="button">Restart Recording</button><button class="ghost" id="save-recording-draft" type="button">Save Draft</button><button class="ghost" id="download-recording" type="button" title="Save this take to your computer as a .webm file">Download</button><button class="primary" id="submit-recording" type="button">Submit Battle</button></div>
       </section>
       <div class="studio-analysis-row">
         <div class="panel ai-panel"><div><span class="eyebrow">JUDGE PANEL</span><h3>Battle Judging</h3><p>Timing / beatmatching / phrase mixing / transitions / technical evidence.</p></div><div class="judge-actions"><button class="primary" id="judge-score-preview" type="button">Preview Scoring</button><div id="score-breakdown" class="score-breakdown"></div></div></div>
@@ -1196,6 +1239,7 @@ function switchView(view){
   }
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===view));
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
+  if(typeof syncNavMoreState === 'function') syncNavMoreState();
   document.getElementById('page-title').textContent=pageTitles[view]||'DJ Battle';
   if(state.shareTitle) setShareMeta('', '');
   if(view === 'operations'){
@@ -1231,6 +1275,78 @@ function switchView(view){
 }
 document.querySelectorAll('[data-view-target]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.viewTarget)));
 document.querySelectorAll('.nav-btn').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
+
+// "More" sheet for the one-row phone menu. Lists every nav page that is not in the phone bar.
+function navMoreItems(){
+  return Array.from(document.querySelectorAll('.sidebar .nav-btn[data-view]'))
+    .filter(btn => !btn.dataset.phonePrimary && !btn.classList.contains('hidden'))
+    .map(btn => ({ view:btn.dataset.view, label:btn.title || btn.textContent.trim(), icon:(btn.querySelector('b') || {}).textContent || '' }));
+}
+function ensureNavMoreSheet(){
+  let sheet = document.getElementById('nav-more-sheet');
+  if(sheet) return sheet;
+  sheet = document.createElement('div');
+  sheet.id = 'nav-more-sheet';
+  sheet.className = 'nav-more-sheet hidden';
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-modal', 'true');
+  sheet.setAttribute('aria-labelledby', 'nav-more-title');
+  document.body.appendChild(sheet);
+  return sheet;
+}
+function navMoreIsOpen(){
+  const sheet = document.getElementById('nav-more-sheet');
+  return Boolean(sheet && !sheet.classList.contains('hidden'));
+}
+function openNavMoreSheet(){
+  const sheet = ensureNavMoreSheet();
+  const current = (document.querySelector('.view.active') || {}).id || '';
+  const unread = Number((document.getElementById('notification-count-pill') || {}).textContent) || 0;
+  sheet.innerHTML = `<div class="nav-more-backdrop" data-nav-more-close></div><div class="nav-more-panel"><div class="nav-more-head"><strong id="nav-more-title">More</strong><button class="ghost small" type="button" data-nav-more-close aria-label="Close menu">Close</button></div><div class="nav-more-list">${navMoreItems().map(item => `<button type="button" class="nav-more-item ${item.view === current ? 'active' : ''}" data-more-view="${esc(item.view)}"${item.view === current ? ' aria-current="page"' : ''}><b aria-hidden="true">${esc(item.icon)}</b><span>${esc(item.label)}</span>${item.view === 'activity' && unread ? `<em class="nav-more-count" aria-label="${unread} unread">${unread}</em>` : ''}</button>`).join('')}</div></div>`;
+  sheet.classList.remove('hidden');
+  const more = document.getElementById('nav-more');
+  if(more) more.setAttribute('aria-expanded', 'true');
+  sheet.querySelectorAll('[data-nav-more-close]').forEach(el => { el.onclick = () => closeNavMoreSheet(); });
+  sheet.querySelectorAll('[data-more-view]').forEach(btn => { btn.onclick = () => { closeNavMoreSheet({ restoreFocus:false }); switchView(btn.dataset.moreView); }; });
+  const first = sheet.querySelector('.nav-more-item');
+  if(first && first.focus) first.focus();
+  return sheet;
+}
+function closeNavMoreSheet(opts = {}){
+  const sheet = document.getElementById('nav-more-sheet');
+  if(!sheet || sheet.classList.contains('hidden')) return false;
+  sheet.classList.add('hidden');
+  const more = document.getElementById('nav-more');
+  if(more){
+    more.setAttribute('aria-expanded', 'false');
+    if(opts.restoreFocus !== false && more.focus) more.focus();
+  }
+  return true;
+}
+function syncNavMoreState(){
+  const more = document.getElementById('nav-more');
+  if(!more) return;
+  const current = (document.querySelector('.view.active') || {}).id || '';
+  const inMore = navMoreItems().some(item => item.view === current);
+  more.classList.toggle('active', inMore);
+  const unread = Number((document.getElementById('notification-count-pill') || {}).textContent) || 0;
+  const dot = document.getElementById('nav-more-dot');
+  if(dot) dot.classList.toggle('hidden', !unread);
+}
+(function wireNavMore(){
+  const more = document.getElementById('nav-more');
+  if(!more) return;
+  more.addEventListener('click', () => { if(navMoreIsOpen()) closeNavMoreSheet(); else openNavMoreSheet(); });
+  document.addEventListener('keydown', event => {
+    if(event.key !== 'Escape' || !navMoreIsOpen()) return;
+    event.preventDefault();
+    closeNavMoreSheet();
+  });
+  document.querySelectorAll('.nav-btn').forEach(b => b.addEventListener('click', () => closeNavMoreSheet({ restoreFocus:false })));
+  const pill = document.getElementById('notification-count-pill');
+  if(pill && typeof MutationObserver === 'function') new MutationObserver(syncNavMoreState).observe(pill, { childList:true, characterData:true, subtree:true });
+  syncNavMoreState();
+})();
 const brandHome = document.getElementById('brand-home');
 if(brandHome){
   brandHome.addEventListener('click',()=>switchView('dashboard'));
@@ -5640,7 +5756,7 @@ async function createAuthenticatedBattleWithPrepSnapshot(draft, selectedCrateId,
     isPremium:Boolean(state.premium),
     publicProfile:{
       name:currentUser().displayName,
-      country:document.getElementById('profile-country')?.textContent || '',
+      country:currentUser().hometown || '',
       belt:document.getElementById('profile-belt')?.textContent || '',
       rating:state.battleProgress && state.battleProgress.rankingRating || null
     }
@@ -12013,7 +12129,7 @@ function renderBattleRoom(session){
   document.getElementById('br-genre').textContent = session.genre;
   document.getElementById('br-duration').textContent = `${session.duration} min`;
   document.getElementById('br-dj1-name').textContent = document.getElementById('profile-name')?.textContent || 'You';
-  document.getElementById('br-dj1-meta').textContent = `${document.getElementById('profile-belt')?.textContent || 'Unranked'}`;
+  document.getElementById('br-dj1-meta').textContent = playerCardMeta();
   if(session.opponent){
     document.getElementById('br-dj2-name').textContent = session.opponent.name || 'Opponent';
     document.getElementById('br-dj2-meta').textContent = `${session.opponent.country || ''} • ${session.opponent.record || ''}`;
@@ -14047,4 +14163,25 @@ if(typeof MutationObserver !== 'undefined'){
 
 Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), {
   isAudioFile, parseArtistTitleFromFilename, parseId3Tags, extractAudioFileMetadata, splitDroppedFiles, handleLibraryDrop, handleDeckDrop, wireDragAndDrop
+});
+
+Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), {
+  midiParse: data => controllerMappingManager.parseMidi(data),
+  midiRoute: data => controllerMappingManager.routeMidi(data),
+  midiStartLearn: id => controllerMappingManager.startLearn(id),
+  midiCancelLearn: () => controllerMappingManager.cancelLearn(),
+  midiClearMapping: id => controllerMappingManager.clearMapping(id),
+  midiResetMappings: () => controllerMappingManager.resetMappings(),
+  midiLearnMap: () => controllerMappingManager.getLearnMap(),
+  midiLearning: () => controllerMappingManager.getLearning(),
+  midiLearnTargets: () => controllerMappingManager.learnTargets(),
+  downloadRecording: () => studioRecordingManager.download(),
+  recordingDownloadName: (title, date) => studioRecordingManager.downloadFileName(title, date),
+  playerCardMeta,
+  currentBeltName,
+  renderCurrentUserUI,
+  openNavMoreSheet,
+  closeNavMoreSheet,
+  navMoreItems,
+  navMoreIsOpen
 });

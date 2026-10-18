@@ -114,7 +114,7 @@
         <div class="section-head"><div><span class="eyebrow accent">BATTLE ROOM</span><h3 id="br-title">Preparing Battle</h3></div><button class="text-btn" id="br-leave">← Back</button></div>
         <div class="battle-room-grid">
           <div class="panel players">
-            <div class="player-card" id="br-dj1"><div class="avatar">G</div><div><strong id="br-dj1-name">Guest</strong><div id="br-dj1-meta">Tampa • White Belt</div></div><div class="belt">White</div></div>
+            <div class="player-card" id="br-dj1"><div class="avatar">G</div><div><strong id="br-dj1-name">Guest</strong><div id="br-dj1-meta">White Belt</div></div><div class="belt">White</div></div>
             <div class="player-card" id="br-dj2"><div class="avatar">AI</div><div><strong id="br-dj2-name">Solo Mode</strong><div id="br-dj2-meta">—</div></div><div class="belt" id="br-dj2-belt">—</div></div>
             <div class="battle-meta panel" id="br-meta">
               <div><span>Mode</span><strong id="br-mode">—</strong></div>
@@ -241,7 +241,7 @@
 
             <div class="panel" id="mini-battle-panel" style="display:flex;align-items:center;justify-content:space-between;padding:12px">
               <div style="display:flex;gap:12px;align-items:center">
-                <div style="display:flex;flex-direction:column"><strong id="mini-dj1">Guest</strong><small id="mini-meta1" style="color:var(--muted)">White • Tampa</small></div>
+                <div style="display:flex;flex-direction:column"><strong id="mini-dj1">Guest</strong><small id="mini-meta1" style="color:var(--muted)">White Belt</small></div>
                 <div style="font-size:18px;font-weight:900;color:var(--accent)">VS</div>
                 <div style="display:flex;flex-direction:column"><strong id="mini-dj2">Solo Mode</strong><small id="mini-meta2" style="color:var(--muted)">—</small></div>
               </div>
@@ -482,7 +482,7 @@
       </section>
 
       <section id="profile" class="view">
-        <div class="profile-hero"><div class="avatar huge" id="profile-hero-avatar">G</div><div><span class="eyebrow accent">DJ PROFILE</span><h2><span id="profile-hero-name">Guest</span> <span id="profile-belt-hero" class="belt-badge">White</span></h2><p id="profile-hero-tagline">Guest • Local DJ profile saved in this browser</p><div class="profile-actions"><button class="primary" id="edit-profile-button" type="button">Edit Profile</button><button class="ghost" id="share-profile-button" type="button">Share</button></div><div style="margin-top:8px"><button class="primary" id="take-belt-test">Take Belt Test</button></div></div><div class="profile-score"><strong>0</strong><span>Battle Rating</span></div></div>
+        <div class="profile-hero"><div class="avatar huge" id="profile-hero-avatar">G</div><div><span class="eyebrow accent">DJ PROFILE</span><h2><span id="profile-hero-name">Guest</span> <span id="profile-belt-hero" class="belt-badge">White</span></h2><p id="profile-hero-tagline">Guest • Local DJ profile saved in this browser</p><p id="profile-hero-about" class="profile-hero-about hidden"></p><div class="profile-actions"><button class="primary" id="edit-profile-button" type="button">Edit Profile</button><button class="ghost" id="share-profile-button" type="button">Share</button></div><div style="margin-top:8px"><button class="primary" id="take-belt-test">Take Belt Test</button></div></div><div class="profile-score"><strong>0</strong><span>Battle Rating</span></div></div>
         <div id="profile-rating-history" class="panel rating-history"></div>
         <div id="profile-streaks" class="panel profile-streaks"></div>
         <div id="profile-genre-stats" class="panel profile-genre-stats"></div>
@@ -540,7 +540,7 @@
       }
       const savedBelt = localStorage.getItem('dj_battle_belt') || 'White';
       setBelt(savedBelt);
-      window.setCurrentBelt = (b) => { localStorage.setItem('dj_battle_belt', b); setBelt(b); };
+      window.setCurrentBelt = (b) => { localStorage.setItem('dj_battle_belt', b); setBelt(b); if(typeof window.renderCurrentUserUI === 'function') window.renderCurrentUserUI(); };
     })();
   </script>
   <script src="api_client.js"></script>

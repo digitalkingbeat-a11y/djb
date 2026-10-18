@@ -1795,3 +1795,50 @@ a.mention-link:hover{text-decoration:underline}
 .dd-prefill-art img{ width:64px; height:64px; object-fit:cover; border-radius:8px; }
 .dd-prefill-note{ color:var(--muted, #aaa); font-size:.85rem; margin:0 0 8px; }
 @media (prefers-reduced-motion: reduce){ .drop-active::after{ transition:none; } }
+
+/* ---- MIDI Learn ---- */
+.midi-learn-panel{margin-top:12px;display:grid;gap:8px}
+.midi-learn-head{display:flex;align-items:center;gap:10px}
+.midi-learn-head strong{font-size:13px}
+.midi-learn-count{color:var(--muted);font-size:11px;margin-right:auto}
+.midi-learn-notice{margin:0;padding:8px 10px;border:1px solid #3a3320;background:#17140c;border-radius:8px;color:#e8d9a8;font-size:12px}
+.midi-learn-message{margin:0;min-height:1em;color:var(--accent);font-size:12px}
+.midi-learn-message:empty{display:none}
+.midi-learn-group{display:grid;gap:4px}
+.midi-learn-group-title{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-top:4px}
+.midi-learn-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr) auto auto;align-items:center;gap:6px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:#0f141b;font-size:12px}
+.midi-learn-row small{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.midi-learn-row.mapped small{color:#d8f7a0}
+.midi-learn-row.learning{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.midi-learn-row.learning small{color:var(--accent)}
+.midi-learn-row .small{padding:4px 8px}
+.profile-hero-about{margin:4px 0 0;color:#c9d1dc}
+
+/* ---- One-row phone menu ---- */
+.nav-more-btn,.nav-short{display:none}
+.nav-more-sheet{position:fixed;inset:0;z-index:60}
+.nav-more-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.6)}
+.nav-more-panel{position:absolute;left:0;right:0;bottom:0;background:#11161e;border-top:1px solid var(--line);border-radius:16px 16px 0 0;padding:14px 14px calc(14px + env(safe-area-inset-bottom));max-height:70vh;overflow:auto}
+.nav-more-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.nav-more-list{display:grid;gap:4px}
+.nav-more-item{display:flex;align-items:center;gap:10px;width:100%;min-height:46px;padding:8px 10px;border:0;border-radius:10px;background:transparent;color:#e7ecf3;text-align:left;font-size:14px;cursor:pointer}
+.nav-more-item b{display:grid;place-items:center;width:26px;height:26px;border-radius:6px;background:#141b26;color:var(--accent);font-size:10px}
+.nav-more-item.active{background:#18202c;box-shadow:inset 3px 0 var(--accent)}
+.nav-more-item:focus-visible,.nav-more-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.nav-more-count{margin-left:auto;font-style:normal;min-width:20px;padding:0 6px;border-radius:999px;background:#243015;color:var(--accent);font-size:11px;text-align:center}
+@media(max-width:760px){
+  .sidebar nav{grid-template-columns:repeat(6,minmax(0,1fr));gap:2px}
+  .sidebar nav .nav-btn:not([data-phone-primary]){display:none}
+  .sidebar nav .nav-btn,.nav-more-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:52px;padding:4px 2px;border:0;border-radius:8px;background:transparent;color:#aab1bd;cursor:pointer;position:relative}
+  .sidebar nav .nav-btn.active{box-shadow:inset 0 2px var(--accent)}
+  .nav-more-btn.active{color:#fff;box-shadow:inset 0 2px var(--accent);background:#151c27}
+  .nav-more-btn b{display:grid;place-items:center;width:24px;height:24px;border-radius:6px;background:#141b26;color:var(--accent);font-size:14px}
+  .nav-short{display:block;font-size:10px;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .nav-more-dot{position:absolute;top:6px;right:calc(50% - 16px);width:8px;height:8px;border-radius:50%;background:var(--accent)}
+  .main{padding-bottom:96px}
+}
+@media(max-width:760px) and (prefers-reduced-motion:no-preference){
+  .nav-more-panel{animation:navMoreUp .18s ease-out}
+  @keyframes navMoreUp{from{transform:translateY(24px);opacity:.6}to{transform:none;opacity:1}}
+}
+#edit-profile-bio{font:inherit;font-size:13px;min-height:64px}

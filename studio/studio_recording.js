@@ -50,6 +50,8 @@
       if(arm) arm.disabled = recording;
       if(rec) rec.disabled = !armed || recording;
       if(stop) stop.disabled = !recording;
+      const dl = doc.getElementById('download-recording');
+      if(dl) dl.disabled = !win.lastRecordedMixFile;
       if(status) status.textContent = recordState.error || (recordState.state === 'countin' ? 'Get ready…' : recording ? (recordState.limitMs ? 'REC battle take' : 'REC active') : armed ? 'Armed' : review ? (recordState.autoStopped ? 'Battle time reached. Take stopped.' : 'Review take ready') : 'Recording idle');
       if(timer) timer.textContent = elapsedText(recording && recordState.startedAt ? now() - recordState.startedAt : recordState.elapsedMs);
       const left = doc.getElementById('record-time-left');
@@ -373,6 +375,45 @@
       return { ok:true, trackId:state.studioRecording.draftTrackId || null };
     }
 
+    // Safe filename from the battle title and the take date, e.g. "friday-night-house-battle-2026-10-18.webm".
+    function downloadFileName(title, date){
+      const d = date instanceof Date && !isNaN(date) ? date : new Date(now());
+      const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const slug = String(title || '')
+        .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 60)
+        .replace(/-+$/g, '');
+      return `${slug || 'dj-battle-mix'}-${stamp}.webm`;
+    }
+
+    function download(){
+      const file = win.lastRecordedMixFile;
+      if(!file){
+        state.studioRecording.error = 'Record a take before downloading.';
+        updateUi();
+        return { ok:false, error:'no_take' };
+      }
+      const session = deps.activeStudioBattleSession ? deps.activeStudioBattleSession() : null;
+      const title = session && (session.title || session.name) || 'Practice mix';
+      const name = downloadFileName(title, new Date(now()));
+      const URLs = win.URL || global.URL;
+      const url = URLs && URLs.createObjectURL ? URLs.createObjectURL(file) : '';
+      if(!url) return { ok:false, error:'download_unavailable', name };
+      const a = doc.createElement('a');
+      a.href = url;
+      a.download = name;
+      a.rel = 'noopener';
+      a.style.display = 'none';
+      doc.body.appendChild(a);
+      a.click();
+      a.remove();
+      setT(() => { if(URLs.revokeObjectURL) URLs.revokeObjectURL(url); }, 4000);
+      return { ok:true, name };
+    }
+
     function submit(){
       if(!win.lastRecordedMixFile){
         state.studioRecording.error = 'Record and review a take before submitting.';
@@ -412,6 +453,8 @@
       if(restartButton) restartButton.onclick = restart;
       if(saveButton) saveButton.onclick = saveDraft;
       if(submitButton) submitButton.onclick = submit;
+      const downloadButton = doc.getElementById('download-recording');
+      if(downloadButton) downloadButton.onclick = download;
       updateUi();
       renderTracklist();
     }
@@ -433,6 +476,8 @@
       restart,
       saveDraft,
       submit,
+      download,
+      downloadFileName,
       wireControls,
       setReviewPeaks,
       seekReview,
