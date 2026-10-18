@@ -8,6 +8,7 @@ function plainObject(value){
 }
 
 const state = {
+  beltPromotion: { belts:null, serverBelt:null, attempts:[], status:'idle', message:'', lastResult:null, activeRunner:null },
   premium: false,
   library: safeParse('djBattleLibrary', []),
   posts: safeParse('djBattlePosts', null) || [
@@ -424,11 +425,16 @@ function currentUser(){
   const meta = sessionUser && sessionUser.user_metadata || {};
   const hometown = local.hometown || String(meta.hometown || '').replace(/\s+/g, ' ').trim().slice(0, LOCAL_PROFILE_HOMETOWN_MAX);
   const bio = local.bio || String(meta.bio || '').replace(/\s+/g, ' ').trim().slice(0, LOCAL_PROFILE_BIO_MAX);
-  return { ...base, hometown, bio };
+  // Profile photo: this browser's copy first, then the account's avatar_url (set by the server after upload).
+  const avatar = local.avatar || (isSafeAvatarUrl(meta.avatar_url) && /^https:/i.test(String(meta.avatar_url)) ? String(meta.avatar_url) : '');
+  return { ...base, hometown, bio, avatar };
 }
 
 // The DJ's real belt from local progress (White is the true starting belt for everyone).
 function currentBeltName(){
+  // Signed in: the belt on your account (from a server-graded promotion test) wins over this browser's copy.
+  const serverBelt = state.beltPromotion && state.beltPromotion.serverBelt;
+  if(serverBelt && serverBelt.name && currentAuthState.user) return String(serverBelt.name).replace(/\s*belt$/i, '').trim() || 'White';
   let saved = '';
   try{ saved = localStorage.getItem('dj_battle_belt') || ''; }catch(e){ saved = ''; }
   const shown = document.getElementById('profile-belt')?.textContent || '';
@@ -462,7 +468,8 @@ function normalizeLocalProfileInput(input = {}){
   const bio = String(input.bio || '').replace(/\s+/g, ' ').trim();
   if(hometown.length > LOCAL_PROFILE_HOMETOWN_MAX) return { error:`Hometown must be ${LOCAL_PROFILE_HOMETOWN_MAX} characters or fewer.` };
   if(bio.length > LOCAL_PROFILE_BIO_MAX) return { error:`Bio must be ${LOCAL_PROFILE_BIO_MAX} characters or fewer.` };
-  return { value:{ displayName, initials, hometown, bio } };
+  const avatar = isSafeAvatarUrl(input.avatar) ? String(input.avatar) : '';
+  return { value:{ displayName, initials, hometown, bio, avatar } };
 }
 
 function saveLocalProfile(input){
@@ -473,6 +480,9 @@ function saveLocalProfile(input){
   const value = { displayName:normalized.value.displayName, initials:normalized.value.initials || initialsForName(normalized.value.displayName) };
   if(normalized.value.hometown) value.hometown = normalized.value.hometown;
   if(normalized.value.bio) value.bio = normalized.value.bio;
+  // avatar: undefined keeps the current photo, '' or null removes it.
+  const keepAvatar = input && input.avatar === undefined ? readLocalProfile(before.id).avatar : normalized.value.avatar;
+  if(keepAvatar) value.avatar = keepAvatar;
   localStorage.setItem(`${LOCAL_PROFILE_STORAGE_PREFIX}${before.id}`, JSON.stringify(value));
   const after = currentUser();
   // Keep this browser's own local posts in step with the new name.
@@ -489,17 +499,39 @@ function openEditProfileModal(){
   const scopeNote = user.signedIn
     ? 'Saved in this browser only. Your account profile on the server is not changed.'
     : 'Saved in this browser only. Sign in later to sync battles and results.';
-  openModal(`<span class="eyebrow accent">PROFILE</span><h3>Edit Profile</h3><p style="color:var(--muted)" id="edit-profile-scope">${esc(scopeNote)}</p><div class="form-grid"><label>Display name<input id="edit-profile-name" maxlength="${LOCAL_PROFILE_NAME_MAX}" autocomplete="nickname" value="${esc(user.displayName)}"></label><label>Initials (avatar)<input id="edit-profile-initials" maxlength="${LOCAL_PROFILE_INITIALS_MAX}" value="${esc(user.initials)}"></label><label>Hometown <small style="color:var(--muted)">(optional, shown on your player card)</small><input id="edit-profile-hometown" maxlength="${LOCAL_PROFILE_HOMETOWN_MAX}" autocomplete="address-level2" placeholder="e.g. Atlanta, GA" value="${esc(user.hometown || '')}"></label><label class="full">Short bio <small style="color:var(--muted)">(optional)</small><textarea id="edit-profile-bio" maxlength="${LOCAL_PROFILE_BIO_MAX}" rows="2" placeholder="A line about your style">${esc(user.bio || '')}</textarea></label></div><p id="edit-profile-error" class="hidden" role="alert" style="color:var(--danger)"></p><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="save-profile">Save Profile</button></div>`);
+  openModal(`<span class="eyebrow accent">PROFILE</span><h3>Edit Profile</h3><p style="color:var(--muted)" id="edit-profile-scope">${esc(scopeNote)}</p><div class="edit-profile-photo"><div class="avatar huge${user.avatar ? ' has-photo' : ''}" id="edit-profile-photo-preview">${avatarInnerHtml(user.initials, user.avatar)}</div><div class="edit-profile-photo-actions"><label class="ghost small file-button" for="edit-profile-photo">Choose photo<input type="file" id="edit-profile-photo" accept="${AVATAR_ACCEPT}" hidden></label><button class="ghost small" type="button" id="edit-profile-photo-remove"${user.avatar ? '' : ' disabled'}>Remove photo</button><small>${esc(AVATAR_HINT)}</small><small id="edit-profile-photo-status" class="edit-profile-photo-status" aria-live="polite"></small></div></div><div class="form-grid"><label>Display name<input id="edit-profile-name" maxlength="${LOCAL_PROFILE_NAME_MAX}" autocomplete="nickname" value="${esc(user.displayName)}"></label><label>Initials (avatar)<input id="edit-profile-initials" maxlength="${LOCAL_PROFILE_INITIALS_MAX}" value="${esc(user.initials)}"></label><label>Hometown <small style="color:var(--muted)">(optional, shown on your player card)</small><input id="edit-profile-hometown" maxlength="${LOCAL_PROFILE_HOMETOWN_MAX}" autocomplete="address-level2" placeholder="e.g. Atlanta, GA" value="${esc(user.hometown || '')}"></label><label class="full">Short bio <small style="color:var(--muted)">(optional)</small><textarea id="edit-profile-bio" maxlength="${LOCAL_PROFILE_BIO_MAX}" rows="2" placeholder="A line about your style">${esc(user.bio || '')}</textarea></label></div><p id="edit-profile-error" class="hidden" role="alert" style="color:var(--danger)"></p><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="save-profile">Save Profile</button></div>`);
   const nameInput = document.getElementById('edit-profile-name');
   const initialsInput = document.getElementById('edit-profile-initials');
   let initialsTouched = false;
   if(initialsInput) initialsInput.addEventListener('input', () => { initialsTouched = true; initialsInput.value = initialsInput.value.toUpperCase(); });
   if(nameInput && initialsInput) nameInput.addEventListener('input', () => { if(!initialsTouched) initialsInput.value = initialsForName(nameInput.value); });
+  // undefined = photo unchanged, null = remove, { dataUrl, blob } = new photo.
+  let pendingAvatar;
+  const photoInput = document.getElementById('edit-profile-photo');
+  const photoPreview = document.getElementById('edit-profile-photo-preview');
+  const photoRemove = document.getElementById('edit-profile-photo-remove');
+  const photoStatus = document.getElementById('edit-profile-photo-status');
+  const showPreview = url => { if(photoPreview){ photoPreview.classList.toggle('has-photo', Boolean(url)); photoPreview.innerHTML = avatarInnerHtml(initialsInput ? initialsInput.value || user.initials : user.initials, url); } };
+  if(photoInput) photoInput.addEventListener('change', async () => {
+    const file = photoInput.files && photoInput.files[0];
+    if(!file) return;
+    if(photoStatus) photoStatus.textContent = 'Preparing photo…';
+    const processed = await processAvatarFile(file);
+    if(processed.error){ if(photoStatus) photoStatus.textContent = processed.error; photoInput.value = ''; return; }
+    pendingAvatar = processed;
+    showPreview(processed.dataUrl);
+    if(photoRemove) photoRemove.disabled = false;
+    if(photoStatus) photoStatus.textContent = 'Cropped to a square. Save Profile to keep it.';
+  });
+  if(photoRemove) photoRemove.onclick = () => { pendingAvatar = null; showPreview(''); photoRemove.disabled = true; if(photoInput) photoInput.value = ''; if(photoStatus) photoStatus.textContent = 'Photo will be removed when you save.'; };
+  editProfileModalState.getPendingAvatar = () => pendingAvatar;
+  editProfileModalState.setPendingAvatar = value => { pendingAvatar = value; showPreview(value && value.dataUrl || ''); };
   const save = document.getElementById('save-profile');
   if(save) save.onclick = () => {
     const hometownInput = document.getElementById('edit-profile-hometown');
     const bioInput = document.getElementById('edit-profile-bio');
-    const result = saveLocalProfile({ displayName:nameInput ? nameInput.value : '', initials:initialsInput ? initialsInput.value : '', hometown:hometownInput ? hometownInput.value : '', bio:bioInput ? bioInput.value : '' });
+    const avatarValue = pendingAvatar === undefined ? undefined : pendingAvatar === null ? '' : pendingAvatar.dataUrl;
+    const result = saveLocalProfile({ displayName:nameInput ? nameInput.value : '', initials:initialsInput ? initialsInput.value : '', hometown:hometownInput ? hometownInput.value : '', bio:bioInput ? bioInput.value : '', avatar:avatarValue });
     const errorNode = document.getElementById('edit-profile-error');
     if(result.error){
       if(errorNode){ errorNode.textContent = result.error; errorNode.classList.remove('hidden'); }
@@ -509,8 +541,111 @@ function openEditProfileModal(){
     renderCurrentUserUI();
     renderPosts();
     renderProfile();
+    if(pendingAvatar !== undefined) result.avatarSync = syncAvatarToServer(pendingAvatar);
     return result;
   };
+}
+
+// ---------- Profile photos ----------
+const AVATAR_ACCEPT = 'image/jpeg,image/png,image/webp,image/gif';
+const AVATAR_INPUT_MAX_BYTES = 8 * 1024 * 1024;
+const AVATAR_SIZE_PX = 256;
+const AVATAR_MAX_DATA_URL = 400000;
+const AVATAR_HINT = 'JPG, PNG, WebP or GIF up to 8 MB. It is cropped to a square.';
+const editProfileModalState = {};
+
+function isSafeAvatarUrl(value){
+  const text = String(value || '');
+  if(!text) return false;
+  if(text.startsWith('data:')) return text.length <= 400000 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(text);
+  return text.length <= 1000 && /^https:\/\/[^\s"'<>()]+$/i.test(text);
+}
+function avatarInnerHtml(initials, url){
+  return isSafeAvatarUrl(url) ? `<img src="${esc(url)}" alt="" loading="lazy" decoding="async">` : esc(initials || 'DJ');
+}
+function djAvatarHtml(name, url, extraClass = ''){
+  const has = isSafeAvatarUrl(url);
+  return `<div class="avatar ${extraClass}${has ? ' has-photo' : ''}">${avatarInnerHtml(initialsForName(name), url)}</div>`;
+}
+function applyAvatarNode(node, initials, url){
+  if(!node) return;
+  const has = isSafeAvatarUrl(url);
+  node.classList.toggle('has-photo', has);
+  if(has){ node.innerHTML = avatarInnerHtml(initials, url); node.setAttribute('aria-label', 'Profile photo'); }
+  else { node.textContent = initials || 'DJ'; node.removeAttribute('aria-label'); }
+}
+function validateAvatarFile(file){
+  if(!file) return { error:'Choose a photo.' };
+  if(!AVATAR_ACCEPT.split(',').includes(String(file.type || '').toLowerCase())) return { error:'Choose a JPG, PNG, WebP or GIF image.' };
+  if(Number(file.size || 0) > AVATAR_INPUT_MAX_BYTES) return { error:'That photo is over 8 MB. Choose a smaller one.' };
+  return { ok:true };
+}
+// Center-crops to a square and resizes to 256x256 JPEG in the browser.
+async function cropAvatarToSquare(file, size = AVATAR_SIZE_PX){
+  const url = URL.createObjectURL(file);
+  try{
+    const img = await new Promise((resolve, reject) => { const el = new Image(); el.onload = () => resolve(el); el.onerror = () => reject(new Error('That image could not be read.')); el.src = url; });
+    const side = Math.min(img.naturalWidth || img.width, img.naturalHeight || img.height);
+    if(!side) throw new Error('That image could not be read.');
+    const canvas = document.createElement('canvas'); canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext && canvas.getContext('2d');
+    if(!ctx) throw new Error('Photo cropping is not supported in this browser.');
+    const sx = ((img.naturalWidth || img.width) - side) / 2; const sy = ((img.naturalHeight || img.height) - side) / 2;
+    ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    const blob = await new Promise(resolve => canvas.toBlob ? canvas.toBlob(resolve, 'image/jpeg', 0.85) : resolve(null));
+    return { dataUrl, blob };
+  } finally { URL.revokeObjectURL(url); }
+}
+let avatarCropper = cropAvatarToSquare;
+async function processAvatarFile(file){
+  const valid = validateAvatarFile(file);
+  if(valid.error) return valid;
+  try{
+    const out = await avatarCropper(file);
+    if(!out || !isSafeAvatarUrl(out.dataUrl)) return { error:'That photo could not be prepared. Try a different image.' };
+    return out;
+  }catch(err){ return { error:err && err.message || 'That photo could not be prepared.' }; }
+}
+function dataUrlToBlob(dataUrl){
+  const [head, body] = String(dataUrl).split(',');
+  const mime = (head.match(/data:([^;]+)/) || [])[1] || 'image/jpeg';
+  const bin = atob(body || ''); const bytes = new Uint8Array(bin.length);
+  for(let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type:mime });
+}
+// Signed in: upload through the server (public profile-avatars bucket) and keep the returned URL.
+// Signed out or server unavailable: the photo stays in this browser only, and we say so.
+async function syncAvatarToServer(pending){
+  const user = currentUser();
+  const api = window.DJBattleApi;
+  const storageReady = window.supabase && window.supabase.storage && typeof window.supabase.storage.from === 'function';
+  if(!user.signedIn || !api || typeof api.apiRequest !== 'function') return { localOnly:true };
+  if(pending === null){
+    const removed = await api.apiRequest('/api/profile/avatar', { method:'DELETE' });
+    if(removed.error){ appAlert(`Photo removed in this browser, but not from your account: ${removed.error}`, 'Photo'); return { error:removed.error }; }
+    return { removed:true };
+  }
+  if(!storageReady) { appAlert('Photo saved in this browser only. Your account photo needs the server and storage to be set up.', 'Photo'); return { localOnly:true }; }
+  const blob = pending.blob || dataUrlToBlob(pending.dataUrl);
+  const auth = await api.apiRequest('/api/profile/avatarUploadAuthorization', { method:'POST', body:{ mimeType:blob.type || 'image/jpeg', size:blob.size } });
+  if(auth.error){ appAlert(`Photo saved in this browser only: ${auth.data && auth.data.error || auth.error}`, 'Photo'); return { error:auth.error }; }
+  const uploaded = await window.supabase.storage.from(auth.data.bucket).uploadToSignedUrl(auth.data.uploadPath, auth.data.uploadToken, blob, { contentType:blob.type || 'image/jpeg' });
+  if(uploaded && uploaded.error){ appAlert(`Photo saved in this browser only: ${uploaded.error.message || 'upload failed'}`, 'Photo'); return { error:uploaded.error.message || 'upload failed' }; }
+  const done = await api.apiRequest('/api/profile/completeAvatarUpload', { method:'POST', body:{ uploadPath:auth.data.uploadPath } });
+  if(done.error || !done.data || !done.data.avatarUrl){ appAlert(`Photo saved in this browser only: ${done.data && done.data.error || done.error || 'save failed'}`, 'Photo'); return { error:done.error || 'save failed' }; }
+  const local = readLocalProfile(user.id);
+  localStorage.setItem(`${LOCAL_PROFILE_STORAGE_PREFIX}${user.id}`, JSON.stringify({ ...local, avatar:done.data.avatarUrl }));
+  if(currentAuthState.user) currentAuthState.user = { ...currentAuthState.user, user_metadata:{ ...(currentAuthState.user.user_metadata || {}), avatar_url:done.data.avatarUrl } };
+  renderCurrentUserUI();
+  showAppToast('Profile photo saved', 'Other DJs can now see it on your account.');
+  return { avatarUrl:done.data.avatarUrl };
+}
+// Avatar for a DJ shown in a list: your own photo for you, a server-provided https photo for others, else initials.
+function avatarUrlForDj({ name, publicProfileId, avatarUrl, isSelf } = {}){
+  const me = currentUser();
+  if(isSelf || (name && isCurrentUserName(name)) || (publicProfileId && publicProfileId === currentPublicProfileShareId())) return me.avatar || '';
+  return isSafeAvatarUrl(avatarUrl) && /^https:/i.test(String(avatarUrl)) ? String(avatarUrl) : '';
 }
 
 function currentProfileUserId(){ return currentUser().id; }
@@ -531,12 +666,12 @@ function renderCurrentUserUI(){
   const user = currentUser();
   const setText = (selector, value) => document.querySelectorAll(selector).forEach(node => { node.textContent = value; });
   setText('#profile-name', user.displayName);
-  setText('.profile-chip .avatar', user.initials);
+  document.querySelectorAll('.profile-chip .avatar').forEach(node => applyAvatarNode(node, user.initials, user.avatar));
   setText('#profile-hero-name', user.displayName);
-  setText('#profile-hero-avatar', user.initials);
+  applyAvatarNode(document.getElementById('profile-hero-avatar'), user.initials, user.avatar);
   setText('#profile-hero-tagline', user.signedIn ? `Signed in${user.email ? ` as ${user.email}` : ''}` : `${user.customized ? 'Local DJ' : 'Guest • Local DJ'} profile saved in this browser`);
   setText('#br-dj1-name', user.displayName);
-  setText('#br-dj1 .avatar', user.initials);
+  document.querySelectorAll('#br-dj1 .avatar').forEach(node => applyAvatarNode(node, user.initials, user.avatar));
   setText('#mini-dj1', user.displayName);
   const belt = currentBeltName();
   setText('#br-dj1-meta', playerCardMeta(user, belt));
@@ -1225,7 +1360,42 @@ function installAuxiliaryViews(){
 }
 
 installProfessionalShell();
-function switchView(view){
+// ---- Address bar routing: every page lives at #<view> so Back/Forward, refresh and shared links work. ----
+const ROUTABLE_VIEWS = ['dashboard','battles','studio','library','community','verified-results','rankings','notifications','activity','settings','operations','profile'];
+function viewFromHash(hash = window.location && window.location.hash){
+  const raw = String(hash || '').replace(/^#\/?/, '');
+  if(!raw) return '';
+  const name = raw.split(/[?&]/)[0];
+  // "#dj=..." and "#result=..." are shared links, not page names.
+  if(name.includes('=')) return '';
+  return ROUTABLE_VIEWS.includes(name) ? name : '';
+}
+function hashForView(view){
+  if(view === 'rankings' && typeof publicRankingDeepLink === 'function') return publicRankingDeepLink();
+  return `#${view}`;
+}
+function recordViewInUrl(view){
+  if(!ROUTABLE_VIEWS.includes(view) || !window.history || !window.location) return false;
+  if(viewFromHash() === view) return false; // already there (keeps extra details like #profile?tab=...)
+  try{ window.history.pushState({ djbView:view }, '', `${window.location.pathname}${window.location.search || ''}${hashForView(view)}`); }catch(e){ return false; }
+  return true;
+}
+function activeViewId(){ return (document.querySelector('.view.active') || {}).id || ''; }
+function handleRouteChange(){
+  const target = viewFromHash() || (String(window.location.hash || '') === '' ? 'battles' : '');
+  if(!target || target === activeViewId()) return false;
+  if(target === 'rankings') applyRankingsDeepLink();
+  const switched = switchView(target, { fromHistory:true });
+  // A recording guard kept us in the Studio: put the Studio back in the address bar.
+  if(switched === false && activeViewId() === 'studio'){
+    try{ window.history.pushState({ djbView:'studio' }, '', `${window.location.pathname}${window.location.search || ''}#studio`); }catch(e){}
+  }
+  return switched;
+}
+window.addEventListener('popstate', handleRouteChange);
+window.addEventListener('hashchange', handleRouteChange);
+
+function switchView(view, options = {}){
   if(view === 'tour'){
     // The old Virtual Tour page is gone; any link to it now opens the guided pop-up tour.
     activeTourStep = 0;
@@ -1233,12 +1403,13 @@ function switchView(view){
   }
   if(isStudioRecordingActive() && view !== 'studio'){
     if(!switchView.__force){
-      appConfirmDanger('Leave Battle Studio?', 'A recording is in progress. Leaving now risks losing the active take.', 'Leave Studio').then(ok => { if(ok){ switchView.__force = true; try { switchView(view); } finally { switchView.__force = false; } } });
+      appConfirmDanger('Leave Battle Studio?', 'A recording is in progress. Leaving now risks losing the active take.', 'Leave Studio').then(ok => { if(ok){ switchView.__force = true; try { switchView(view, options); } finally { switchView.__force = false; } } });
       return false;
     }
   }
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===view));
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
+  if(!options.fromHistory) recordViewInUrl(view);
   if(typeof syncNavMoreState === 'function') syncNavMoreState();
   document.getElementById('page-title').textContent=pageTitles[view]||'DJ Battle';
   if(state.shareTitle) setShareMeta('', '');
@@ -1910,7 +2081,7 @@ function sampleRankingsHtml(){
   const me = currentUser().displayName;
   const rows = rankings.filter(row => !isCurrentUserName(row[1]));
   const body = rows.map(row => `<tr><td>#${esc(row[0])}</td><td><strong>${esc(row[1])}</strong></td><td>${esc(row[2])}</td><td>${esc(row[3])}</td><td>${esc(row[6])}</td></tr>`).join('')
-    + `<tr class="sample-you-row"><td><span class="unranked-label">Unranked</span></td><td><strong>${esc(me)} (you)</strong></td><td>—</td><td>—</td><td>—</td></tr>`;
+    + `<tr class="sample-you-row"><td><span class="unranked-label">Unranked</span></td><td class="sample-you-cell">${djAvatarHtml(me, currentUser().avatar, 'ranking-avatar')}<strong>${esc(me)} (you)</strong></td><td>—</td><td>—</td><td>—</td></tr>`;
   return `<div class="sample-rankings-tag" id="rankings-sample-tag"><i></i>${esc(SAMPLE_RANKINGS_TAG)}</div><div class="table-wrap"><table class="sample-rankings-table"><thead><tr><th>Rank</th><th>DJ</th><th>Genre</th><th>Record</th><th>Rating</th></tr></thead><tbody>${body}</tbody></table></div><p class="sample-rankings-note">The server can't be reached, so these are built-in examples. You show as Unranked until real results load.</p>`;
 }
 
@@ -3649,7 +3820,7 @@ function communityPostHtml(post){
   const canChallenge = challengeProfile && publicProfileCanChallenge(challengeProfile);
   return `<article class="forum-post community-post ${post.localOnly ? 'local' : ''}" data-community-post="${esc(post.id)}">
     <div class="post-head">
-      <div class="avatar">${esc((post.author && (post.author.displayName || post.author.name) || 'DJ').split(/\s+/).map(part=>part[0]).join('').slice(0,2).toUpperCase())}</div>
+      ${(() => { const authorName = post.author && (post.author.displayName || post.author.name) || 'DJ'; const url = avatarUrlForDj({ name:authorName, publicProfileId:post.author && post.author.publicProfileId, avatarUrl:post.author && (post.author.avatarUrl || post.author.avatar_url), isSelf:owner }); return `<div class="avatar${isSafeAvatarUrl(url) ? ' has-photo' : ''}">${avatarInnerHtml(authorName.split(/\s+/).map(part=>part[0]).join('').slice(0,2).toUpperCase(), url)}</div>`; })()}
       <div class="post-author-copy"><strong>${esc(post.author && (post.author.displayName || post.author.name) || 'DJ')}</strong><span>${esc(communityCategoryLabel(post.categoryId))} / ${relativeTimeHtml(post.createdAt)}${edited ? ' <em class="edited-tag" title="Edited">edited</em>' : ''}${esc(locked)}</span></div>
       ${postAuthorFollowButtonHtml(post)}
       ${canChallenge ? `<button class="ghost small request-battle" type="button" data-community-challenge="${esc(authorProfileId)}" data-community-post="${esc(post.id)}">Request Battle</button>` : ''}
@@ -4512,6 +4683,7 @@ function updateAuthUI(user){
   state.operatorUser = isOperatorUser(user);
   renderJudgingOperationsAccess();
   renderCurrentUserUI();
+  try{ window.dispatchEvent(new CustomEvent('djb:auth-changed', { detail:{ signedIn:Boolean(user) } })); }catch(e){}
   if(user){
     if(authBtn){ authBtn.textContent = 'Sign Out'; authBtn.onclick = () => signOutWithDataPrompt(); }
     handleMusicLibraryAuthChange(user).catch(()=>setMusicLibrarySyncStatus('failed', { error:'Library sync failed after sign-in.' }));
@@ -8148,28 +8320,145 @@ function openBattleHistoryResult(identifier){
   return true;
 }
 
+const MIX_RIGHTS_ATTESTATION_TEXT = 'I own or have permission for this music, and I agree to show this battle result publicly.';
+const MIX_RIGHTS_ATTESTATION_VERSION = 'mix-rights-v1';
+
+// In-app "I own or have permission for this music" step. Resolves { replayConsent } when confirmed, or null when cancelled.
+function openMixRightsDialog(result, { offline = false } = {}){
+  return new Promise(resolve => {
+    document.querySelectorAll('.mix-rights-overlay').forEach(el => el.remove());
+    const overlay = document.createElement('div');
+    overlay.className = 'app-confirm-overlay mix-rights-overlay';
+    overlay.innerHTML = `<div class="app-confirm mix-rights-dialog" role="dialog" aria-modal="true" aria-labelledby="mix-rights-title"><span class="eyebrow accent">MAKE PUBLIC</span><h3 id="mix-rights-title">Confirm your music rights</h3><p>Before <b>${esc(historyTitle(result))}</b> can be public, confirm you have the rights to the music in this mix.</p>${offline ? '<p class="mix-rights-note" data-mix-rights-offline>You are offline or not signed in, so this is saved in this browser only. Nothing is published to other DJs.</p>' : ''}<label class="mix-rights-check"><input type="checkbox" data-mix-rights-attest> <span>I own or have permission for this music</span></label><label class="mix-rights-check mix-rights-check--optional"><input type="checkbox" data-mix-rights-replay> <span>Also allow on-site replay of my mix <small>(optional)</small></span></label><p class="mix-rights-error hidden" role="alert" data-mix-rights-error></p><div class="modal-actions"><button class="ghost" type="button" data-mix-rights-cancel>Cancel</button><button class="primary" type="button" data-mix-rights-confirm disabled>Confirm and make public</button></div></div>`;
+    const attest = overlay.querySelector('[data-mix-rights-attest]');
+    const confirmBtn = overlay.querySelector('[data-mix-rights-confirm]');
+    const done = value => { overlay.remove(); resolve(value); };
+    attest.addEventListener('change', () => { confirmBtn.disabled = !attest.checked; });
+    confirmBtn.onclick = () => {
+      if(!attest.checked){
+        const err = overlay.querySelector('[data-mix-rights-error]');
+        err.textContent = 'Tick the box to confirm you own or have permission for this music.';
+        err.classList.remove('hidden');
+        return;
+      }
+      done({ replayConsent: Boolean(overlay.querySelector('[data-mix-rights-replay]').checked) });
+    };
+    overlay.querySelector('[data-mix-rights-cancel]').onclick = () => done(null);
+    overlay.addEventListener('keydown', e => { if(e.key === 'Escape') done(null); });
+    document.body.appendChild(overlay);
+    if(attest.focus) attest.focus();
+  });
+}
+
+function mixRightsReasonText(certification){
+  const reasons = certification && (certification.blockedReasons && certification.blockedReasons.length ? certification.blockedReasons : certification.warnings) || [];
+  return reasons.slice(0, 3).join(' ');
+}
+
+function battleResultApiAvailable(result){
+  return Boolean(window.DJBattleApi && typeof window.DJBattleApi.apiRequest === 'function' && result && result.submissionId);
+}
+
+async function patchBattleResultVisibility(result, visibility){
+  return window.DJBattleApi.apiRequest(`/api/battleResults/${encodeURIComponent(result.submissionId)}/visibility`, {
+    method:'PATCH',
+    body:{ visibility }
+  });
+}
+
+function finishServerVisibility(response){
+  applyServerBattleResultProfile(response.data.result);
+  renderBattleHistory();
+  return response.data.result;
+}
+
+// Server rejected "public" because the mix-rights step is missing: ask, certify, then try again.
+async function certifyMixRightsAndRetry(result, firstResponse){
+  const data = firstResponse && firstResponse.data || {};
+  if(data.reviewRequired){
+    const message = 'Your rights confirmation for this mix is waiting on a moderator review. It stays private until the review is done.';
+    appAlert(message, 'Waiting on review');
+    return { error:message, reviewRequired:true, cancelled:true };
+  }
+  const answer = await openMixRightsDialog(result);
+  if(!answer) return { cancelled:true, error:'Make Public was cancelled. The result is still private.' };
+  const details = historyDetails(result) || {};
+  const prep = details.battlePrep || result.battlePrep || {};
+  const snapshotId = result.battlePrepSnapshotId || prep.snapshotId || prep.id || null;
+  const body = {
+    rightsAttested:true,
+    publicResultConsent:true,
+    replayConsent:answer.replayConsent,
+    attestationText:MIX_RIGHTS_ATTESTATION_TEXT,
+    attestationVersion:MIX_RIGHTS_ATTESTATION_VERSION
+  };
+  if(snapshotId) body.battlePrepSnapshotId = String(snapshotId);
+  const cert = await window.DJBattleApi.apiRequest(`/api/mixRights/certifications/${encodeURIComponent(result.submissionId)}`, { method:'POST', body });
+  if(!cert || cert.error){
+    const serverText = cert && cert.data && cert.data.error;
+    const message = cert && cert.status === 0
+      ? 'Could not reach the server, so your rights confirmation was not saved. The result is still private.'
+      : `Your rights confirmation was not saved: ${serverText || (cert && cert.error) || 'unknown error'}. The result is still private.`;
+    showErrorToast(message, () => toggleBattleResultVisibility(historyResultId(result)));
+    return { error:message, status:cert && cert.status };
+  }
+  const certification = cert.data && cert.data.certification || {};
+  result.mixRightsCertification = { status:certification.status || null, updatedAt:certification.updatedAt || null };
+  if(certification.status === 'blocked'){
+    const message = `This mix can't be public because the music rights check blocked it. ${mixRightsReasonText(certification)}`.trim();
+    appAlert(message, 'Rights check blocked');
+    return { error:message, blocked:true, cancelled:true };
+  }
+  if(certification.status === 'review_required'){
+    const message = `Thanks, your confirmation is saved. A moderator needs to review this mix before it can be public, so it stays private for now. ${mixRightsReasonText(certification)}`.trim();
+    appAlert(message, 'Sent for review');
+    return { error:message, reviewRequired:true, cancelled:true };
+  }
+  const retry = await patchBattleResultVisibility(result, 'public');
+  if(retry && retry.data && retry.data.result){
+    showAppToast('Result is public', 'Your music rights are confirmed and the verified link is live.');
+    return finishServerVisibility(retry);
+  }
+  const message = `Rights confirmed, but making the result public still failed: ${retry && retry.data && retry.data.error || retry && retry.error || 'unknown error'}.`;
+  showErrorToast(message, () => toggleBattleResultVisibility(historyResultId(result)));
+  return { error:message, status:retry && retry.status };
+}
+
 async function toggleBattleResultVisibility(identifier){
   const result = findBattleHistoryResult(identifier);
   if(!result) return { error:'not_found' };
   if(result.userId && String(result.userId) !== currentProfileUserId()) return { error:'unauthorized' };
   const nextVisibility = result.visibility === 'public' ? 'private' : 'public';
-  if(window.DJBattleApi && typeof window.DJBattleApi.apiRequest === 'function' && result.submissionId){
-    const response = await window.DJBattleApi.apiRequest(`/api/battleResults/${encodeURIComponent(result.submissionId)}/visibility`, {
-      method:'PATCH',
-      body:{ visibility: nextVisibility }
-    });
-    if(response && response.data && response.data.result){
-      applyServerBattleResultProfile(response.data.result);
-      renderBattleHistory();
-      return response.data.result;
+  if(battleResultApiAvailable(result)){
+    const response = await patchBattleResultVisibility(result, nextVisibility);
+    if(response && response.data && response.data.result) return finishServerVisibility(response);
+    if(response && response.status === 409 && nextVisibility === 'public') return certifyMixRightsAndRetry(result, response);
+    if(response && response.status === 403 && response.data && response.data.certification){
+      const message = `This mix can't be public because the music rights check blocked it. ${mixRightsReasonText(response.data.certification)}`.trim();
+      appAlert(message, 'Rights check blocked');
+      return { error:message, blocked:true, cancelled:true };
     }
-    if(response && response.error) return response;
+    // Signed out / Supabase not configured (demo mode): fall back to this browser only, below.
+    const offline = response && (response.status === 0 || response.status === 503 || response.status === 401);
+    if(response && response.error && !offline){
+      const message = response.data && response.data.error || response.error;
+      showErrorToast(`Could not change who can see this result: ${message}`, () => toggleBattleResultVisibility(identifier));
+      return response;
+    }
+  }
+  if(nextVisibility === 'public' && !result.rightsAttestedLocally){
+    const answer = await openMixRightsDialog(result, { offline:true });
+    if(!answer) return { cancelled:true, error:'Make Public was cancelled. The result is still private.' };
+    result.rightsAttestedLocally = true;
+    result.replayConsentLocally = answer.replayConsent;
   }
   result.visibility = nextVisibility;
   result.verifiedResultId = result.verifiedResultId || localVerifiedResultId(historyResultId(result));
   result.verifiedResultUrl = nextVisibility === 'public' ? verifiedResultUrl(result.verifiedResultId) : null;
+  result.publicLocalOnly = nextVisibility === 'public';
   persistBattleProgress();
   renderBattleHistory();
+  if(nextVisibility === 'public') showAppToast('Public in this browser only', 'You are offline or not signed in, so other DJs cannot see this yet. Sign in to publish it for real.');
   return result;
 }
 
@@ -8885,6 +9174,7 @@ function renderRankingRows(){
       <div class="ranking-rank-cell"><strong>#${esc(row.rank || '-')}</strong><span>Prev #${esc(row.previousRank || '-')}</span></div>
       <div class="ranking-main">
         <div class="ranking-title">
+          ${djAvatarHtml(row.djName || 'Ranked DJ', avatarUrlForDj({ name:row.djName, publicProfileId:row.publicProfileId, avatarUrl:row.avatarUrl }), 'ranking-avatar')}
           <strong>${esc(row.djName || 'Ranked DJ')}</strong>
           <span class="ranking-country">${esc(row.countryCode || countryCode(row.country))}</span>
           <span class="ranking-belt">${esc(row.belt || 'Unranked')}</span>
@@ -12528,6 +12818,9 @@ setTimeout(()=>{
   const profileMatch = hash.match(/(?:^#|[?&])dj=([^&]+)/);
   if(resultMatch) loadPublicVerifiedResult(decodeURIComponent(resultMatch[1]));
   if(profileMatch) loadPublicDjProfile(decodeURIComponent(profileMatch[1]));
+  // Refresh or a shared page link (#studio, #profile, #library...) reopens that page.
+  const routed = viewFromHash(hash);
+  if(!resultMatch && !profileMatch && routed && routed !== activeViewId()) switchView(routed, { fromHistory:true });
 },0);
 
 
@@ -12548,7 +12841,394 @@ document.addEventListener('change', event => {
   }).catch(err => console.warn('Re-attach audio failed', err));
 });
 
+// ---------- Belt promotion tests ----------
+// Real tests only: the server creates the test, grades the raw tap timings and awards the next belt.
+// Offline or signed out, the panel says so and never shows a pass.
+const BELT_LADDER_FALLBACK = [
+  { code:'white', name:'White', order:1, minScore:0 }, { code:'yellow', name:'Yellow', order:2, minScore:60 },
+  { code:'orange', name:'Orange', order:3, minScore:70 }, { code:'green', name:'Green', order:4, minScore:76 },
+  { code:'blue', name:'Blue', order:5, minScore:82 }, { code:'purple', name:'Purple', order:6, minScore:86 },
+  { code:'brown', name:'Brown', order:7, minScore:90 }, { code:'black', name:'Black', order:8, minScore:94 }
+];
+const BELT_TEST_BPM = 120;
+const BELT_TAPS_PER_ROUND = 4;
+const BELT_COUNT_IN_BEATS = 4;
+
+function beltLadder(){
+  const belts = state.beltPromotion.belts && state.beltPromotion.belts.length ? state.beltPromotion.belts : BELT_LADDER_FALLBACK;
+  return belts.slice().sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+}
+function beltByName(name){
+  const key = String(name || '').replace(/\s*belt$/i, '').trim().toLowerCase();
+  return beltLadder().find(b => String(b.name).toLowerCase() === key || String(b.code).toLowerCase() === key) || null;
+}
+function nextBeltFor(name){
+  const ladder = beltLadder();
+  const index = ladder.findIndex(b => b === beltByName(name));
+  return index >= 0 ? ladder[index + 1] || null : ladder[1] || null;
+}
+function beltPromotionAvailable(){
+  return Boolean(currentUser().signedIn && window.DJBattleApi && typeof window.DJBattleApi.apiRequest === 'function');
+}
+
+// Match each expected beat to the nearest unused tap within half a beat; returns ms offsets (null = missed).
+function beltTapOffsets(beatTimes, tapTimes, intervalMs){
+  const used = new Set();
+  return beatTimes.map(beat => {
+    let best = -1; let bestDiff = Infinity;
+    tapTimes.forEach((tap, index) => {
+      if(used.has(index)) return;
+      const diff = Math.abs(tap - beat);
+      if(diff < bestDiff && diff <= intervalMs / 2){ best = index; bestDiff = diff; }
+    });
+    if(best < 0) return null;
+    used.add(best);
+    return Math.round(tapTimes[best] - beat);
+  });
+}
+// Same grading rule as the server, used only to preview; the server's score is the one that counts.
+function beltTapPreviewScore(offsets, windows){
+  if(!offsets.length) return 0;
+  const scores = offsets.map((offset, i) => {
+    const w = windows[Math.floor(i / BELT_TAPS_PER_ROUND)] || windows[windows.length - 1] || 150;
+    if(offset == null) return 0;
+    const off = Math.abs(offset);
+    return off <= w ? 100 : Math.max(0, Math.round(100 * (1 - (off - w) / (2 * w))));
+  });
+  return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+}
+
+function beltTestWindows(test){
+  const events = test && test.criteria && Array.isArray(test.criteria.events) ? test.criteria.events : [];
+  if(events.length) return events.map(e => Math.max(30, Math.min(400, Number(e.targetWindowMs) || 150)));
+  const ladder = beltLadder();
+  const belt = beltByName(test && test.code) || ladder[1];
+  const maxOrder = Math.max(1, ...ladder.map(b => Number(b.order || 1)));
+  const windowMs = Math.max(40, Math.round(300 - ((Number(belt && belt.order) || 1) / maxOrder) * 240));
+  return [windowMs, windowMs, windowMs, windowMs];
+}
+
+// Drives one tap test. The UI feeds it real clock times; tests feed it fixed numbers.
+function createBeltTapTest(test, { bpm = BELT_TEST_BPM } = {}){
+  const intervalMs = 60000 / bpm;
+  const windows = beltTestWindows(test);
+  const expected = windows.length * BELT_TAPS_PER_ROUND;
+  let startAt = null; const taps = [];
+  const beatTimes = () => Array.from({ length:expected }, (_, k) => startAt + (BELT_COUNT_IN_BEATS + k) * intervalMs);
+  return {
+    intervalMs, windows, expected,
+    begin(now){ startAt = now; taps.length = 0; },
+    tap(now){ if(startAt != null) taps.push(now); return taps.length; },
+    endsAt(){ return startAt == null ? null : startAt + (BELT_COUNT_IN_BEATS + expected) * intervalMs + intervalMs / 2; },
+    offsets(){ return startAt == null ? [] : beltTapOffsets(beatTimes(), taps, intervalMs); },
+    preview(){ return beltTapPreviewScore(this.offsets(), windows); },
+    breakdown(){ return { method:'tap_timing_v1', bpm, tapsPerRound:BELT_TAPS_PER_ROUND, taps:this.offsets() }; }
+  };
+}
+
+async function loadBeltPromotion(){
+  const bp = state.beltPromotion;
+  if(!beltPromotionAvailable()){
+    bp.status = 'offline'; bp.serverBelt = null; bp.attempts = [];
+    renderBeltPromotion();
+    syncBeltBadges();
+    return { skipped:true };
+  }
+  bp.status = 'loading'; renderBeltPromotion();
+  const api = window.DJBattleApi;
+  const [beltsRes, mineRes, attemptsRes] = await Promise.all([
+    api.apiRequest('/api/getBelts', { public:true }),
+    api.apiRequest('/api/myBelt'),
+    window.DJBattleApi.apiRequest('/api/getBeltAttempts')
+  ]);
+  if(beltsRes && beltsRes.data && Array.isArray(beltsRes.data.belts)) bp.belts = beltsRes.data.belts;
+  if(mineRes && mineRes.data && mineRes.data.belt) bp.serverBelt = mineRes.data.belt;
+  bp.attempts = attemptsRes && attemptsRes.data && Array.isArray(attemptsRes.data.attempts) ? attemptsRes.data.attempts : bp.attempts || [];
+  const failed = [mineRes, attemptsRes].find(r => !r || r.error);
+  bp.status = failed ? 'error' : 'ready';
+  bp.message = failed ? (failed && failed.error || 'Belt tests are unavailable right now.') : '';
+  renderBeltPromotion();
+  renderCurrentUserUI();
+  syncBeltBadges();
+  return { ok:!failed };
+}
+
+const BELT_BADGE_COLORS = { White:'#eee', Yellow:'#ffd54f', Orange:'#ffb74d', Green:'#81c784', Blue:'#64b5f6', Purple:'#9575cd', Brown:'#8d6e63', Black:'#212121' };
+function syncBeltBadges(){
+  const belt = currentBeltName();
+  document.querySelectorAll('#profile-belt, #profile-belt-hero').forEach(el => {
+    el.textContent = belt;
+    el.style.background = BELT_BADGE_COLORS[belt] || '#ccc';
+    el.style.color = belt === 'Black' ? '#fff' : '#111';
+  });
+  return belt;
+}
+
+function beltAttemptRowHtml(attempt){
+  const breakdown = attempt.breakdown || {};
+  const belt = beltByName(breakdown.beltCode) || null;
+  const passing = Number(attempt.passing_score != null ? attempt.passing_score : belt ? belt.minScore : 0);
+  const score = Math.round(Number(attempt.score) || 0);
+  const passed = score >= passing;
+  const when = attempt.created_at ? relativeTimeLabel(attempt.created_at) : '';
+  return `<div class="belt-attempt-row ${passed ? 'is-pass' : 'is-fail'}" data-belt-attempt="${esc(attempt.id || '')}"><div><strong>${esc(belt ? `${belt.name} Belt test` : 'Belt test')}</strong><small>${esc(when)}${breakdown.serverScored ? ' • graded by server' : ''}</small></div><div class="belt-attempt-score"><b>${esc(score)}</b><small>/ ${esc(passing)} needed</small><span class="belt-attempt-chip">${passed ? 'PASS' : 'FAIL'}</span></div></div>`;
+}
+
+function renderBeltPromotion(){
+  const statusNode = document.getElementById('belt-promotion-status');
+  const list = document.getElementById('promotion-history-list');
+  if(!statusNode || !list) return;
+  const bp = state.beltPromotion;
+  const current = currentBeltName();
+  const next = bp.serverBelt && bp.serverBelt.next ? beltByName(bp.serverBelt.next.code) || bp.serverBelt.next : nextBeltFor(current);
+  const available = beltPromotionAvailable();
+  const button = next
+    ? `<button class="primary" type="button" data-start-belt-test ${available && bp.status !== 'loading' ? '' : 'disabled'}>Take your ${esc(next.name)} Belt test</button>`
+    : '<span class="belt-top">You hold the top belt.</span>';
+  const note = !available
+    ? '<p class="belt-promotion-note" data-belt-offline>Sign in to take a belt test. Tests are created and graded by the server, so there is no pass without it.</p>'
+    : bp.status === 'loading' ? '<p class="belt-promotion-note">Loading your belt…</p>'
+    : bp.status === 'error' ? `<p class="belt-promotion-note belt-promotion-note--error" role="alert">${esc(bp.message || 'Belt tests are unavailable right now.')}</p>`
+    : `<p class="belt-promotion-note">Tap on the beat for ${BELT_TAPS_PER_ROUND}-beat rounds at ${BELT_TEST_BPM} BPM. Your taps are graded by the server.</p>`;
+  const result = bp.lastResult ? `<div class="belt-result ${bp.lastResult.passed ? 'is-pass' : 'is-fail'}" data-belt-result><strong>${bp.lastResult.passed ? 'PASS' : 'FAIL'}: ${esc(bp.lastResult.score)} / ${esc(bp.lastResult.passingScore)}</strong><span>${esc(bp.lastResult.message)}</span></div>` : '';
+  statusNode.innerHTML = `<div class="belt-ladder-row"><div class="belt-stat"><span>Current belt</span><strong>${esc(current)}</strong>${available && bp.serverBelt ? '<small>from your account</small>' : '<small>this browser</small>'}</div><div class="belt-stat"><span>Next belt</span><strong>${esc(next ? next.name : '—')}</strong></div><div class="belt-stat"><span>Score needed</span><strong>${esc(next ? next.minScore : '—')}</strong><small>out of 100</small></div><div class="belt-stat belt-stat--action">${button}</div></div>${note}${result}`;
+  const attempts = available ? bp.attempts || [] : [];
+  list.innerHTML = attempts.length
+    ? attempts.slice(0, 20).map(beltAttemptRowHtml).join('')
+    : `<div class="belt-promotion-empty">${available ? 'No belt test attempts yet.' : 'Attempt history appears here once you are signed in.'}</div>`;
+  statusNode.querySelectorAll('[data-start-belt-test]').forEach(btn => { btn.onclick = () => startBeltTest(); });
+}
+
+async function startBeltTest(){
+  if(!beltPromotionAvailable()){
+    appAlert('Sign in to take a belt test. Tests are graded by the server, so offline practice never counts as a pass.', 'Sign in required');
+    return { error:'signed_out' };
+  }
+  const next = state.beltPromotion.serverBelt && state.beltPromotion.serverBelt.next || nextBeltFor(currentBeltName());
+  if(!next) return { error:'top_belt' };
+  let created = await window.DJBattleApi.apiRequest('/api/generateBeltTest', { method:'POST', body:{ beltCode:next.code } });
+  if(created && created.status === 404) created = await window.DJBattleApi.apiRequest('/api/requestBeltTest', { method:'POST', body:{ beltCode:next.code } });
+  const test = created && created.data && created.data.test;
+  if(!test){
+    const message = `Could not start the ${next.name} Belt test: ${created && (created.data && created.data.error || created.error) || 'unknown error'}`;
+    showErrorToast(message, () => startBeltTest());
+    return { error:message };
+  }
+  openBeltTestModal(test, next);
+  return { test };
+}
+
+function playBeltClick(ctx, at, accent){
+  try{
+    const osc = ctx.createOscillator(); const gain = ctx.createGain();
+    osc.frequency.value = accent ? 1500 : 1000;
+    gain.gain.setValueAtTime(0.0001, at); gain.gain.exponentialRampToValueAtTime(0.4, at + 0.002); gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.06);
+    osc.connect(gain); gain.connect(ctx.destination); osc.start(at); osc.stop(at + 0.08);
+  }catch(e){}
+}
+
+function openBeltTestModal(test, belt){
+  const runner = createBeltTapTest(test);
+  state.beltPromotion.activeRunner = runner;
+  const rounds = runner.windows.length;
+  openModal(`<span class="eyebrow accent">BELT PROMOTION TEST</span><h3>${esc(belt.name)} Belt test</h3><p style="color:var(--muted)">After a ${BELT_COUNT_IN_BEATS}-beat count-in, tap <b>Space</b> or the pad on every beat: ${rounds} rounds of ${BELT_TAPS_PER_ROUND} taps at ${BELT_TEST_BPM} BPM. Each tap must land within ±${Math.min(...runner.windows)}–${Math.max(...runner.windows)} ms of the beat. You need ${esc(belt.minScore)}/100.</p><button class="belt-tap-pad" type="button" id="belt-tap-pad" disabled><span id="belt-tap-label">Press Start</span><small id="belt-tap-progress">0 / ${runner.expected} taps</small></button><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="belt-test-start">Start</button></div>`);
+  const pad = document.getElementById('belt-tap-pad');
+  const startBtn = document.getElementById('belt-test-start');
+  const label = document.getElementById('belt-tap-label');
+  const progress = document.getElementById('belt-tap-progress');
+  const now = () => (window.performance && performance.now ? performance.now() : Date.now());
+  let timers = []; let finished = false; let ctx = null;
+  const onTap = () => { const n = runner.tap(now()); if(progress) progress.textContent = `${n} / ${runner.expected} taps`; pad.classList.add('hit'); setTimeout(() => pad.classList.remove('hit'), 80); };
+  const keyHandler = event => { if(event.code === 'Space' || event.key === ' '){ event.preventDefault(); onTap(); } };
+  const cleanup = () => { timers.forEach(clearTimeout); timers = []; document.removeEventListener('keydown', keyHandler, true); try{ ctx && ctx.close && ctx.close(); }catch(e){} };
+  const modal = document.getElementById('modal');
+  if(modal) modal.addEventListener('close', () => { if(!finished){ finished = true; cleanup(); state.beltPromotion.activeRunner = null; } }, { once:true });
+  pad.onpointerdown = event => { event.preventDefault(); onTap(); };
+  startBtn.onclick = () => {
+    startBtn.disabled = true; startBtn.hidden = true; pad.disabled = false;
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    try{ ctx = Ctx ? new Ctx() : null; }catch(e){ ctx = null; }
+    const t0 = now();
+    runner.begin(t0 + 100);
+    const audioStart = ctx ? ctx.currentTime + 0.1 : 0;
+    const totalBeats = BELT_COUNT_IN_BEATS + runner.expected;
+    for(let k = 0; k < totalBeats; k++){
+      if(ctx) playBeltClick(ctx, audioStart + k * runner.intervalMs / 1000, k % BELT_TAPS_PER_ROUND === 0);
+      timers.push(setTimeout(() => {
+        const counting = k < BELT_COUNT_IN_BEATS;
+        label.textContent = counting ? `Count-in ${k + 1}` : `Round ${Math.floor((k - BELT_COUNT_IN_BEATS) / BELT_TAPS_PER_ROUND) + 1} of ${rounds}`;
+        pad.classList.toggle('counting', counting);
+        pad.classList.add('beat'); setTimeout(() => pad.classList.remove('beat'), 90);
+      }, 100 + k * runner.intervalMs));
+    }
+    document.addEventListener('keydown', keyHandler, true);
+    timers.push(setTimeout(async () => {
+      finished = true; cleanup();
+      label.textContent = 'Grading…'; pad.disabled = true;
+      await submitBeltTestAttempt(test, belt, runner);
+    }, runner.endsAt() - t0));
+  };
+}
+
+async function submitBeltTestAttempt(test, belt, runner){
+  const response = await window.DJBattleApi.apiRequest('/api/submitBeltAttempt', { method:'POST', body:{ testId:test.id, score:runner.preview(), breakdown:runner.breakdown() } });
+  state.beltPromotion.activeRunner = null;
+  const out = response && response.data;
+  if(!out || !out.success){
+    const message = `Your ${belt.name} Belt test could not be graded: ${response && (response.data && response.data.error || response.error) || 'unknown error'}. Nothing was awarded.`;
+    state.beltPromotion.lastResult = null;
+    const modal = document.getElementById('modal'); if(modal && modal.open) modal.close();
+    showErrorToast(message);
+    renderBeltPromotion();
+    return { error:message };
+  }
+  const score = Math.round(Number(out.score != null ? out.score : runner.preview()));
+  const passingScore = Number(out.passingScore != null ? out.passingScore : belt.minScore);
+  let message;
+  if(out.passed && out.award){
+    message = `You earned the ${out.award.beltName || belt.name} Belt.`;
+    state.beltPromotion.serverBelt = { code:out.award.beltCode, name:out.award.beltName || belt.name, next:(() => { const n = nextBeltFor(out.award.beltName || belt.name); return n ? { code:n.code, name:n.name, minScore:n.minScore } : null; })() };
+  } else if(out.passed && out.serverScored === false){
+    message = 'The server did not grade your taps itself, so no belt was awarded. Redeploy the server to turn on graded tests.';
+  } else if(out.passed){
+    message = 'Passed, but belts are awarded in order, so your belt did not change.';
+  } else {
+    message = `You needed ${passingScore}. Keep practicing your timing and try again.`;
+  }
+  state.beltPromotion.lastResult = { passed:Boolean(out.passed), score, passingScore, message, beltName:belt.name };
+  const modal = document.getElementById('modal'); if(modal && modal.open) modal.close();
+  renderBeltPromotion();
+  loadBeltPromotion().catch(() => {});
+  return state.beltPromotion.lastResult;
+}
+
+(function wireBeltPromotion(){
+  const take = document.getElementById('take-belt-test');
+  if(take) take.onclick = () => {
+    const panel = document.getElementById('promotion-history-panel');
+    if(panel && panel.scrollIntoView) panel.scrollIntoView({ behavior:'smooth', block:'start' });
+    return beltPromotionAvailable() ? startBeltTest() : (renderBeltPromotion(), appAlert('Sign in to take a belt test. Tests are graded by the server, so offline practice never counts as a pass.', 'Sign in required'));
+  };
+  const refresh = document.getElementById('refresh-promotions');
+  if(refresh) refresh.onclick = () => loadBeltPromotion().catch(err => console.warn('Belt promotion refresh failed', err));
+  renderBeltPromotion();
+  window.addEventListener('djb:auth-changed', () => loadBeltPromotion().catch(() => {}));
+  setTimeout(() => { if(beltPromotionAvailable()) loadBeltPromotion().catch(() => {}); }, 400);
+})();
+
+// ---------- Studio keyboard shortcuts ----------
+// Laptop DJs without a controller: keys press the same on-screen buttons, so every existing rule still applies.
+const STUDIO_SHORTCUTS = [
+  { keys:['q'], label:'Q', action:'Deck A Cue', group:'Deck A', run:() => clickStudioControl('[data-cue="a"]') },
+  { keys:['w'], label:'W', action:'Deck A Play / Pause', group:'Deck A', run:() => clickStudioControl('[data-play="a"]') },
+  { keys:['1'], label:'1', action:'Deck A Hot Cue 1', group:'Deck A', run:() => clickStudioControl('#hotcue-pads-a [data-hotcue-pad="0"]') },
+  { keys:['2'], label:'2', action:'Deck A Hot Cue 2', group:'Deck A', run:() => clickStudioControl('#hotcue-pads-a [data-hotcue-pad="1"]') },
+  { keys:['3'], label:'3', action:'Deck A Hot Cue 3', group:'Deck A', run:() => clickStudioControl('#hotcue-pads-a [data-hotcue-pad="2"]') },
+  { keys:['4'], label:'4', action:'Deck A Hot Cue 4', group:'Deck A', run:() => clickStudioControl('#hotcue-pads-a [data-hotcue-pad="3"]') },
+  { keys:['o'], label:'O', action:'Deck B Cue', group:'Deck B', run:() => clickStudioControl('[data-cue="b"]') },
+  { keys:['p'], label:'P', action:'Deck B Play / Pause', group:'Deck B', run:() => clickStudioControl('[data-play="b"]') },
+  { keys:['7'], label:'7', action:'Deck B Hot Cue 1', group:'Deck B', run:() => clickStudioControl('#hotcue-pads-b [data-hotcue-pad="0"]') },
+  { keys:['8'], label:'8', action:'Deck B Hot Cue 2', group:'Deck B', run:() => clickStudioControl('#hotcue-pads-b [data-hotcue-pad="1"]') },
+  { keys:['9'], label:'9', action:'Deck B Hot Cue 3', group:'Deck B', run:() => clickStudioControl('#hotcue-pads-b [data-hotcue-pad="2"]') },
+  { keys:['0'], label:'0', action:'Deck B Hot Cue 4', group:'Deck B', run:() => clickStudioControl('#hotcue-pads-b [data-hotcue-pad="3"]') },
+  { keys:['arrowleft'], label:'←', action:'Crossfader nudge toward A (Shift = bigger step)', group:'Mixer', run:event => nudgeCrossfader(event && event.shiftKey ? -0.25 : -0.05) },
+  { keys:['arrowright'], label:'→', action:'Crossfader nudge toward B (Shift = bigger step)', group:'Mixer', run:event => nudgeCrossfader(event && event.shiftKey ? 0.25 : 0.05) },
+  { keys:['x'], label:'X', action:'Crossfader to center', group:'Mixer', run:() => setCrossfader(0) },
+  { keys:['r'], label:'R', action:'Recording: Arm, then Record, then Stop', group:'Recording', run:() => toggleStudioRecordingShortcut() },
+  { keys:['?'], label:'?', action:'Show or hide this list', group:'Help', run:() => toggleShortcutHelp() }
+];
+
+function clickStudioControl(selector){
+  const el = document.querySelector(selector);
+  if(!el) return { ok:false, error:'missing' };
+  if(el.disabled) return { ok:false, error:'disabled' };
+  el.click();
+  return { ok:true };
+}
+function setCrossfader(value){
+  const xf = document.getElementById('xfader');
+  if(!xf || xf.disabled) return { ok:false };
+  const min = Number(xf.min || -1); const max = Number(xf.max || 1);
+  xf.value = String(Math.max(min, Math.min(max, Math.round(value * 100) / 100)));
+  xf.dispatchEvent(new Event('input', { bubbles:true }));
+  xf.dispatchEvent(new Event('change', { bubbles:true }));
+  return { ok:true, value:Number(xf.value) };
+}
+function nudgeCrossfader(step){
+  const xf = document.getElementById('xfader');
+  return xf ? setCrossfader(Number(xf.value || 0) + step) : { ok:false };
+}
+function toggleStudioRecordingShortcut(){
+  const stop = document.getElementById('stop-record');
+  if(stop && !stop.disabled){ stop.click(); return { ok:true, action:'stop' }; }
+  const record = document.getElementById('record-mix');
+  if(record && !record.disabled){ record.click(); return { ok:true, action:'record' }; }
+  const arm = document.getElementById('arm-record');
+  if(arm && !arm.disabled){ arm.click(); return { ok:true, action:'arm' }; }
+  return { ok:false };
+}
+
+function shortcutHelpOpen(){ return Boolean(document.getElementById('shortcut-help')); }
+function closeShortcutHelp(){ const el = document.getElementById('shortcut-help'); if(el) el.remove(); return false; }
+function openShortcutHelp(){
+  if(shortcutHelpOpen()) return true;
+  const groups = ['Deck A', 'Deck B', 'Mixer', 'Recording', 'Help'];
+  const overlay = document.createElement('div');
+  overlay.id = 'shortcut-help';
+  overlay.className = 'shortcut-help-overlay';
+  overlay.innerHTML = `<div class="shortcut-help" role="dialog" aria-modal="true" aria-labelledby="shortcut-help-title"><div class="shortcut-help-head"><div><span class="eyebrow accent">BATTLE STUDIO</span><h3 id="shortcut-help-title">Keyboard shortcuts</h3></div><button class="ghost small" type="button" data-shortcut-help-close aria-label="Close shortcuts">Close</button></div><p class="shortcut-help-note">Works on the Studio page when you are not typing in a box. Keys press the same buttons you see, so disabled buttons stay disabled. Esc closes this list.</p><div class="shortcut-help-grid">${groups.map(group => `<section><h4>${esc(group)}</h4>${STUDIO_SHORTCUTS.filter(s => s.group === group).map(s => `<div class="shortcut-row"><kbd>${esc(s.label)}</kbd><span>${esc(s.action)}</span></div>`).join('')}</section>`).join('')}</div></div>`;
+  overlay.addEventListener('click', event => { if(event.target === overlay || event.target.closest('[data-shortcut-help-close]')) closeShortcutHelp(); });
+  document.body.appendChild(overlay);
+  const close = overlay.querySelector('[data-shortcut-help-close]'); if(close && close.focus) close.focus();
+  return true;
+}
+function toggleShortcutHelp(){ return shortcutHelpOpen() ? closeShortcutHelp() : openShortcutHelp(); }
+
+function isTypingTarget(target){
+  if(!target || !target.closest) return false;
+  if(target.isContentEditable) return true;
+  return Boolean(target.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""]'));
+}
+
+// Returns the shortcut that ran, or null when the key was left alone.
+function handleStudioShortcut(event){
+  if(!event || event.defaultPrevented) return null;
+  if(event.key === 'Escape'){
+    // Only claim Escape for our own list; MIDI Learn and other dialogs keep their own Escape.
+    if(shortcutHelpOpen()){ closeShortcutHelp(); event.preventDefault(); return { action:'close-help' }; }
+    return null;
+  }
+  if(event.ctrlKey || event.metaKey || event.altKey) return null;
+  if(activeViewId() !== 'studio') return null;
+  if(isTypingTarget(event.target)) return null;
+  const modal = document.getElementById('modal');
+  if(modal && modal.open) return null;
+  if(document.querySelector('.app-confirm-overlay')) return null;
+  const key = String(event.key || '').toLowerCase();
+  if(shortcutHelpOpen() && key !== '?') return null;
+  const shortcut = STUDIO_SHORTCUTS.find(s => s.keys.includes(key));
+  if(!shortcut) return null;
+  if(event.repeat && shortcut.group !== 'Mixer') { event.preventDefault(); return null; }
+  event.preventDefault();
+  shortcut.run(event);
+  return shortcut;
+}
+document.addEventListener('keydown', handleStudioShortcut);
+
+(function addShortcutButton(){
+  const strip = document.getElementById('studio-recording-panel');
+  if(!strip || document.getElementById('studio-shortcuts-button')) return;
+  const btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'ghost small'; btn.id = 'studio-shortcuts-button';
+  btn.title = 'Keyboard shortcuts (?)'; btn.textContent = '⌨ Shortcuts';
+  btn.onclick = () => toggleShortcutHelp();
+  strip.appendChild(btn);
+})();
+
 window.__DJBattleTestHooks = {
+  isSafeAvatarUrl, validateAvatarFile, processAvatarFile, syncAvatarToServer, avatarUrlForDj, djAvatarHtml, setAvatarCropper: fn => { avatarCropper = fn || cropAvatarToSquare; }, editProfileModalState,
+  STUDIO_SHORTCUTS, handleStudioShortcut, openShortcutHelp, closeShortcutHelp, toggleShortcutHelp, shortcutHelpOpen,
+  syncBeltBadges, beltTapOffsets, beltTapPreviewScore, createBeltTapTest, loadBeltPromotion, renderBeltPromotion, startBeltTest, submitBeltTestAttempt, currentBeltName, getBeltPromotionState: () => state.beltPromotion,
   shouldShowFirstRunTour,
   maybeShowFirstRunTour,
   replayGuidedTour,
@@ -12612,6 +13292,8 @@ window.__DJBattleTestHooks = {
   stopBattleRoomLiveSync,
   openBattleHistoryResult,
   toggleBattleResultVisibility,
+  openMixRightsDialog,
+  viewFromHash, hashForView, handleRouteChange, switchView,
   openCreateBattleModal,
   openBattleLifecycle,
   joinBattleFromModal,

@@ -482,12 +482,12 @@
       </section>
 
       <section id="profile" class="view">
-        <div class="profile-hero"><div class="avatar huge" id="profile-hero-avatar">G</div><div><span class="eyebrow accent">DJ PROFILE</span><h2><span id="profile-hero-name">Guest</span> <span id="profile-belt-hero" class="belt-badge">White</span></h2><p id="profile-hero-tagline">Guest • Local DJ profile saved in this browser</p><p id="profile-hero-about" class="profile-hero-about hidden"></p><div class="profile-actions"><button class="primary" id="edit-profile-button" type="button">Edit Profile</button><button class="ghost" id="share-profile-button" type="button">Share</button></div><div style="margin-top:8px"><button class="primary" id="take-belt-test">Take Belt Test</button></div></div><div class="profile-score"><strong>0</strong><span>Battle Rating</span></div></div>
+        <div class="profile-hero"><div class="avatar huge" id="profile-hero-avatar">G</div><div><span class="eyebrow accent">DJ PROFILE</span><h2><span id="profile-hero-name">Guest</span> <span id="profile-belt-hero" class="belt-badge">White</span></h2><p id="profile-hero-tagline">Guest • Local DJ profile saved in this browser</p><p id="profile-hero-about" class="profile-hero-about hidden"></p><div class="profile-actions"><button class="primary" id="edit-profile-button" type="button">Edit Profile</button><button class="ghost" id="share-profile-button" type="button">Share</button></div><div style="margin-top:8px"><button class="primary" id="take-belt-test" type="button">Take Belt Test</button></div></div><div class="profile-score"><strong>0</strong><span>Battle Rating</span></div></div>
         <div id="profile-rating-history" class="panel rating-history"></div>
         <div id="profile-streaks" class="panel profile-streaks"></div>
         <div id="profile-genre-stats" class="panel profile-genre-stats"></div>
         <div class="stats profile-stats"><div><strong>0</strong><span>Wins</span></div><div><strong>0</strong><span>Losses</span></div><div><strong>0</strong><span>Uploads</span></div><div><strong>0</strong><span>Judge XP</span></div><div><strong>0</strong><span>Followers</span></div></div>
-        <div class="panel" id="promotion-history-panel" style="margin-top:16px"><div class="section-head compact"><div><span class="eyebrow">ACHIEVEMENTS</span><h3>Promotion History</h3></div><button class="text-btn" id="refresh-promotions">Refresh</button></div><div id="promotion-history-list" style="display:grid;gap:8px;margin-top:8px"></div></div>
+        <div class="panel belt-promotion-panel" id="promotion-history-panel" style="margin-top:16px"><div class="section-head compact"><div><span class="eyebrow">BELT PROMOTION</span><h3>Belt Tests</h3></div><button class="text-btn" id="refresh-promotions" type="button">Refresh</button></div><div id="belt-promotion-status" class="belt-promotion-status" aria-live="polite"></div><h4 class="belt-history-title">Attempt history</h4><div id="promotion-history-list" style="display:grid;gap:8px;margin-top:8px"></div></div>
         <div class="profile-tabs"><button class="active" data-profile-tab="music">Music</button><button data-profile-tab="history">Battle History</button><button data-profile-tab="progression">Progression History</button><button data-profile-tab="challenges">Challenges <span id="challenge-count-pill">0</span></button><button data-profile-tab="relationships">Relationships</button><button data-profile-tab="feed">Feed</button><button data-profile-tab="opponents">Opponents</button><button data-profile-tab="preferences">Preferences</button><button data-profile-tab="mixes">Mixes</button><button data-profile-tab="battles">Battles</button><button data-profile-tab="posts">Posts</button><button data-profile-tab="achievements">Achievements</button></div><div id="profile-media" class="card-grid"></div>
       </section>
     </main>
@@ -605,73 +605,7 @@
         };
       },50);
     };
-    // Belt test flow: request a test, run local analysis, submit attempt
-    document.getElementById('take-belt-test').onclick = async ()=>{
-      try{
-        const resp = await DJBattleApi.apiRequest('/api/getBelts', { public:true });
-        const j = resp.data;
-        if(!j || !j.success) return alert('Unable to load belts');
-        const belts = j.belts || [];
-        const options = belts.map(b=>`<option value="${b.code}">${b.name} — pass ${b.minScore}</option>`).join('');
-        openModal(`<span class="eyebrow accent">BELT PROMOTION</span><h3>Request Promotion Test</h3><p style="color:var(--muted)">Choose a belt to attempt. Tests are randomized and measured.</p><div class="form-grid"><label>Choose belt<select id="choose-belt">${options}</select></label></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" id="start-belt-test">Start Test</button></div>`);
-        setTimeout(()=>{
-          const start = document.getElementById('start-belt-test'); if(!start) return;
-          start.onclick = async ()=>{
-            const chosen = document.getElementById('choose-belt').value;
-            const rq = await DJBattleApi.apiRequest('/api/requestBeltTest',{ method:'POST', body: { beltCode: chosen } });
-            const rj = rq.data; if(!rj || !rj.success) return alert(rq.error || 'Failed to request test');
-            document.getElementById('modal').close();
-            const practiceEvents = [ { label:'Transition A', idealSec:32, actualSec:32.05, bpm:128, phraseOverlap:false, durationMs:350, clipping:false, freqOverlap:0.05, gainVariance:0.03 }, { label:'Transition B', idealSec:64, actualSec:64.22, bpm:128, phraseOverlap:false, durationMs:420, clipping:false, freqOverlap:0.1, gainVariance:0.05 } ];
-            const analysis = DJJudge.analyzePerformance(practiceEvents, {});
-            const score = analysis.overallScore;
-            // submit attempt
-            const submit = await DJBattleApi.apiRequest('/api/submitBeltAttempt',{ method:'POST', body: { testId: rj.test.id, score, breakdown: analysis } });
-            const out = submit.data;
-            if(out && out.success){
-              const msg = out.passed ? `PASS — ${chosen.toUpperCase()} awarded` : `FAIL — Score ${score}`;
-              openModal(`<span class="eyebrow accent">TEST RESULT</span><h3>${msg}</h3><p style="color:var(--muted)">${out.passed ? 'Congratulations — belt awarded.' : 'Review the Judge critique and try again.'}</p><div class="modal-actions"><button class="primary" value="cancel">Close</button></div>`);
-              if(out.passed && window.setCurrentBelt){ window.setCurrentBelt(belts.find(b=>b.code===chosen).name); }
-            } else { alert(submit.error || 'Submission failed'); }
-          };
-        },0);
-      }catch(err){ console.error('belt test flow error', err); alert('Error requesting belt test'); }
-    };
-    // Promotion history loader
-    async function loadPromotionHistory(){
-      try{
-        const resp = await DJBattleApi.apiRequest('/api/getBeltAttempts');
-        const j = resp.data;
-        const list = document.getElementById('promotion-history-list'); list.innerHTML = '';
-        if(!j || !j.success){
-          if(resp.error){ console.warn('loadPromotionHistory failed', resp.error); list.innerHTML = `<div style="color:var(--muted)">${resp.error}</div>`; }
-          return;
-        }
-        if(!j.attempts || j.attempts.length===0){ list.innerHTML = '<div style="color:var(--muted)">No promotion attempts yet.</div>'; return; }
-        j.attempts.forEach(a=>{
-          const passed = a.score >= (a.passing_score || 0) || (a.passed===true);
-          const when = new Date(a.created_at || a.inserted_at || Date.now()).toLocaleString();
-          const card = document.createElement('div'); card.className = 'media-card'; card.style.padding='10px';
-          card.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center"><div><strong>${a.test_id ? (a.test_id) : (a.test && a.test.name ? a.test.name : (a.code||'Belt Test'))}</strong><div style="color:var(--muted);font-size:12px">${when}</div></div><div style="text-align:right"><div style="font-weight:700;color:${passed? 'var(--accent)':'#f66'}">${a.score}</div><div style="font-size:12px;color:var(--muted)">${passed? 'PASSED' : 'FAILED'}</div></div></div><div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end"><button class="ghost view-evidence" data-attempt-id="${a.id}">View Evidence</button></div>`;
-          list.appendChild(card);
-        });
-        // attach handlers for evidence buttons
-        list.querySelectorAll('.view-evidence').forEach(b=>b.onclick=async (e)=>{
-          const id = e.currentTarget.dataset.attemptId;
-          try{
-            const r = await DJBattleApi.apiRequest('/api/getBeltAttempt?id='+encodeURIComponent(id));
-            const j = r.data; if(!j || !j.success) return alert(r.error || 'Unable to load attempt');
-            const att = j.attempt;
-            const when = new Date(att.created_at || Date.now()).toLocaleString();
-            const bd = att.breakdown || att.evidence || {};
-            openModal(`<span class="eyebrow accent">PROMOTION EVIDENCE</span><h3>${att.test_id || att.test?.name || att.test_name || att.id}</h3><div style="color:var(--muted)">${when}</div><div class="panel" style="margin-top:12px"><pre style="white-space:pre-wrap;color:#cfd8e3">${JSON.stringify(bd, null, 2)}</pre></div><div class="modal-actions"><button class="primary" value="cancel">Close</button></div>`);
-          }catch(err){ console.warn('view evidence failed', err); alert('Failed to load evidence'); }
-        });
-      }catch(err){ console.warn('loadPromotionHistory failed', err); }
-    }
-    document.getElementById('refresh-promotions').onclick = ()=> loadPromotionHistory();
-    // load on initial profile view open
-    // Load immediately for the local profile panel.
-    setTimeout(()=>{ loadPromotionHistory(); }, 500);
+    // Belt promotion tests (take a test, real pass/fail, attempt history) live in app.js: see renderBeltPromotion().
   </script>
 </body>
 </html>
