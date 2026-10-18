@@ -815,6 +815,22 @@ async function createDjBlock(dataClient, blockerId, input = {}, now = new Date()
   const active = (existing.data || []).find(row => row.active !== false && row.status !== 'inactive');
   if(active) return { block:sanitizeBlock(active), duplicate:true, cancelledChallengeCount:0 };
   const idempotencyKey = cleanString(input.idempotencyKey || input.idempotency_key, 128);
+  const inactive = (existing.data || [])[0];
+  if(inactive){
+    // Unblocked earlier: switch the same row back on instead of inserting a clashing id.
+    const revived = await dataClient.from(DJ_BLOCKS_TABLE)
+      .update({ status:'active', active:true, blocked_public_profile_id:target.profile.publicProfileId || null, blocked_profile:profileSnapshot(target.profile), updated_at:nowIso(now) })
+      .eq('id', inactive.id)
+      .eq('blocker_user_id', String(blockerId))
+      .select('*')
+      .single();
+    if(revived.error) return { error:revived.error };
+    const cancelledAgain = await cancelPendingChallengesBetween(dataClient, blockerId, target.userId, now);
+    if(cancelledAgain.error) return cancelledAgain;
+    const followAgain = await disableFollowRelationshipsBetween(dataClient, blockerId, target.userId, now);
+    if(followAgain.error) return followAgain;
+    return { block:sanitizeBlock(revived.data || { ...inactive, status:'active', active:true }), created:true, reactivated:true, cancelledChallengeCount:cancelledAgain.cancelledCount || 0, disabledFollowCount:followAgain.disabledCount || 0 };
+  }
   const payload = {
     id:`block-${stableHash({ blockerId, blockedId:target.userId, idempotencyKey }).slice(0, 24)}`,
     blocker_user_id:String(blockerId),
@@ -891,6 +907,19 @@ async function createNotificationMute(dataClient, userId, input = {}, now = new 
     && String(row.notification_type || '') === String(notificationType || '')
   );
   if(existing) return { mute:sanitizeMute(existing), duplicate:true };
+  const muteId = `mute-${stableHash({ userId, mutedUserId, mutedPublicProfileId, category, notificationType }).slice(0, 24)}`;
+  const previous = (result.data || []).find(row => String(row.id) === muteId);
+  if(previous){
+    // Unmuted earlier: turn the same row back on (ids are deterministic).
+    const revived = await dataClient.from(DJ_NOTIFICATION_MUTES_TABLE)
+      .update({ active:true, muted:true, updated_at:nowIso(now) })
+      .eq('id', muteId)
+      .eq('user_id', String(userId))
+      .select('*')
+      .single();
+    if(revived.error) return { error:revived.error };
+    return { mute:sanitizeMute(revived.data || { ...previous, active:true, muted:true }), created:true, reactivated:true };
+  }
   const payload = {
     id:`mute-${stableHash({ userId, mutedUserId, mutedPublicProfileId, category, notificationType }).slice(0, 24)}`,
     user_id:String(userId),
@@ -1309,6 +1338,78 @@ function blockingDenial(challengerId, recipientId, options = {}){
   });
 }
 
+// ---- "Blocked & muted" list: only the signed-in user's own rows, never anyone else's. ----
+async function listOwnedBlocks(dataClient, userId){
+  const owner = cleanString(userId, 128);
+  if(!owner) return { validationError:'Sign in to see your blocked DJs.' };
+  const result = await tableQuery(dataClient, DJ_BLOCKS_TABLE).eq('blocker_user_id', owner).limit(500);
+  if(result.error) return { error:result.error };
+  const rows = (result.data || []).filter(row => String(row.blocker_user_id) === owner && row.active !== false && row.status !== 'inactive');
+  rows.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  return { blocks:rows.map(sanitizeBlock) };
+}
+
+async function removeOwnedBlock(dataClient, userId, blockId, now = new Date()){
+  const owner = cleanString(userId, 128);
+  const id = cleanString(blockId, 128);
+  if(!owner || !id) return { validationError:'Choose a block to remove.' };
+  const found = await tableQuery(dataClient, DJ_BLOCKS_TABLE).eq('id', id).limit(1);
+  if(found.error) return { error:found.error };
+  const row = (found.data || [])[0];
+  // Someone else's block looks exactly like a missing one, so block state never leaks.
+  if(!row || String(row.blocker_user_id) !== owner) return { notFound:true };
+  if(row.active === false || row.status === 'inactive') return { removed:true, duplicate:true, block:sanitizeBlock(row) };
+  const updated = await dataClient.from(DJ_BLOCKS_TABLE)
+    .update({ status:'inactive', active:false, updated_at:nowIso(now) })
+    .eq('id', id)
+    .eq('blocker_user_id', owner)
+    .select('*')
+    .single();
+  if(updated.error) return { error:updated.error };
+  return { removed:true, block:sanitizeBlock(updated.data || { ...row, status:'inactive', active:false }) };
+}
+
+async function listOwnedMutes(dataClient, userId){
+  const owner = cleanString(userId, 128);
+  if(!owner) return { validationError:'Sign in to see your muted DJs.' };
+  const listed = await listOwnedMuteRows(dataClient, owner);
+  if(listed.error) return listed;
+  const rows = listed.mutes.filter(row => String(row.user_id) === owner);
+  let profiles = null;
+  if(rows.some(row => row.muted_user_id || row.muted_public_profile_id)){
+    const fetched = await fetchProgressionProfiles(dataClient);
+    if(!fetched.error) profiles = fetched;
+  }
+  rows.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  return {
+    mutes:rows.map(row => {
+      const mute = sanitizeMute(row);
+      const found = profiles && ((row.muted_user_id && profiles.byUser.get(String(row.muted_user_id))) || (row.muted_public_profile_id && profiles.byPublic.get(String(row.muted_public_profile_id))));
+      mute.mutedProfile = found && found.public ? profileSnapshot(found.profile) : (row.muted_user_id || row.muted_public_profile_id ? { publicProfileId:mute.mutedProfileId || null, displayName:found ? 'Private DJ' : 'DJ', name:found ? 'Private DJ' : 'DJ' } : null);
+      return mute;
+    })
+  };
+}
+
+async function removeOwnedMute(dataClient, userId, muteId, now = new Date()){
+  const owner = cleanString(userId, 128);
+  const id = cleanString(muteId, 128);
+  if(!owner || !id) return { validationError:'Choose a mute to remove.' };
+  const found = await tableQuery(dataClient, DJ_NOTIFICATION_MUTES_TABLE).eq('id', id).limit(1);
+  if(found.error) return { error:found.error };
+  const row = (found.data || [])[0];
+  if(!row || String(row.user_id) !== owner) return { notFound:true };
+  if(row.active === false || row.muted === false) return { removed:true, duplicate:true, mute:sanitizeMute(row) };
+  const updated = await dataClient.from(DJ_NOTIFICATION_MUTES_TABLE)
+    .update({ active:false, muted:false, updated_at:nowIso(now) })
+    .eq('id', id)
+    .eq('user_id', owner)
+    .select('*')
+    .single();
+  if(updated.error) return { error:updated.error };
+  return { removed:true, mute:sanitizeMute(updated.data || { ...row, active:false, muted:false }) };
+}
+
 module.exports = {
   DJ_BLOCKS_TABLE,
   DJ_CHALLENGE_TABLE,
@@ -1323,6 +1424,10 @@ module.exports = {
   countOwnedNotifications,
   createDjBlock,
   createNotificationMute,
+  listOwnedBlocks,
+  removeOwnedBlock,
+  listOwnedMutes,
+  removeOwnedMute,
   countOwnedDjChallenges,
   listOwnedDjChallenges,
   listOwnedNotifications,

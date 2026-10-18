@@ -1042,7 +1042,7 @@ async function fetchLeaderboardLive(opts={}){
   }
 }
 
-const pageTitles={dashboard:'Battle Home',battles:'Battles',studio:'Battle Studio',library:'Music Library',community:'Community','verified-results':'Verified Results',rankings:'Rankings',notifications:'Activity',activity:'Activity',tour:'Virtual Tour',settings:'Settings',operations:'Judging Operations',profile:'Profile'};
+const pageTitles={dashboard:'Battle Home',battles:'Battles',studio:'Battle Studio',library:'Music Library',community:'Community','verified-results':'Verified Results',rankings:'Rankings',notifications:'Activity',activity:'Activity',tour:'Virtual Tour',settings:'Settings',operations:'Judging Operations',profile:'Profile',store:'Beat Store',practice:'Practice Log'};
 
 function sanitizedTrackForStorage(track){
   if(!track || typeof track !== 'object') return track;
@@ -1174,6 +1174,8 @@ function installProfessionalShell(){
       ['community','CM','Community'],
       ['rankings','RK','Rankings'],
       ['activity','AC','Activity'],
+      ['store','BS','Beat Store'],
+      ['practice','PL','Practice Log'],
       ['profile','PR','Profile'],
       ['settings','SE','Settings']
     ];
@@ -1354,14 +1356,14 @@ function installAuxiliaryViews(){
     const section = document.createElement('section');
     section.id = 'settings';
     section.className = 'view';
-    section.innerHTML = `<div class="product-page-head"><div><span class="eyebrow accent">SETTINGS</span><h2>Settings</h2></div></div><div class="settings-grid"><section class="panel" id="settings-data-panel"><span class="eyebrow">YOUR DATA</span><h3>Back up &amp; restore</h3><p>Everything you make here lives in this browser. Save one backup file, restore it on any browser, or start fresh.</p><div class="settings-data-actions"><button class="primary small" id="settings-backup" type="button">Back up my data</button><button class="ghost small" id="settings-restore" type="button">Restore from backup</button><button class="ghost small danger" id="settings-reset" type="button">Reset</button><input id="settings-restore-file" type="file" accept=".json,application/json" hidden></div><small id="settings-data-status" class="settings-data-status"></small></section><section class="panel" id="settings-tour-panel"><span class="eyebrow">TOUR</span><h3>Guided tour</h3><p>Walk through the app again, one step at a time.</p><button class="primary small" id="settings-replay-tour" type="button">Replay tour</button></section><section class="panel"><span class="eyebrow">STUDIO</span><h3>Device Preferences</h3><p>Controller and audio device choices are browser-scoped and never imply unsupported output routing.</p><button class="ghost small" data-view-target="studio" type="button">Open Studio Setup</button></section><section class="panel"><span class="eyebrow">ACCOUNT</span><h3>Profile Controls</h3><p>Public profile, relationships, battle history, and privacy controls stay in Profile.</p><button class="ghost small" data-view-target="profile" type="button">Open Profile</button></section></div>`;
+    section.innerHTML = `<div class="product-page-head"><div><span class="eyebrow accent">SETTINGS</span><h2>Settings</h2></div></div><div class="settings-grid"><section class="panel" id="settings-data-panel"><span class="eyebrow">YOUR DATA</span><h3>Back up &amp; restore</h3><p>Everything you make here lives in this browser. Save one backup file, restore it on any browser, or start fresh.</p><div class="settings-data-actions"><button class="primary small" id="settings-backup" type="button">Back up my data</button><button class="ghost small" id="settings-restore" type="button">Restore from backup</button><button class="ghost small danger" id="settings-reset" type="button">Reset</button><input id="settings-restore-file" type="file" accept=".json,application/json" hidden></div><small id="settings-data-status" class="settings-data-status"></small></section><section class="panel" id="settings-safety-panel"><span class="eyebrow">SAFETY</span><h3>Blocked &amp; muted</h3><p>DJs you've blocked can't challenge you or follow you. Muted DJs don't send you notifications.</p><div id="settings-safety-list" class="settings-safety-list" aria-live="polite"></div></section><section class="panel" id="settings-install-panel"><span class="eyebrow">APP</span><h3>Install on your phone</h3><p>Add DJ Battle to your home screen. It opens full-screen with its own icon, and shows a friendly page when you're offline.</p><div id="settings-install-body"></div></section><section class="panel" id="settings-tour-panel"><span class="eyebrow">TOUR</span><h3>Guided tour</h3><p>Walk through the app again, one step at a time.</p><button class="primary small" id="settings-replay-tour" type="button">Replay tour</button></section><section class="panel"><span class="eyebrow">STUDIO</span><h3>Device Preferences</h3><p>Controller and audio device choices are browser-scoped and never imply unsupported output routing.</p><button class="ghost small" data-view-target="studio" type="button">Open Studio Setup</button></section><section class="panel"><span class="eyebrow">ACCOUNT</span><h3>Profile Controls</h3><p>Public profile, relationships, battle history, and privacy controls stay in Profile.</p><button class="ghost small" data-view-target="profile" type="button">Open Profile</button></section></div>`;
     main.insertBefore(section, document.getElementById('operations') || null);
   }
 }
 
 installProfessionalShell();
 // ---- Address bar routing: every page lives at #<view> so Back/Forward, refresh and shared links work. ----
-const ROUTABLE_VIEWS = ['dashboard','battles','studio','library','community','verified-results','rankings','notifications','activity','settings','operations','profile'];
+const ROUTABLE_VIEWS = ['dashboard','battles','studio','library','community','verified-results','rankings','notifications','activity','settings','operations','profile','store','practice'];
 function viewFromHash(hash = window.location && window.location.hash){
   const raw = String(hash || '').replace(/^#\/?/, '');
   if(!raw) return '';
@@ -1434,6 +1436,8 @@ function switchView(view, options = {}){
     loadDjNotifications({ preserve:true }).catch(err=>console.warn('Activity refresh failed', err));
   }
   if(view === 'settings') renderSettingsPage();
+  if(view === 'store') openBeatStorePage();
+  if(view === 'practice') openPracticePage();
   if(view === 'community') loadCommunityFeed({ preserve:true }).catch(err=>console.warn('Community refresh failed', err));
   if(view === 'battles') loadServerBattleLobby({ render:false }).then(()=>renderBattles()).catch(err=>console.warn('Battle lobby refresh failed', err));
   if(view === 'studio') recoverBattlePrepSnapshotInStudio(activeStudioBattleSession());
@@ -2554,6 +2558,9 @@ function saveCompletedResultHistory(result, battle, progressionState){
   if(state.practiceHistory.some(entry => entry.resultKey === resultKey)) return;
   state.practiceHistory.unshift({
     resultKey,
+    id: practiceSessionIdFromKey(resultKey),
+    recordedAt: new Date(result.completedAt || Date.now()).toISOString(),
+    source: 'battle',
     title: battle.title || 'Practice result',
     score: result.score,
     date: new Date(result.completedAt || Date.now()).toLocaleDateString(),
@@ -2562,7 +2569,8 @@ function saveCompletedResultHistory(result, battle, progressionState){
     genre: battle.genre || 'Global',
     highScoreEligible:true
   });
-  localStorage.setItem('djBattlePracticeHistory', JSON.stringify(state.practiceHistory.slice(0,20)));
+  persistPracticeHistory();
+  syncPracticeSessionToAccount(state.practiceHistory[0]).catch(() => {});
   renderAiLeaderboard();
 }
 
@@ -3058,14 +3066,19 @@ async function completeFromJudgingEndpoint(session, submissionId, setUploadStatu
 
 async function savePracticeResult(entry){
   state.practiceHistory.unshift({
+    id: entry.id || newPracticeSessionId(),
+    recordedAt: entry.recordedAt || new Date().toISOString(),
+    source: 'practice',
     title: entry.title,
     score: entry.score,
+    maxScore: entry.maxScore || 180,
     date: entry.date || new Date().toLocaleDateString(),
     breakdown: entry.breakdown,
     type: entry.type || 'Practice',
     genre: entry.genre || 'Global'
   });
-  localStorage.setItem('djBattlePracticeHistory', JSON.stringify(state.practiceHistory.slice(0,20)));
+  persistPracticeHistory();
+  syncPracticeSessionToAccount(state.practiceHistory[0]).catch(() => {});
   renderAiLeaderboard();
 
   // If running in live mode, send the score to the backend and show any server notifications.
@@ -3599,6 +3612,8 @@ function renderActivityPage(){
 
 function renderSettingsPage(){
   wireDataBackupControls();
+  if(typeof renderInstallPanel === 'function') renderInstallPanel();
+  if(typeof loadSafetyLists === 'function') loadSafetyLists().catch(err => console.warn('Blocked & muted list failed', err));
   const replay = document.getElementById('settings-replay-tour');
   if(replay) replay.onclick = () => replayGuidedTour();
 }
@@ -4226,7 +4241,7 @@ function communityCommentHtml(comment){
   const counts = communityReactionCounts(comment.reactionCounts);
   const owner = comment.viewer && comment.viewer.isOwner;
   return `<div class="community-comment ${comment.parentCommentId ? 'reply' : ''}" data-community-comment="${esc(comment.id)}">
-    <div><strong>${esc(comment.author && (comment.author.displayName || comment.author.name) || 'DJ')}</strong><span>${relativeTimeHtml(comment.createdAt)}${comment.editedAt ? ' <em class="edited-tag" title="Edited">edited</em>' : ''}</span></div>
+    <div class="community-comment-head">${djAvatarHtml(comment.author && (comment.author.displayName || comment.author.name) || 'DJ', avatarUrlForDj({ name:comment.author && (comment.author.displayName || comment.author.name), publicProfileId:comment.author && comment.author.publicProfileId, avatarUrl:comment.author && comment.author.avatarUrl, isSelf:Boolean(comment.viewer && comment.viewer.isOwner) }), 'comment-avatar')}<strong>${esc(comment.author && (comment.author.displayName || comment.author.name) || 'DJ')}</strong><span>${relativeTimeHtml(comment.createdAt)}${comment.editedAt ? ' <em class="edited-tag" title="Edited">edited</em>' : ''}</span></div>
     <p>${comment.tombstone ? esc('Comment unavailable.') : mentionifyText(comment.bodyText || '')}</p>
     <div class="community-comment-actions">
       <span>Like ${esc(counts.like)}</span>
@@ -6056,7 +6071,9 @@ function recoveredBattleSession(recovered, existingSession = null){
       name:opponentProfile.name,
       country:opponentProfile.country || '',
       belt:opponentProfile.belt || '',
-      record:opponentProfile.rating ? String(opponentProfile.rating) : ''
+      record:opponentProfile.rating ? String(opponentProfile.rating) : '',
+      publicProfileId:opponentProfile.publicProfileId || null,
+      avatarUrl:opponentProfile.avatarUrl || null
     } : existingSession && existingSession.opponent || null,
     entries:battle.entries || existingSession && existingSession.entries || {},
     battlePrepSnapshot:snapshot,
@@ -10718,7 +10735,7 @@ function scheduleDjRelationshipPolling(intervalMs = 30000){
 function relationshipRowHtml(row){
   const profile = row.profile || row;
   return `<article class="challenge-row relationship-row" data-relationship-row="${esc(row.id || row.publicProfileId)}">
-    <div><span class="challenge-lamp green"></span><strong>${esc(profile.displayName || profile.name || 'DJ')}</strong><div class="challenge-meta">${esc(profile.country || 'Country unavailable')} / ${esc(profile.belt || 'Unranked')} / ${esc(profile.rating == null ? 'rating pending' : `${profile.rating} rating`)}</div></div>
+    <div class="dj-row-with-avatar">${djAvatarHtml(profile.displayName || profile.name || 'DJ', avatarUrlForDj({ name:profile.displayName || profile.name, publicProfileId:profile.publicProfileId, avatarUrl:profile.avatarUrl || row.avatarUrl }), 'row-avatar')}<div><span class="challenge-lamp green"></span><strong>${esc(profile.displayName || profile.name || 'DJ')}</strong><div class="challenge-meta">${esc(profile.country || 'Country unavailable')} / ${esc(profile.belt || 'Unranked')} / ${esc(profile.rating == null ? 'rating pending' : `${profile.rating} rating`)}</div></div></div>
     <div><span class="notification-destination">${esc(readableComponentName(row.direction || 'relationship'))}</span><div class="challenge-meta">Since ${esc(relationshipDate(row.followedAt || row.createdAt))}. Public profile only; private lists and auth IDs stay hidden.</div></div>
     <div class="challenge-actions">${profile.publicProfileId ? `<button class="ghost small" type="button" data-open-relationship-profile="${esc(profile.publicProfileId)}">Profile</button><button class="primary small" type="button" data-relationship-challenge="${esc(profile.publicProfileId)}">Challenge</button>` : ''}</div>
   </article>`;
@@ -11687,7 +11704,7 @@ function challengeRowHtml(challenge){
   const crateSelect = canAccept ? `<select data-challenge-crate="${esc(challenge.id)}">${battlePrepCrateSelectHtml()}</select>` : '';
   return `<div class="challenge-row" data-challenge-row="${esc(challenge.id)}">
     <div>
-      <span class="challenge-lamp ${lamp}"></span><strong>${esc(challengeProfileSummary(other))}</strong>
+      ${djAvatarHtml(other && (other.displayName || other.name) || 'DJ', avatarUrlForDj({ name:other && (other.displayName || other.name), publicProfileId:other && other.publicProfileId, avatarUrl:other && other.avatarUrl }), 'row-avatar challenge-avatar')}<span class="challenge-lamp ${lamp}"></span><strong>${esc(challengeProfileSummary(other))}</strong>
       <div class="challenge-meta">${esc(incoming ? 'Challenger' : 'Recipient')} / ${esc(other && other.belt || 'Unranked')} / ${esc(other && other.rating == null ? 'rating pending' : `${other.rating} rating`)}</div>
     </div>
     <div>
@@ -11914,7 +11931,7 @@ function renderPublicDjProfile(profile, status){
   const mediaHtml = media.length
     ? media.map(item => `<div class="battle-result-row"><b>${esc(item.title || 'Public media')}</b><em>${item.securePlaybackPermitted && item.publicUrl ? `<audio controls src="${esc(item.publicUrl)}" style="max-width:220px"></audio>` : 'On-site playback unavailable'}</em></div>`).join('')
     : '<div class="battle-result-row"><b>Public media</b><em>None approved</em></div>';
-  openModal(`<span class="eyebrow accent">PUBLIC DJ PROFILE</span><h3>${esc(profile.displayName || 'DJ')}</h3>
+  openModal(`<span class="eyebrow accent">PUBLIC DJ PROFILE</span><div class="public-profile-title">${djAvatarHtml(profile.displayName || 'DJ', avatarUrlForDj({ name:profile.displayName, publicProfileId:profileIdValue, avatarUrl:profile.avatarUrl }), 'public-profile-avatar')}<h3>${esc(profile.displayName || 'DJ')}</h3></div>
     ${headToHeadProfileHtml({ publicProfileId:profileIdValue, name:profile.displayName || profile.name })}
     <div class="battle-result-surface">
       <div class="battle-result-top">
@@ -12424,10 +12441,12 @@ function renderBattleRoom(session){
     document.getElementById('br-dj2-name').textContent = session.opponent.name || 'Opponent';
     document.getElementById('br-dj2-meta').textContent = `${session.opponent.country || ''} • ${session.opponent.record || ''}`;
     document.getElementById('br-dj2-belt').textContent = session.opponent.belt || '—';
+    applyAvatarNode(document.querySelector('#br-dj2 .avatar'), initialsForName(session.opponent.name || 'Opponent'), avatarUrlForDj({ name:session.opponent.name, publicProfileId:session.opponent.publicProfileId, avatarUrl:session.opponent.avatarUrl }));
   } else {
     document.getElementById('br-dj2-name').textContent = 'Solo Mode';
     document.getElementById('br-dj2-meta').textContent = 'AI Rating';
     document.getElementById('br-dj2-belt').textContent = '—';
+    applyAvatarNode(document.querySelector('#br-dj2 .avatar'), 'AI', '');
   }
   const tracksWrap = document.getElementById('br-tracks'); tracksWrap.innerHTML='';
   const assignedTracks = Array.isArray(session.assigned) ? session.assigned : [];
@@ -14866,4 +14885,666 @@ Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), {
   closeNavMoreSheet,
   navMoreItems,
   navMoreIsOpen
+});
+
+// ===================================================================================
+// Oct 18 (b): Beat Store, Blocked & muted list, home-screen install, practice log.
+// ===================================================================================
+
+function djbApi(){ return window.DJBattleApi && typeof window.DJBattleApi.apiRequest === 'function' ? window.DJBattleApi : null; }
+function djbSignedIn(){ return Boolean(currentAuthState.user); }
+function djbOffline(){ return typeof navigator !== 'undefined' && navigator.onLine === false; }
+// Signed-out visitors call public routes without trying to attach a session token.
+function djbRequest(path, options = {}){
+  const api = djbApi();
+  if(!api) return Promise.resolve({ error:'Server API unavailable', status:0 });
+  return api.apiRequest(path, djbSignedIn() ? options : { ...options, public:true });
+}
+function djbServerErrorText(response, fallback){
+  if(!response) return fallback;
+  if(response.status === 0) return 'Can\'t reach the server right now.';
+  return (response.data && response.data.error) || response.error || fallback;
+}
+
+// Make the new pages part of the nav click handling and the address-bar router.
+function wireNewNavButtons(){
+  // installProfessionalShell() builds these before the shared nav click wiring runs, so they are
+  // normally wired already; this only covers a nav rebuilt later.
+  document.querySelectorAll('.nav-btn[data-view="store"], .nav-btn[data-view="practice"]').forEach(btn => {
+    if(btn.dataset.wiredNav || btn.dataset.navWired) return;
+    btn.dataset.wiredNav = '1';
+    btn.addEventListener('click', () => switchView(btn.dataset.view));
+  });
+}
+function installStorePracticeViews(){
+  const main = document.querySelector('.main');
+  if(!main) return;
+  if(!document.getElementById('store')){
+    const section = document.createElement('section');
+    section.id = 'store';
+    section.className = 'view';
+    section.innerHTML = `<div class="product-page-head"><div><span class="eyebrow accent">BEAT STORE</span><h2>Free beats from DJs</h2><p>Grab a free beat or sample pack by entering your email. The producer gets your email so they can keep you posted. Paid sales aren't available yet.</p></div><div class="store-head-actions"><button class="ghost compact" id="store-refresh" type="button">Refresh</button><button class="primary compact" id="store-create" type="button">List a free beat</button></div></div><div class="store-status" id="store-status" aria-live="polite"></div><div class="store-grid" id="store-grid"></div><div class="store-more"><button class="ghost small hidden" id="store-load-more" type="button">Load More</button></div><section class="panel store-mine hidden" id="store-mine"><span class="eyebrow">YOUR LISTINGS</span><h3>Your free beats</h3><div id="store-mine-list"></div></section>`;
+    main.insertBefore(section, document.getElementById('operations') || null);
+  }
+  if(!document.getElementById('practice')){
+    const section = document.createElement('section');
+    section.id = 'practice';
+    section.className = 'view';
+    section.innerHTML = `<div class="product-page-head"><div><span class="eyebrow accent">PRACTICE LOG</span><h2>Every practice session</h2><p>All your practice scores in one place, with how each skill is trending. Signed in, your log follows you to any device.</p></div><button class="ghost compact" id="practice-refresh" type="button">Refresh</button></div><div class="practice-status" id="practice-status" aria-live="polite"></div><section class="panel practice-chart-panel"><span class="eyebrow">SCORES OVER TIME</span><h3>How each skill is trending</h3><div id="practice-chart" class="practice-chart"></div></section><section class="panel"><span class="eyebrow">SESSIONS</span><h3 id="practice-count">Sessions</h3><div id="practice-list" class="practice-list"></div><button class="ghost small hidden" id="practice-load-more" type="button">Load older sessions</button></section>`;
+    main.insertBefore(section, document.getElementById('operations') || null);
+  }
+}
+installStorePracticeViews();
+wireNewNavButtons();
+
+/* ---------------------------------- 1. Beat Store ---------------------------------- */
+
+const MARKETPLACE_ALLOWED_RIGHTS = ['original', 'licensed', 'royalty_free', 'platform_cleared'];
+const BEAT_STORE_CLAIMS_KEY = 'djBattleBeatStoreClaims';
+state.beatStore = { status:'idle', listings:[], pagination:{ page:1, hasMore:false }, mine:[], mineStatus:'idle', leads:{}, error:'', loadedAt:null };
+
+function beatStoreClaims(){ return safeParse(BEAT_STORE_CLAIMS_KEY, {}) || {}; }
+function saveBeatStoreClaim(listingId, claim){
+  const all = beatStoreClaims();
+  all[listingId] = { ...(all[listingId] || {}), ...claim };
+  try{ localStorage.setItem(BEAT_STORE_CLAIMS_KEY, JSON.stringify(all)); }catch(e){}
+  return all[listingId];
+}
+function marketplaceRightsAllowed(value){ return MARKETPLACE_ALLOWED_RIGHTS.includes(String(value || '').toLowerCase()); }
+// Why a library track can or can't go in the Beat Store, in plain words.
+function beatStoreTrackEligibility(track){
+  if(!track) return { ok:false, reason:'Choose one of your own tracks.' };
+  if(!marketplaceRightsAllowed(track.rightsClassification)){
+    return { ok:false, code:'rights', reason:`Rights are "${rightsClassificationLabel(track.rightsClassification)}". Only Original, Licensed, Royalty-free or Platform-cleared music can be shared. Change the rights in Edit Track if you made it.` };
+  }
+  if(!track.serverBacked) return { ok:false, code:'local', reason:'This track is only in this browser. Sign in and upload it to your account first.' };
+  if(track.sourceType === 'practice_recording') return { ok:false, code:'type', reason:'Practice recordings can\'t be listed. Pick a beat or sample pack you made.' };
+  return { ok:true };
+}
+function beatStoreOwnTracks(){
+  return (state.library || []).filter(track => track && !track.archived && track.source !== 'PLATFORM');
+}
+function beatStoreCardHtml(listing){
+  const product = listing.product || {};
+  const facts = [product.genre || listing.genre, product.bpm ? `${product.bpm} BPM` : '', product.key || '', product.type === 'sample_pack' ? 'Sample pack' : product.type === 'loop_pack' ? 'Loop pack' : 'Beat'].filter(Boolean).join(' • ');
+  const claim = beatStoreClaims()[listing.id];
+  const free = listing.freeDownload;
+  const action = free
+    ? `<button class="primary small" type="button" data-store-claim="${esc(listing.id)}">${claim && claim.downloadAccessToken ? 'Download again' : 'Get it free'}</button>`
+    : `<span class="store-tag">Preview only</span>`;
+  return `<article class="store-card" data-store-listing="${esc(listing.id)}">
+    <div class="store-art" aria-hidden="true">${esc((listing.title || 'B').slice(0, 1).toUpperCase())}</div>
+    <div class="store-body"><strong>${esc(listing.title || 'Untitled beat')}</strong><small>${esc(facts)}</small>${listing.description ? `<p>${esc(listing.description)}</p>` : ''}
+    <div class="store-card-foot"><span class="store-price">${free ? 'FREE for email' : 'Not for sale yet'}</span>${action}</div></div>
+  </article>`;
+}
+function renderBeatStorePage(){
+  const grid = document.getElementById('store-grid');
+  const status = document.getElementById('store-status');
+  if(!grid || !status) return;
+  const store = state.beatStore;
+  const create = document.getElementById('store-create');
+  if(create){
+    create.disabled = djbOffline();
+    create.title = djbSignedIn() ? 'List one of your tracks as a free download' : 'Sign in to list a beat';
+    create.onclick = () => openBeatStoreCreate();
+  }
+  const refresh = document.getElementById('store-refresh');
+  if(refresh) refresh.onclick = () => loadBeatStore({ reset:true });
+  let note = '';
+  if(djbOffline()) note = 'You\'re offline. The Beat Store needs a connection, so nothing new can load or download right now.';
+  else if(store.status === 'loading') note = 'Loading the Beat Store…';
+  else if(store.status === 'unavailable') note = store.error || 'The Beat Store isn\'t set up on the server yet.';
+  else if(store.status === 'failed') note = store.error || 'The Beat Store could not be loaded.';
+  else if(!djbSignedIn()) note = 'You can browse and grab free beats without an account. Sign in to list your own.';
+  status.textContent = note;
+  status.className = `store-status${store.status === 'failed' || store.status === 'unavailable' || djbOffline() ? ' store-status--warn' : ''}`;
+  if(store.listings.length) grid.innerHTML = store.listings.map(beatStoreCardHtml).join('');
+  else if(store.status === 'ready') grid.innerHTML = `<div class="store-empty"><strong>No free beats yet</strong><p>${djbSignedIn() ? 'Be the first: list a beat you made with "List a free beat".' : 'Check back soon, or sign in and list one of yours.'}</p></div>`;
+  else grid.innerHTML = '';
+  grid.querySelectorAll('[data-store-claim]').forEach(btn => { btn.onclick = () => openBeatStoreClaim(btn.dataset.storeClaim); });
+  const more = document.getElementById('store-load-more');
+  if(more){ more.classList.toggle('hidden', !store.pagination.hasMore); more.onclick = () => loadBeatStore({ append:true }); }
+  renderBeatStoreMine();
+}
+function renderBeatStoreMine(){
+  const panel = document.getElementById('store-mine');
+  const list = document.getElementById('store-mine-list');
+  if(!panel || !list) return;
+  const store = state.beatStore;
+  panel.classList.toggle('hidden', !djbSignedIn());
+  if(!djbSignedIn()) return;
+  if(store.mineStatus === 'loading'){ list.innerHTML = '<p class="muted">Loading your listings…</p>'; return; }
+  if(store.mineStatus === 'failed'){ list.innerHTML = `<p class="muted">${esc(store.mineError || 'Your listings could not be loaded.')}</p>`; return; }
+  if(!store.mine.length){ list.innerHTML = '<p class="muted">You haven\'t listed anything yet.</p>'; return; }
+  list.innerHTML = store.mine.map(listing => {
+    const leads = store.leads[listing.id];
+    const leadsHtml = leads ? (leads.length
+      ? `<ul class="store-leads">${leads.map(lead => `<li><span>${esc(lead.email)}</span><small>${esc(lead.marketingConsentStatus === 'accepted' ? 'OK to email about new beats' : 'Download only')} • ${relativeTimeHtml(lead.claimedAt || lead.createdAt)}</small></li>`).join('')}</ul>`
+      : '<p class="muted">No one has claimed this yet.</p>') : '';
+    return `<div class="store-mine-row" data-store-mine="${esc(listing.id)}"><div><strong>${esc(listing.title)}</strong><small>${esc(listing.freeDownload ? 'Free for email' : 'Not downloadable yet')} • ${esc(listing.status)}</small></div><div class="store-claim-count"><b>${esc(listing.claimCount || 0)}</b><span>claim${listing.claimCount === 1 ? '' : 's'}</span></div><button class="ghost small" type="button" data-store-leads="${esc(listing.id)}">${leads ? 'Hide emails' : 'See emails'}</button>${leadsHtml}</div>`;
+  }).join('');
+  list.querySelectorAll('[data-store-leads]').forEach(btn => { btn.onclick = () => toggleBeatStoreLeads(btn.dataset.storeLeads); });
+}
+async function toggleBeatStoreLeads(listingId){
+  if(state.beatStore.leads[listingId]){ delete state.beatStore.leads[listingId]; renderBeatStoreMine(); return; }
+  const response = await djbRequest(`/api/marketplace/freeEmail/leads?listingId=${encodeURIComponent(listingId)}`);
+  if(response.error){ appAlert(`Couldn't load emails: ${djbServerErrorText(response, 'request failed')}`, 'Beat Store'); return; }
+  state.beatStore.leads[listingId] = (response.data && response.data.leads || []).filter(lead => lead.listingId === listingId || !lead.listingId);
+  renderBeatStoreMine();
+}
+async function loadBeatStore(options = {}){
+  const store = state.beatStore;
+  if(djbOffline()){ store.status = 'offline'; renderBeatStorePage(); return { offline:true }; }
+  if(!djbApi()){ store.status = 'unavailable'; store.error = 'The Beat Store needs the DJ Battle server, which isn\'t connected.'; renderBeatStorePage(); return { skipped:true }; }
+  const page = options.append ? (store.pagination.page || 1) + 1 : 1;
+  store.status = 'loading';
+  renderBeatStorePage();
+  const response = await djbRequest(`/api/marketplace/catalog?limit=24&page=${page}`);
+  if(response.error){
+    store.status = response.status === 503 || response.status === 0 ? 'unavailable' : 'failed';
+    store.error = response.status === 0 ? 'Can\'t reach the server right now, so the Beat Store can\'t load.' : response.status === 503 ? 'The Beat Store isn\'t switched on yet. The server needs its marketplace database set up first.' : `The Beat Store could not be loaded: ${djbServerErrorText(response, 'request failed')}`;
+    renderBeatStorePage();
+    return response;
+  }
+  const rows = response.data && response.data.listings || [];
+  store.listings = options.append ? store.listings.concat(rows.filter(row => !store.listings.some(old => old.id === row.id))) : rows;
+  store.pagination = { page, ...(response.data && response.data.pagination || {}), hasMore:Boolean(response.data && response.data.pagination && response.data.pagination.hasMore) };
+  store.status = 'ready';
+  store.loadedAt = Date.now();
+  if(djbSignedIn() && !options.append) await loadBeatStoreMine();
+  renderBeatStorePage();
+  return response;
+}
+async function loadBeatStoreMine(){
+  const store = state.beatStore;
+  store.mineStatus = 'loading';
+  const response = await djbRequest('/api/marketplace/myListings');
+  if(response.error){ store.mineStatus = 'failed'; store.mineError = `Your listings could not be loaded: ${djbServerErrorText(response, 'request failed')}`; return response; }
+  store.mine = response.data && response.data.listings || [];
+  store.mineStatus = 'ready';
+  return response;
+}
+function openBeatStorePage(){
+  renderBeatStorePage();
+  if(state.beatStore.status !== 'loading') loadBeatStore().catch(err => console.warn('Beat Store load failed', err));
+}
+
+function openBeatStoreCreate(){
+  if(djbOffline()){ appAlert('You\'re offline. Listing a beat needs a connection.', 'Beat Store'); return null; }
+  if(!djbSignedIn()){ appAlert('Sign in to list a beat. Listings are tied to your account so claims and emails come to you.', 'Beat Store'); return null; }
+  const tracks = beatStoreOwnTracks();
+  const options = tracks.map(track => {
+    const check = beatStoreTrackEligibility(track);
+    return `<label class="store-track-option${check.ok ? '' : ' is-blocked'}"><input type="radio" name="store-track" value="${esc(track.id)}" ${check.ok ? '' : 'disabled'}><span><strong>${esc(track.title || track.name || 'Untitled')}</strong><small>${esc(rightsClassificationLabel(track.rightsClassification))}</small>${check.ok ? '' : `<em class="store-track-why">${esc(check.reason)}</em>`}</span></label>`;
+  }).join('');
+  openModal(`<span class="eyebrow accent">BEAT STORE</span><h3>List a free beat</h3><p style="color:var(--muted)">Pick a track you made. Anyone can download it free by entering their email, and you'll see who did. Only MP3 files can be given away; WAV and stems stay private.</p>
+    <div class="store-track-list" id="store-track-list">${options || '<p class="muted">You have no tracks in My Music yet. Upload one first.</p>'}</div>
+    <label>Title<input id="store-create-title" maxlength="160" placeholder="Uses the track title if empty"></label>
+    <label>Description<textarea id="store-create-description" maxlength="600" rows="2" placeholder="Tell DJs what it's good for"></textarea></label>
+    <label class="store-attest"><input type="checkbox" id="store-create-attest"> I made this or have the rights to give it away for free.</label>
+    <p class="store-create-error" id="store-create-error" role="alert"></p>
+    <div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="store-create-submit" disabled>List it free</button></div>`);
+  const submit = document.getElementById('store-create-submit');
+  const update = () => {
+    const picked = document.querySelector('input[name="store-track"]:checked');
+    submit.disabled = !picked || !document.getElementById('store-create-attest').checked;
+  };
+  document.querySelectorAll('input[name="store-track"]').forEach(input => { input.onchange = update; });
+  document.getElementById('store-create-attest').onchange = update;
+  submit.onclick = async () => {
+    const picked = document.querySelector('input[name="store-track"]:checked');
+    submit.disabled = true;
+    submit.textContent = 'Listing…';
+    const result = await createFreeBeatListing({
+      trackId:picked && picked.value,
+      title:document.getElementById('store-create-title').value.trim(),
+      description:document.getElementById('store-create-description').value.trim()
+    });
+    if(result.error){
+      const box = document.getElementById('store-create-error');
+      if(box) box.textContent = result.error;
+      submit.textContent = 'List it free';
+      update();
+      return;
+    }
+    const modal = document.getElementById('modal');
+    if(modal && modal.open) modal.close();
+    showAppToast('Beat listed', `${result.listing.title} is now a free download in the Beat Store.`);
+    loadBeatStore({ reset:true }).catch(() => {});
+  };
+  return true;
+}
+
+// Listing → free-download file → free-for-email offer. Each step reports its own problem.
+async function createFreeBeatListing({ trackId, title, description } = {}){
+  const track = (state.library || []).find(item => String(item.id) === String(trackId));
+  const check = beatStoreTrackEligibility(track);
+  if(!check.ok) return { error:check.reason };
+  const listingBody = {
+    libraryTrackId:track.id,
+    title:title || track.title || track.name,
+    description:description || '',
+    productType:'beat',
+    status:'published',
+    publish:true,
+    downloadAllowed:true,
+    previewAllowed:true,
+    displayPriceCents:0,
+    licenseType:'creator_license'
+  };
+  let response = await djbRequest('/api/marketplace/listings', { method:'POST', body:listingBody });
+  let listing = response.data && response.data.listing;
+  if(response.error && response.status === 409 && listing) response = { data:{ listing } };
+  if(response.error) return { error:`Couldn't create the listing: ${djbServerErrorText(response, 'request failed')}`, step:'listing' };
+  listing = response.data.listing;
+  const file = await djbRequest(`/api/marketplace/listings/${encodeURIComponent(listing.id)}/freeDownloadFile`, { method:'POST', body:{} });
+  if(file.error) return { error:`Listing saved, but the free download isn't ready: ${djbServerErrorText(file, 'request failed')}`, step:'file', listing };
+  const offer = await djbRequest('/api/marketplace/freeEmail/offers', { method:'POST', body:{
+    listingId:listing.id,
+    enabled:true,
+    allowedFiles:[file.data.file],
+    verificationRequired:false,
+    downloadConsentRequired:true,
+    marketingConsentRequired:false,
+    consentText:'Send me this free download. The producer will see my email address.',
+    downloadLimit:3
+  } });
+  if(offer.error) return { error:`Listing saved, but the free offer couldn't be switched on: ${djbServerErrorText(offer, 'request failed')}`, step:'offer', listing };
+  return { listing, offer:offer.data.offer, file:file.data.file };
+}
+
+function openBeatStoreClaim(listingId){
+  const listing = state.beatStore.listings.find(row => row.id === listingId);
+  if(!listing || !listing.freeDownload){ appAlert('This beat isn\'t available as a free download.', 'Beat Store'); return null; }
+  const existing = beatStoreClaims()[listingId];
+  if(existing && existing.downloadAccessToken){ downloadClaimedBeat(listingId).catch(() => {}); return true; }
+  const offer = listing.freeDownload;
+  const suggested = currentUser().email || '';
+  openModal(`<span class="eyebrow accent">FREE DOWNLOAD</span><h3>${esc(listing.title)}</h3><p style="color:var(--muted)">Enter your email to download it free. The producer will see your email.</p>
+    <label>Email<input id="store-claim-email" type="email" maxlength="254" autocomplete="email" value="${esc(suggested)}" placeholder="you@example.com"></label>
+    ${offer.downloadConsentRequired ? `<label class="store-attest"><input type="checkbox" id="store-claim-consent"> ${esc(offer.consentText || 'Send me this free download.')}</label>` : ''}
+    <label class="store-attest"><input type="checkbox" id="store-claim-marketing"> It's OK for the producer to email me about new beats (optional).</label>
+    <p class="store-create-error" id="store-claim-error" role="alert"></p>
+    <div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="store-claim-submit">Get download</button></div>`);
+  document.getElementById('store-claim-submit').onclick = async () => {
+    const email = document.getElementById('store-claim-email').value.trim();
+    const consent = document.getElementById('store-claim-consent');
+    const errorBox = document.getElementById('store-claim-error');
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ errorBox.textContent = 'Enter a real email address.'; return; }
+    if(consent && !consent.checked){ errorBox.textContent = 'Tick the box to agree to the download terms.'; return; }
+    const result = await claimFreeBeat(listingId, { email, marketing:document.getElementById('store-claim-marketing').checked });
+    if(result.error){ errorBox.textContent = result.error; return; }
+    const modal = document.getElementById('modal');
+    if(modal && modal.open) modal.close();
+    renderBeatStorePage();
+  };
+  return true;
+}
+async function claimFreeBeat(listingId, { email, marketing = false } = {}){
+  if(djbOffline()) return { error:'You\'re offline. Connect to the internet to download.' };
+  const path = djbSignedIn() ? '/api/marketplace/freeEmail/claims/authenticated' : '/api/marketplace/freeEmail/claims';
+  const response = await djbRequest(path, { method:'POST', body:{ listingId, email, downloadConsentAccepted:true, marketingConsentAccepted:Boolean(marketing), source:'beat_store' } });
+  if(response.error){
+    if(response.status === 429) return { error:'Too many tries. Wait a few minutes and try again.' };
+    return { error:`Couldn't claim it: ${djbServerErrorText(response, 'request failed')}` };
+  }
+  const data = response.data || {};
+  const lead = data.lead || {};
+  if(data.verificationRequired){
+    saveBeatStoreClaim(listingId, { leadId:lead.id, email, claimedAt:new Date().toISOString(), pendingVerification:true });
+    showAppToast('Check your email', data.deliveryConfigured ? 'Confirm your email to unlock the download.' : 'This producer asked for email confirmation, but confirmation emails aren\'t set up on the server yet.');
+    return { verificationRequired:true };
+  }
+  if(!data.downloadAccessToken){
+    const saved = beatStoreClaims()[listingId];
+    if(saved && saved.downloadAccessToken) return downloadClaimedBeat(listingId);
+    return { error:'You already claimed this with that email. Download it from the browser you first used.' };
+  }
+  saveBeatStoreClaim(listingId, { leadId:lead.id, downloadAccessToken:data.downloadAccessToken, email, claimedAt:new Date().toISOString() });
+  return downloadClaimedBeat(listingId);
+}
+async function downloadClaimedBeat(listingId){
+  const claim = beatStoreClaims()[listingId];
+  if(!claim || !claim.downloadAccessToken) return { error:'No download saved for this beat yet.' };
+  const response = await djbRequest('/api/marketplace/freeEmail/downloads/access', { method:'POST', body:{ leadId:claim.leadId, downloadAccessToken:claim.downloadAccessToken } });
+  if(response.error){
+    const text = response.status === 403 ? 'You\'ve used all the downloads for this beat.' : `Download unavailable: ${djbServerErrorText(response, 'request failed')}`;
+    appAlert(text, 'Beat Store');
+    return { error:text };
+  }
+  const access = response.data && response.data.downloadAccess || {};
+  if(!/^https:\/\//i.test(String(access.url || ''))){ appAlert('The server didn\'t return a safe download link.', 'Beat Store'); return { error:'unsafe url' }; }
+  const link = document.createElement('a');
+  link.href = access.url;
+  link.download = access.file && access.file.filename || 'free-beat.mp3';
+  link.rel = 'noopener';
+  // The file is on another site (storage), where the download attribute is ignored: open it in a
+  // new tab so the app itself never navigates away.
+  link.target = '_blank';
+  document.body.appendChild(link);
+  try{ link.click(); }catch(e){}
+  link.remove();
+  showAppToast('Download started', access.file && access.file.filename || 'Your free beat is downloading.');
+  return { downloaded:true, url:access.url };
+}
+
+/* ------------------------------ 3. Blocked & muted list ----------------------------- */
+
+state.safetyLists = { status:'idle', blocks:[], mutes:[], error:'' };
+const MUTE_CATEGORY_TEXT = { all:'All notifications', challenge:'Challenge notifications', battle:'Battle notifications', relationship:'Follow notifications' };
+function muteDescription(mute){
+  const what = MUTE_CATEGORY_TEXT[mute.category] || 'Notifications';
+  return mute.notificationType ? `${what} (${readableComponentName(mute.notificationType)})` : what;
+}
+function safetyRowHtml(kind, row){
+  const profile = kind === 'block' ? (row.blockedProfile || {}) : (row.mutedProfile || {});
+  const name = profile.displayName || profile.name || (kind === 'mute' ? 'Everyone' : 'DJ');
+  const detail = kind === 'block' ? `Blocked ${relativeTimeHtml(row.createdAt)}` : `${esc(muteDescription(row))} muted ${relativeTimeHtml(row.createdAt)}`;
+  return `<div class="safety-row" data-safety-${kind}="${esc(row.id)}">${djAvatarHtml(name, avatarUrlForDj({ name, publicProfileId:profile.publicProfileId, avatarUrl:profile.avatarUrl }), 'row-avatar')}<div><strong>${esc(name)}</strong><small>${detail}</small></div><button class="ghost small" type="button" data-safety-undo="${kind}" data-safety-id="${esc(row.id)}">${kind === 'block' ? 'Unblock' : 'Unmute'}</button></div>`;
+}
+function renderSafetyLists(){
+  const box = document.getElementById('settings-safety-list');
+  if(!box) return;
+  const lists = state.safetyLists;
+  if(!djbSignedIn()){ box.innerHTML = '<p class="muted">Sign in to see DJs you\'ve blocked or muted. Blocks and mutes are saved on your account.</p>'; return; }
+  if(lists.status === 'loading'){ box.innerHTML = '<p class="muted">Loading…</p>'; return; }
+  if(lists.status === 'failed'){ box.innerHTML = `<p class="muted">${esc(lists.error)}</p><button class="ghost small" type="button" id="safety-retry">Try again</button>`; const retry = document.getElementById('safety-retry'); if(retry) retry.onclick = () => loadSafetyLists(); return; }
+  if(!lists.blocks.length && !lists.mutes.length){ box.innerHTML = '<div class="safety-empty"><strong>You haven\'t blocked or muted anyone.</strong><small>Block or mute a DJ from their profile or a notification.</small></div>'; return; }
+  box.innerHTML = `${lists.blocks.length ? `<h4>Blocked (${lists.blocks.length})</h4>${lists.blocks.map(row => safetyRowHtml('block', row)).join('')}` : ''}${lists.mutes.length ? `<h4>Muted (${lists.mutes.length})</h4>${lists.mutes.map(row => safetyRowHtml('mute', row)).join('')}` : ''}`;
+  box.querySelectorAll('[data-safety-undo]').forEach(btn => { btn.onclick = () => undoSafetyEntry(btn.dataset.safetyUndo, btn.dataset.safetyId); });
+}
+async function loadSafetyLists(){
+  const lists = state.safetyLists;
+  if(!djbSignedIn() || !djbApi()){ renderSafetyLists(); return { skipped:true }; }
+  lists.status = 'loading';
+  renderSafetyLists();
+  const [blocks, mutes] = await Promise.all([djbRequest('/api/blocks'), djbRequest('/api/notificationMutes')]);
+  if(blocks.error || mutes.error){
+    lists.status = 'failed';
+    lists.error = `Couldn't load your list: ${djbServerErrorText(blocks.error ? blocks : mutes, 'request failed')}`;
+  }else{
+    lists.status = 'ready';
+    lists.blocks = blocks.data && blocks.data.blocks || [];
+    lists.mutes = mutes.data && mutes.data.mutes || [];
+  }
+  renderSafetyLists();
+  return lists;
+}
+async function undoSafetyEntry(kind, id){
+  const lists = state.safetyLists;
+  const row = (kind === 'block' ? lists.blocks : lists.mutes).find(item => String(item.id) === String(id));
+  if(!row) return { skipped:true };
+  const profile = kind === 'block' ? row.blockedProfile || {} : row.mutedProfile || {};
+  const name = profile.displayName || profile.name || 'this DJ';
+  const ok = await appConfirm(kind === 'block'
+    ? { title:`Unblock ${name}?`, body:'They\'ll be able to see your public profile, follow you and challenge you again. Follows removed by the block don\'t come back on their own.', confirmLabel:'Unblock', cancelLabel:'Keep blocked' }
+    : { title:`Unmute ${name}?`, body:`You'll get ${muteDescription(row).toLowerCase()} again.`, confirmLabel:'Unmute', cancelLabel:'Keep muted' });
+  if(!ok) return { cancelled:true };
+  const response = await djbRequest(kind === 'block' ? `/api/blocks/${encodeURIComponent(id)}` : `/api/notificationMutes/${encodeURIComponent(id)}`, { method:'DELETE' });
+  if(response.error && response.status !== 404){ showErrorToast(`Couldn't ${kind === 'block' ? 'unblock' : 'unmute'}: ${djbServerErrorText(response, 'request failed')}`, () => undoSafetyEntry(kind, id)); return response; }
+  if(kind === 'block') lists.blocks = lists.blocks.filter(item => String(item.id) !== String(id));
+  else lists.mutes = lists.mutes.filter(item => String(item.id) !== String(id));
+  renderSafetyLists();
+  showAppToast(kind === 'block' ? 'Unblocked' : 'Unmuted', name);
+  return { removed:true };
+}
+
+/* ------------------------------- 4. Home-screen install ------------------------------ */
+
+let deferredInstallPrompt = null;
+function serviceWorkerAllowed(loc = window.location){
+  if(!loc) return false;
+  return loc.protocol === 'https:' || ['localhost', '127.0.0.1', '[::1]'].includes(loc.hostname);
+}
+function registerAppServiceWorker(nav = typeof navigator !== 'undefined' ? navigator : null, loc = window.location){
+  if(!nav || !nav.serviceWorker || typeof nav.serviceWorker.register !== 'function') return Promise.resolve({ skipped:'unsupported' });
+  if(!serviceWorkerAllowed(loc)) return Promise.resolve({ skipped:'insecure' });
+  return nav.serviceWorker.register('sw.js', { scope:'./' }).then(registration => ({ registered:true, registration })).catch(err => ({ error:err && err.message || 'register failed' }));
+}
+function appIsInstalled(){
+  try{ return Boolean((window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || (window.navigator && window.navigator.standalone)); }catch(e){ return false; }
+}
+function renderInstallPanel(){
+  const body = document.getElementById('settings-install-body');
+  if(!body) return;
+  const ua = String(window.navigator && window.navigator.userAgent || '');
+  if(appIsInstalled()){ body.innerHTML = '<p class="install-done">Installed. You\'re using DJ Battle from your home screen.</p>'; return; }
+  if(deferredInstallPrompt){
+    body.innerHTML = '<button class="primary small" type="button" id="settings-install-app">Install DJ Battle</button>';
+    document.getElementById('settings-install-app').onclick = async () => {
+      const prompt = deferredInstallPrompt;
+      deferredInstallPrompt = null;
+      try{ prompt.prompt(); const choice = await prompt.userChoice; if(choice && choice.outcome === 'accepted') showAppToast('Installing', 'DJ Battle is being added to your home screen.'); }catch(e){}
+      renderInstallPanel();
+    };
+    return;
+  }
+  body.innerHTML = /iphone|ipad|ipod/i.test(ua)
+    ? '<p class="install-steps">On iPhone or iPad: tap the <b>Share</b> button in Safari, then <b>Add to Home Screen</b>.</p>'
+    : '<p class="install-steps">In Chrome or Edge: open the browser menu and choose <b>Install app</b> or <b>Add to Home screen</b>. The option shows up once the site is on a secure (https) address.</p>';
+}
+if(typeof window !== 'undefined' && window.addEventListener){
+  window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); deferredInstallPrompt = event; renderInstallPanel(); });
+  window.addEventListener('appinstalled', () => { deferredInstallPrompt = null; renderInstallPanel(); });
+  window.addEventListener('load', () => { registerAppServiceWorker(); });
+  window.addEventListener('online', () => { if(activeViewId() === 'store') loadBeatStore().catch(() => {}); });
+  window.addEventListener('offline', () => { if(activeViewId() === 'store') renderBeatStorePage(); });
+}
+
+/* --------------------------------- 5. Practice log ---------------------------------- */
+
+const PRACTICE_HISTORY_CAP = 500;
+const PRACTICE_PAGE_SIZE = 25;
+state.practiceLog = { status:'idle', server:[], recordings:[], nextBefore:null, hasMore:false, error:'', shown:PRACTICE_PAGE_SIZE };
+
+function newPracticeSessionId(){ return `practice-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`; }
+function practiceSessionIdFromKey(key){ return `result-${String(key || '').replace(/[^A-Za-z0-9._:-]+/g, '-').slice(0, 110)}`; }
+function practiceHash(text){ let h = 2166136261; for(const ch of String(text)){ h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; } return h.toString(36); }
+// Older saved sessions had no id or time: give them stable ones so they never duplicate.
+function normalizePracticeEntry(entry){
+  if(!entry || typeof entry !== 'object') return null;
+  const out = { ...entry };
+  if(!out.id) out.id = out.resultKey ? practiceSessionIdFromKey(out.resultKey) : `legacy-${practiceHash([out.title, out.score, out.date, out.type, out.genre].join('|'))}`;
+  if(!out.recordedAt){
+    const parsed = Date.parse(out.date || '');
+    out.recordedAt = Number.isFinite(parsed) ? new Date(parsed).toISOString() : new Date(0).toISOString();
+  }
+  return out;
+}
+function persistPracticeHistory(){
+  state.practiceHistory = (state.practiceHistory || []).map(normalizePracticeEntry).filter(Boolean);
+  const seen = new Set();
+  state.practiceHistory = state.practiceHistory.filter(entry => (seen.has(entry.id) ? false : (seen.add(entry.id), true))).slice(0, PRACTICE_HISTORY_CAP);
+  try{ localStorage.setItem('djBattlePracticeHistory', JSON.stringify(state.practiceHistory)); }catch(e){
+    // Storage full: keep the newest half rather than losing everything.
+    try{ localStorage.setItem('djBattlePracticeHistory', JSON.stringify(state.practiceHistory.slice(0, Math.floor(PRACTICE_HISTORY_CAP / 2)))); }catch(err){}
+  }
+  return state.practiceHistory;
+}
+state.practiceHistory = (state.practiceHistory || []).map(normalizePracticeEntry).filter(Boolean);
+
+// The app saves two shapes: [{label, score}] for preview ratings (each out of 20) and
+// {timing:{score}} for judged results (each out of 100). Both become [{key,label,score,max}].
+function practiceBreakdownItems(breakdown){
+  const raw = Array.isArray(breakdown)
+    ? breakdown.map(item => ({ key:item && (item.key || item.id || item.label), label:item && (item.label || item.name || item.key), score:item && item.score, max:item && (item.max || item.maxScore) || 20 }))
+    : breakdown && typeof breakdown === 'object'
+      ? Object.entries(breakdown).filter(([, v]) => v && (typeof v === 'number' || (typeof v === 'object' && v.available !== false))).map(([key, v]) => ({ key, label:readableComponentName(key), score:typeof v === 'number' ? v : v.score, max:typeof v === 'object' && v.max || 100 }))
+      : [];
+  return raw.map(item => ({ key:String(item.key || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''), label:String(item.label || item.key || ''), score:Number(item.score), max:Number(item.max) || 100 }))
+    .filter(item => item.key && Number.isFinite(item.score));
+}
+function practiceSessionPayload(entry){
+  const e = normalizePracticeEntry(entry);
+  return { clientSessionId:e.id, title:e.title, type:e.type, genre:e.genre, source:e.source || (e.resultKey ? 'battle' : 'practice'), score:Number(e.score) || 0, maxScore:e.maxScore || (e.resultKey ? 100 : 180), breakdown:practiceBreakdownItems(e.breakdown), recordedAt:e.recordedAt, recordingTrackId:e.recordingTrackId || undefined };
+}
+async function syncPracticeSessionToAccount(entry){
+  if(!entry || !djbSignedIn() || !djbApi() || djbOffline()) return { skipped:true };
+  const response = await djbRequest('/api/practiceSessions', { method:'POST', body:practiceSessionPayload(entry) });
+  if(!response.error){
+    const local = state.practiceHistory.find(item => item.id === normalizePracticeEntry(entry).id);
+    if(local && !local.syncedAt){ local.syncedAt = new Date().toISOString(); persistPracticeHistory(); }
+  }
+  return response;
+}
+async function backfillPracticeSessions(){
+  const pending = state.practiceHistory.filter(entry => !entry.syncedAt).slice(0, 50);
+  let synced = 0;
+  for(const entry of pending){
+    const result = await syncPracticeSessionToAccount(entry);
+    if(result && result.error){ if(result.status === 0 || result.status === 503) break; continue; }
+    if(result && !result.skipped) synced += 1;
+  }
+  return { synced };
+}
+// Local and account sessions, newest first, each session once.
+function mergedPracticeSessions(){
+  const byId = new Map();
+  (state.practiceLog.server || []).forEach(session => { byId.set(session.id, { ...session, breakdownItems:practiceBreakdownItems(session.breakdown), onAccount:true }); });
+  (state.practiceHistory || []).forEach(raw => {
+    const entry = normalizePracticeEntry(raw);
+    const existing = byId.get(entry.id);
+    const local = { id:entry.id, title:entry.title, type:entry.type, genre:entry.genre, source:entry.source || (entry.resultKey ? 'battle' : 'practice'), score:Number(entry.score) || 0, maxScore:entry.maxScore || (entry.resultKey ? 100 : 180), breakdownItems:practiceBreakdownItems(entry.breakdown), recordedAt:entry.recordedAt, recordingTrackId:entry.recordingTrackId || null, local:true };
+    byId.set(entry.id, existing ? { ...local, ...existing, local:true, recordingTrackId:existing.recordingTrackId || local.recordingTrackId } : local);
+  });
+  return Array.from(byId.values()).sort((a, b) => (Date.parse(b.recordedAt) || 0) - (Date.parse(a.recordedAt) || 0));
+}
+function practiceRecordingFor(session){
+  const candidates = [...(state.practiceLog.recordings || []), ...(state.library || []).filter(track => track && track.sourceType === 'practice_recording')];
+  return candidates.find(track => track && (
+    (session.recordingTrackId && String(track.id) === String(session.recordingTrackId))
+    || (track.practiceMetadata && track.practiceMetadata.practiceHistoryId === session.id)
+    || (track.usageRelationships && Array.isArray(track.usageRelationships.practiceHistory) && track.usageRelationships.practiceHistory.includes(session.id))
+  )) || null;
+}
+function practicePercent(score, max){ const m = Number(max) || 100; return Math.max(0, Math.min(100, Math.round((Number(score) / m) * 100))); }
+const PRACTICE_CHART_COLORS = ['#b9ff31', '#4dd8ff', '#ff7ab6', '#ffb020', '#a78bfa', '#34d399', '#f87171', '#facc15', '#60a5fa'];
+function practiceChartSeries(sessions){
+  const ordered = sessions.slice().sort((a, b) => (Date.parse(a.recordedAt) || 0) - (Date.parse(b.recordedAt) || 0)).slice(-40);
+  const series = new Map();
+  series.set('total', { key:'total', label:'Overall', points:[] });
+  ordered.forEach((session, index) => {
+    series.get('total').points.push({ x:index, y:practicePercent(session.score, session.maxScore) });
+    session.breakdownItems.forEach(item => {
+      if(!series.has(item.key)) series.set(item.key, { key:item.key, label:item.label, points:[] });
+      series.get(item.key).points.push({ x:index, y:practicePercent(item.score, item.max) });
+    });
+  });
+  return { count:ordered.length, series:Array.from(series.values()).filter(s => s.points.length) , first:ordered[0], last:ordered[ordered.length - 1] };
+}
+function practiceChartSvg(sessions){
+  const data = practiceChartSeries(sessions);
+  if(data.count < 2) return '<p class="muted">Save at least two practice sessions to see your trend.</p>';
+  const W = 720, H = 240, L = 36, R = 12, T = 12, B = 28;
+  const x = i => L + (data.count === 1 ? 0 : (i / (data.count - 1)) * (W - L - R));
+  const y = v => T + (1 - v / 100) * (H - T - B);
+  const grid = [0, 25, 50, 75, 100].map(v => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="practice-grid"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" class="practice-axis">${v}%</text>`).join('');
+  const lines = data.series.map((s, i) => {
+    const color = PRACTICE_CHART_COLORS[i % PRACTICE_CHART_COLORS.length];
+    const path = s.points.map((p, n) => `${n ? 'L' : 'M'}${x(p.x).toFixed(1)},${y(p.y).toFixed(1)}`).join(' ');
+    const dots = s.points.map(p => `<circle cx="${x(p.x).toFixed(1)}" cy="${y(p.y).toFixed(1)}" r="${s.key === 'total' ? 3.5 : 2.5}" fill="${color}"/>`).join('');
+    return `<g class="practice-line" data-series="${esc(s.key)}"><path d="${path}" fill="none" stroke="${color}" stroke-width="${s.key === 'total' ? 3 : 1.6}" ${s.key === 'total' ? '' : 'stroke-opacity=".85"'}/>${dots}</g>`;
+  }).join('');
+  const fmt = session => session ? new Date(session.recordedAt).toLocaleDateString(undefined, { month:'short', day:'numeric' }) : '';
+  const legend = data.series.map((s, i) => `<span class="practice-legend-item"><i style="background:${PRACTICE_CHART_COLORS[i % PRACTICE_CHART_COLORS.length]}"></i>${esc(s.label)}</span>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" class="practice-chart-svg" role="img" aria-label="Practice scores over your last ${data.count} sessions, as a percent of the top score">${grid}${lines}<text x="${L}" y="${H - 8}" class="practice-axis">${esc(fmt(data.first))}</text><text x="${W - R}" y="${H - 8}" text-anchor="end" class="practice-axis">${esc(fmt(data.last))}</text></svg><div class="practice-legend">${legend}</div>`;
+}
+function practiceRowHtml(session){
+  const recording = practiceRecordingFor(session);
+  const chips = session.breakdownItems.slice(0, 9).map(item => `<span class="practice-chip">${esc(item.label)} <b>${esc(Math.round(item.score * 10) / 10)}</b>/${esc(item.max)}</span>`).join('');
+  const where = session.onAccount ? 'Saved to your account' : djbSignedIn() ? 'This browser (syncing)' : 'This browser only';
+  return `<article class="practice-row" data-practice-session="${esc(session.id)}"><div class="practice-row-main"><strong>${esc(session.title || 'Practice session')}</strong><small>${relativeTimeHtml(session.recordedAt)} • ${esc(session.type || 'Practice')} • ${esc(session.genre || 'Global')} • ${esc(where)}</small><div class="practice-chips">${chips}</div></div><div class="practice-score"><b>${esc(session.score)}</b><span>/${esc(session.maxScore)}</span></div>${recording ? `<button class="ghost small" type="button" data-practice-replay="${esc(session.id)}">Replay</button>` : '<span class="practice-no-replay" title="No recording was saved with this session">No recording</span>'}</article>`;
+}
+function renderPracticePage(){
+  const list = document.getElementById('practice-list');
+  const chart = document.getElementById('practice-chart');
+  const status = document.getElementById('practice-status');
+  if(!list || !chart) return;
+  const log = state.practiceLog;
+  const sessions = mergedPracticeSessions();
+  let note = '';
+  if(!djbSignedIn()) note = 'Saved in this browser only. Sign in to keep your whole practice log on your account.';
+  else if(djbOffline()) note = 'You\'re offline. Showing sessions saved in this browser; they\'ll sync when you\'re back.';
+  else if(log.status === 'loading') note = 'Loading your practice log…';
+  else if(log.status === 'unavailable') note = log.error;
+  else if(log.status === 'failed') note = log.error;
+  if(status){ status.textContent = note; status.className = `practice-status${log.status === 'failed' || log.status === 'unavailable' ? ' practice-status--warn' : ''}`; }
+  chart.innerHTML = practiceChartSvg(sessions);
+  const count = document.getElementById('practice-count');
+  if(count) count.textContent = `${sessions.length} session${sessions.length === 1 ? '' : 's'}`;
+  const visible = sessions.slice(0, log.shown);
+  list.innerHTML = visible.length ? visible.map(practiceRowHtml).join('') : '<div class="practice-empty"><strong>No practice sessions yet</strong><p>Start a practice battle and save the rating. It will show up here.</p></div>';
+  list.querySelectorAll('[data-practice-replay]').forEach(btn => { btn.onclick = () => replayPracticeSession(btn.dataset.practiceReplay); });
+  const more = document.getElementById('practice-load-more');
+  if(more){
+    more.classList.toggle('hidden', !(sessions.length > log.shown || log.hasMore));
+    more.onclick = () => { log.shown += PRACTICE_PAGE_SIZE; if(log.hasMore && sessions.length <= log.shown) loadPracticeLog({ append:true }).catch(() => {}); else renderPracticePage(); };
+  }
+  const refresh = document.getElementById('practice-refresh');
+  if(refresh) refresh.onclick = () => loadPracticeLog().catch(() => {});
+}
+async function loadPracticeLog(options = {}){
+  const log = state.practiceLog;
+  if(!djbSignedIn() || !djbApi() || djbOffline()){ renderPracticePage(); return { skipped:true }; }
+  log.status = 'loading';
+  renderPracticePage();
+  if(!options.append) await backfillPracticeSessions();
+  const query = `/api/practiceSessions?limit=100${options.append && log.nextBefore ? `&before=${encodeURIComponent(log.nextBefore)}` : ''}`;
+  const [sessions, recordings] = await Promise.all([
+    djbRequest(query),
+    options.append ? Promise.resolve({ data:{ tracks:log.recordings } }) : djbRequest('/api/musicLibrary/practiceRecordings')
+  ]);
+  if(sessions.error){
+    log.status = sessions.status === 503 || sessions.status === 500 ? 'unavailable' : 'failed';
+    log.error = sessions.status === 0 ? 'Can\'t reach the server. Showing sessions saved in this browser.' : sessions.status === 503 || sessions.status === 500 ? 'Your account\'s practice log isn\'t set up on the server yet. Showing sessions saved in this browser.' : `Couldn't load your practice log: ${djbServerErrorText(sessions, 'request failed')}`;
+  }else{
+    const rows = sessions.data && sessions.data.sessions || [];
+    const merged = new Map((options.append ? log.server : []).map(row => [row.id, row]));
+    rows.forEach(row => merged.set(row.id, row));
+    log.server = Array.from(merged.values());
+    log.hasMore = Boolean(sessions.data && sessions.data.pagination && sessions.data.pagination.hasMore);
+    log.nextBefore = sessions.data && sessions.data.pagination && sessions.data.pagination.nextBefore || null;
+    log.status = 'ready';
+  }
+  if(!recordings.error) log.recordings = (recordings.data && recordings.data.tracks || []).map(track => serverTrackToLocal(track) || track);
+  renderPracticePage();
+  return log;
+}
+async function replayPracticeSession(sessionId){
+  const session = mergedPracticeSessions().find(item => item.id === sessionId);
+  const recording = session && practiceRecordingFor(session);
+  if(!recording){ appAlert('No recording was saved with this session.', 'Practice'); return { error:'no recording' }; }
+  let src = securePlaybackSource(recording);
+  if(!src && recording.serverBacked){
+    const response = await djbRequest(`/api/musicLibrary/tracks/${encodeURIComponent(recording.id)}/playbackAccess`, { method:'POST' });
+    const track = response.data && response.data.track;
+    src = track && track.playbackAccess && /^https:\/\//i.test(track.playbackAccess.url || '') ? track.playbackAccess.url : '';
+  }
+  if(!src && typeof loadLibraryAudioBlob === 'function'){
+    try{ const blob = await loadLibraryAudioBlob(recording.id); if(blob) src = URL.createObjectURL(blob); }catch(e){}
+  }
+  if(!src){ appAlert('This recording isn\'t available to play right now.', 'Practice'); return { error:'unavailable' }; }
+  openModal(`<span class="eyebrow accent">REPLAY</span><h3>${esc(session.title || 'Practice session')}</h3><p style="color:var(--muted)">${relativeTimeHtml(session.recordedAt)} • ${esc(session.score)}/${esc(session.maxScore)}</p><audio id="practice-replay-audio" controls autoplay src="${esc(src)}" style="width:100%"></audio><div class="modal-actions"><button class="primary" value="cancel">Close</button></div>`);
+  return { playing:true, src };
+}
+function openPracticePage(){
+  renderPracticePage();
+  if(state.practiceLog.status !== 'loading') loadPracticeLog().catch(err => console.warn('Practice log load failed', err));
+}
+
+// Deep links (#store, #practice) opened before these pages existed.
+(function openNewRouteFromHash(){
+  const target = viewFromHash();
+  if((target === 'store' || target === 'practice') && activeViewId() !== target) switchView(target, { fromHistory:true });
+})();
+
+Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), {
+  beatStoreTrackEligibility, loadBeatStore, renderBeatStorePage, openBeatStoreCreate, createFreeBeatListing, openBeatStoreClaim, claimFreeBeat, downloadClaimedBeat, beatStoreClaims,
+  getBeatStoreState: () => state.beatStore, getLibraryTracksState: () => state.library,
+  loadSafetyLists, renderSafetyLists, undoSafetyEntry, getSafetyLists: () => state.safetyLists,
+  serviceWorkerAllowed, registerAppServiceWorker, renderInstallPanel,
+  normalizePracticeEntry, persistPracticeHistory, practiceBreakdownItems, practiceSessionPayload, syncPracticeSessionToAccount, mergedPracticeSessions,
+  practiceChartSeries, renderPracticePage, loadPracticeLog, replayPracticeSession, savePracticeResult, getPracticeLogState: () => state.practiceLog,
+  PRACTICE_HISTORY_CAP, updateAuthUI: typeof updateAuthUI === 'function' ? updateAuthUI : undefined
 });
