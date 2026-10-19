@@ -377,7 +377,8 @@
 
     // Safe filename from the battle title and the take date, e.g. "friday-night-house-battle-2026-10-18.webm".
     function downloadFileName(title, date){
-      const d = date instanceof Date && !isNaN(date) ? date : new Date(now());
+      // Duck-typed so a Date from another realm (e.g. a test harness) is still honoured.
+      const d = date && typeof date.getFullYear === 'function' && !isNaN(date.getTime()) ? date : new Date(now());
       const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       const slug = String(title || '')
         .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
