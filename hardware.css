@@ -1,0 +1,70 @@
+/* ===== Hardware-inspired UI additions ===== */
+:root{--lcd-bg:#071014;--lcd-glow:rgba(185,255,49,0.06);--bezel:#0c1114;--screw:#2b3136;--meter-bg:#081014;--meter-fill:#7ef04a}
+
+/* LCD-style screen */
+.lcd-screen{background:linear-gradient(180deg,var(--lcd-bg),#041018);border:1px solid var(--bezel);box-shadow:0 6px 20px rgba(0,0,0,0.6),0 0 40px var(--lcd-glow) inset;border-radius:8px;padding:10px;color:var(--accent);font-family:monospace}
+.lcd-screen.small{font-size:12px;padding:6px;border-radius:6px}
+
+/* Deck hardware look */
+.deck{background:linear-gradient(180deg,#0a0f12,#0f1418);border:1px solid #0e1418;box-shadow:inset 0 2px 0 rgba(255,255,255,0.02),0 6px 30px rgba(0,0,0,0.6);padding:18px;border-radius:14px}
+.deck .deck-top{align-items:center}
+.deck .bezel{background:linear-gradient(180deg,#070a0c,#0b1113);border-radius:6px;padding:8px;border:1px solid #10161a}
+.brand-mark,.media-card .cover{box-shadow:0 6px 18px rgba(0,0,0,0.6)}
+
+/* focused deck outline */
+.deck.focused{box-shadow:0 0 0 2px rgba(185,255,49,0.06), inset 0 1px 0 rgba(255,255,255,0.02);border-color:#234421}
+
+.deck-cues{display:flex;gap:6px;margin-top:8px}
+.deck-cues button{padding:6px 8px;border-radius:6px;background:#081018;border:1px solid #122028;color:var(--muted);font-size:12px}
+
+/* Readouts: BPM / Key */
+.readout{display:inline-flex;flex-direction:column;align-items:flex-start;padding:8px 10px;border-radius:8px;background:linear-gradient(180deg,#061018,#08121a);border:1px solid #122028;color:var(--accent);font-family:monospace}
+.readout .big{font-size:20px;font-weight:900}
+.bpm-display{display:flex;gap:8px;align-items:center}
+
+/* Cue/Loop indicators */
+.cue-indicator,.loop-indicator{display:inline-block;padding:6px 8px;border-radius:6px;background:#081217;color:#bfe89b;font-weight:800;font-size:11px;border:1px solid rgba(127,200,80,0.12)}
+
+/* Small meters */
+.meter{width:70px;height:8px;background:var(--meter-bg);border-radius:6px;border:1px solid #0f1820;overflow:hidden}
+.meter > i{display:block;height:100%;width:30%;background:linear-gradient(90deg,var(--meter-fill),#54c23a);box-shadow:0 0 6px rgba(126,240,74,0.18)}
+
+/* Hardware source selectors */
+.hardware-source{display:flex;gap:8px;align-items:center}
+.hardware-source button{background:#0b1112;border:1px solid #151b1d;padding:8px 10px;border-radius:8px;color:var(--muted)}
+.hardware-source button.active{background:#071418;color:var(--accent);border-color:#234421;box-shadow:0 4px 14px rgba(14,60,14,0.25)}
+
+/* Battle timer as deck time display */
+.battle-clock{font-family:monospace;background:#030609;padding:8px 12px;border-radius:6px;border:1px solid #081216;color:var(--accent);box-shadow:inset 0 -6px 30px rgba(0,0,0,0.6),0 8px 18px rgba(0,0,0,0.6)}
+.battle-clock.small{font-size:22px}
+
+/* Faux screws for hardware panels */
+.faux-screw{width:8px;height:8px;border-radius:50%;background:linear-gradient(180deg,#2b3136,#1a1f22);box-shadow:inset 0 1px 0 rgba(255,255,255,0.04);border:1px solid #000}
+
+/* Rankings/profile cards with equipment feel */
+.profile-hero, .battle-card, .media-card{background:linear-gradient(180deg,#071016,#0e1419);border:1px solid #0f1720}
+
+/* small responsive tweaks for hardware readouts */
+@media(max-width:760px){.readout{font-size:12px}.lcd-screen{font-size:13px}}
+
+/* Waveform UI */
+.wave{position:relative;background:linear-gradient(180deg,#061018,#07121a);border-radius:6px;overflow:hidden;border:1px solid #0f1720}
+.wave .wave-overview{position:absolute;inset:0;display:flex;align-items:center;padding:6px;gap:2px}
+.wave .wave-seg{flex:1;height:28px;background:linear-gradient(180deg,#0c1620,#081018);margin:0 2px;border-radius:3px;opacity:0.9}
+.wave .beat-division{background:#12323a}
+.wave .position-marker{position:absolute;top:0;bottom:0;left:50%;width:2px;background:var(--accent);box-shadow:0 0 6px rgba(185,255,49,0.08)}
+.wave .cue-marker{position:absolute;top:6px;width:6px;height:16px;background:#ffd580;border-radius:2px;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06)}
+.wave .hotcue{position:absolute;bottom:6px;width:10px;height:10px;border-radius:2px;background:#ff9aa2;border:1px solid #3a0b0f}
+.wave .loop-region{position:absolute;top:0;height:100%;background:linear-gradient(90deg,rgba(126,240,74,0.08),rgba(126,240,74,0.02));border-left:1px solid rgba(126,240,74,0.12);border-right:1px solid rgba(126,240,74,0.06)}
+
+/* Level meter (vertical segmented) */
+.level-meter{width:12px;height:72px;background:#071018;border:1px solid #0f1720;border-radius:4px;padding:4px;display:flex;flex-direction:column-reverse;gap:3px}
+.level-meter .seg{flex:1;background:#0b1416;border-radius:2px}
+.level-meter .seg.on{background:linear-gradient(180deg,#7ef04a,#4fb32a)}
+
+/* Mobile studio switcher */
+.studio-grid.mobile-mode{grid-template-columns:1fr !important}
+.studio-grid.mobile-show-decka .deck-right,.studio-grid.mobile-show-decka .deck-right + *{display:none}
+.studio-grid.mobile-show-deckb .deck-left,.studio-grid.mobile-show-deckb .deck-left ~ *{display:none}
+.studio-controls-mobile{display:none}
+@media(max-width:900px){.studio-controls-mobile{display:flex;gap:8px;margin-bottom:8px}.studio-grid{grid-template-columns:1fr!important}}

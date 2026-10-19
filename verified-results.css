@@ -1,0 +1,240 @@
+.verified-discovery-panel,
+.verified-ranking-panel{
+  display:grid;
+  gap:12px;
+}
+
+.verified-actions{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.verified-filters{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:8px;
+  border:1px solid #252c38;
+  background:#0d1117;
+  border-radius:6px;
+  padding:12px;
+}
+
+.verified-filters label{
+  color:var(--muted);
+  font-size:9px;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  font-weight:800;
+}
+
+.verified-filters select{
+  width:100%;
+  margin-top:6px;
+  background:#111820;
+  color:#fff;
+  border:1px solid #2b3441;
+  border-radius:4px;
+  padding:8px;
+}
+
+.verified-status-strip{
+  min-height:28px;
+  display:flex;
+  gap:8px;
+  align-items:center;
+  flex-wrap:wrap;
+  color:var(--muted);
+  font-size:12px;
+}
+
+.verified-status-pill{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  border:1px solid #2b3441;
+  background:#10151d;
+  border-radius:4px;
+  padding:6px 8px;
+}
+
+.verified-status-pill i{
+  width:9px;
+  height:9px;
+  display:inline-block;
+  background:#7ee787;
+  box-shadow:0 0 10px rgba(126,231,135,.45);
+}
+
+.verified-status-pill.warn i{
+  background:#ffd166;
+  box-shadow:0 0 10px rgba(255,209,102,.45);
+}
+
+.verified-results-list{
+  display:grid;
+  gap:8px;
+}
+
+.verified-result-row{
+  display:grid;
+  grid-template-columns:86px 1fr auto;
+  gap:12px;
+  align-items:stretch;
+  border:1px solid #252c38;
+  background:#0f141c;
+  border-radius:6px;
+  padding:10px;
+}
+
+.verified-score-cell{
+  display:grid;
+  gap:6px;
+  place-items:center;
+  border:1px solid #2f3a24;
+  background:#10190d;
+  border-radius:4px;
+  padding:8px 6px;
+}
+
+.verified-score-cell strong{
+  color:var(--accent);
+  font-family:ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size:30px;
+  line-height:1;
+}
+
+.verified-country-marker,
+.verified-belt-marker{
+  display:inline-flex;
+  min-width:36px;
+  justify-content:center;
+  align-items:center;
+  border:1px solid #344050;
+  background:#151b24;
+  color:#fff;
+  border-radius:4px;
+  padding:3px 6px;
+  font-size:10px;
+  font-weight:900;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+
+.verified-main{
+  display:grid;
+  gap:7px;
+}
+
+.verified-title{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+
+.verified-title strong{
+  font-size:16px;
+}
+
+.verified-meta{
+  display:grid;
+  grid-template-columns:repeat(6,minmax(0,1fr));
+  gap:6px;
+}
+
+.verified-chip{
+  border:1px solid #222936;
+  background:#151a22;
+  border-radius:4px;
+  padding:7px;
+  min-width:0;
+}
+
+.verified-chip span{
+  display:block;
+  color:var(--muted);
+  font-size:8px;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  font-weight:800;
+}
+
+.verified-chip b{
+  display:block;
+  margin-top:4px;
+  color:#fff;
+  font-size:12px;
+  overflow-wrap:anywhere;
+}
+
+.verified-actions-column{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  align-items:stretch;
+}
+
+.verified-ranking-categories{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+}
+
+.verified-ranking-category{
+  border:1px solid #252c38;
+  background:#0f141c;
+  border-radius:6px;
+  padding:10px;
+}
+
+.verified-ranking-category h4{
+  margin:0 0 8px;
+  font-size:13px;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+}
+
+.verified-ranking-row{
+  display:grid;
+  grid-template-columns:38px 1fr auto;
+  gap:8px;
+  align-items:center;
+  border-top:1px solid #202734;
+  padding:8px 0;
+  font-size:12px;
+}
+
+.verified-ranking-row:first-of-type{
+  border-top:0;
+}
+
+.verified-ranking-row strong{
+  display:block;
+}
+
+.verified-ranking-row small{
+  color:var(--muted);
+}
+
+@media(max-width:1050px){
+  .verified-filters,
+  .verified-meta,
+  .verified-ranking-categories{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+}
+
+@media(max-width:760px){
+  .verified-filters,
+  .verified-meta,
+  .verified-result-row,
+  .verified-ranking-categories{
+    grid-template-columns:1fr;
+  }
+
+  .verified-actions-column{
+    flex-direction:row;
+    flex-wrap:wrap;
+  }
+}

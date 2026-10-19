@@ -1,0 +1,23 @@
+/* Battle Room specific styles */
+.battle-room-grid{display:grid;grid-template-columns:360px 1fr 360px;gap:14px;margin-top:12px}
+.battle-room .players .player-card,.player-card{display:flex;align-items:center;gap:12px;padding:12px;border-radius:12px;background:#0f1418;border:1px solid var(--line)}
+.player-card .avatar{width:52px;height:52px;border-radius:8px;font-size:18px}
+.battle-meta{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;padding:12px;border-radius:10px}
+.assigned-tracks{margin-top:12px;border-top:1px solid #1b2129;padding-top:12px;display:flex;flex-direction:column;gap:8px}
+.assigned-tracks .track{padding:10px;border-radius:8px;background:#0b0f13;border:1px solid #1f2730;display:flex;justify-content:space-between;align-items:center}
+.battle-clock{font-size:34px;color:var(--accent);font-weight:900;margin-top:6px}
+.battle-clock.warning{color:var(--danger);text-shadow:0 0 12px rgba(255,91,110,.12)}
+.upload-panel input[type=file]{width:100%}
+.upload-panel .progress{height:8px;border-radius:8px;overflow:hidden;margin-top:6px}
+.upload-panel .progress i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2))}
+@media(max-width:1050px){.battle-room-grid{grid-template-columns:1fr}.battle-room .players{order:2}}
+
+/* Hardware styling tweaks for battle room */
+.battle-room-grid{gap:18px}
+.assigned-tracks .track{padding:12px;border-radius:10px;background:linear-gradient(180deg,#061018,#08121a);border:1px solid #0f1720;display:flex;justify-content:space-between;align-items:center;box-shadow:inset 0 -6px 20px rgba(0,0,0,0.6)}
+.assigned-tracks .track .meta{display:flex;gap:12px;align-items:center}
+.assigned-tracks .track .meta .readout{padding:6px 8px}
+.battle-clock{font-family:monospace;background:#030609;padding:8px 12px;border-radius:6px;border:1px solid #081216;color:var(--accent);box-shadow:inset 0 -6px 30px rgba(0,0,0,0.6),0 8px 18px rgba(0,0,0,0.6);font-size:34px}
+.battle-clock.warning{color:var(--danger);text-shadow:0 0 12px rgba(255,91,110,.18)}
+.player-card{border-radius:12px;padding:14px;background:linear-gradient(180deg,#071016,#0f1418);border:1px solid #0f1720}
+.upload-panel .panel{background:linear-gradient(180deg,#071016,#0f1418);border:1px solid #0f1720}
