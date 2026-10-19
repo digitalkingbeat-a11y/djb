@@ -48,3 +48,6 @@ server/temp/
 # OS/editor noise
 .DS_Store
 Thumbs.db
+
+# GitHub Pages build output (scripts/build-pages.js)
+_site/

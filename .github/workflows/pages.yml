@@ -1,0 +1,55 @@
+name: Deploy to GitHub Pages
+
+# Publishes the static front end to the gh-pages branch on every push to main.
+# GitHub Pages serves that branch at https://digitalkingbeat-a11y.github.io/djb/.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and publish gh-pages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build check
+        run: npm run build
+      - name: Assemble site
+        run: node scripts/build-pages.js _site
+      - name: Publish to gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA::7}"
+          REMOTE="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git ls-remote --exit-code --heads "$REMOTE" gh-pages >/dev/null; then
+            git clone --quiet --depth 1 --branch gh-pages "$REMOTE" publish
+          else
+            git init --quiet publish
+            git -C publish checkout --quiet --orphan gh-pages
+            git -C publish remote add origin "$REMOTE"
+          fi
+          find publish -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a _site/. publish/
+          printf '# DJ Battle — GitHub Pages build\n\nPublished automatically from main @ %s by .github/workflows/pages.yml. Do not edit this branch by hand.\n' "$SHORT_SHA" > publish/README.md
+          cd publish
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Site unchanged; nothing to publish."
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit --quiet -m "Deploy main @ ${SHORT_SHA} to GitHub Pages"
+          git push --quiet origin gh-pages
