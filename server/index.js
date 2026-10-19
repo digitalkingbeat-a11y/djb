@@ -545,6 +545,9 @@ app.post('/api/battles/:battleId/join', requireAuth, async (req, res) => {
     idempotencyReplay:false
   })) return;
   try{
+    const tournamentGate = await Tournaments.tournamentBattleJoinAllowed(supabaseService, validation.value.battleId, userId);
+    if(tournamentGate.error) throw tournamentGate.error;
+    if(!tournamentGate.allowed) return res.status(403).json({ error:'Only the two DJs in this tournament match can join it' });
     const result = await joinBattleWithPrepSnapshot(supabaseService, userId, validation.value.battleId, body);
     if(result.forbidden) return res.status(403).json({ error:'Cannot use another DJ\'s Battle Prep crate or tracks' });
     if(result.notFound || result.unavailable) return res.status(404).json({ error:'Battle or Battle Prep crate is unavailable' });
@@ -3171,6 +3174,191 @@ app.post('/api/submitJudgeBreakdown', requireAuth, async (req, res) => {
   }catch(err){
     console.error('submitJudgeBreakdown error', err);
     return res.status(500).json({ error: 'Judge breakdown submission failed' });
+  }
+});
+
+/* ---------- Oct 19: battle chat, tournaments, timed comments ---------- */
+const BattleChat = require('./battle_chat');
+const Tournaments = require('./tournaments');
+const TimedComments = require('./timed_comments');
+// Lets a public read include "you" details when the browser sends a token, without requiring one.
+const optionalAuth = (req, res, next) => (req.get('Authorization') ? requireAuth(req, res, next) : next());
+function sendSchemaMissing(res, result){
+  return res.status(503).json({ error:`Run server/sql/${result.schema}.sql in Supabase to turn this on`, schemaMissing:true, schema:result.schema });
+}
+
+app.get('/api/battles/:battleId/chat', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await BattleChat.listBattleChat(supabaseService, req.authUser.id, req.params.battleId, { after:req.query && req.query.after });
+    if(result.schemaMissing) return sendSchemaMissing(res, result);
+    if(result.forbidden) return res.status(403).json({ error:'Only DJs in this battle can read its chat' });
+    if(result.validationError) return res.status(422).json({ error:result.validationError });
+    if(result.error) throw result.error;
+    return res.json({ success:true, messages:result.messages, canSend:result.canSend, maxLength:result.maxLength });
+  }catch(err){
+    console.error('battle chat list error', err);
+    return res.status(500).json({ error:'Battle chat request failed' });
+  }
+});
+
+app.post('/api/battles/:battleId/chat', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  if(!guardProtectedWrite(req, res, 'battleChatPost', { payload:{ userId:req.authUser.id, battleId:req.params.battleId }, fingerprintReplay:false, idempotencyReplay:false })) return;
+  try{
+    const result = await BattleChat.postBattleChat(supabaseService, req.authUser.id, req.params.battleId, req.body || {});
+    if(result.schemaMissing) return sendSchemaMissing(res, result);
+    if(result.forbidden) return res.status(403).json({ error:'Only DJs in this battle can chat here' });
+    if(result.blocked) return res.status(403).json({ error:'You can\'t message this DJ', blocked:true });
+    if(result.rateLimited) return res.status(429).json({ error:'Slow down a little before sending more' });
+    if(result.validationError) return res.status(422).json({ error:result.validationError });
+    if(result.error) throw result.error;
+    return res.status(201).json({ success:true, message:result.message });
+  }catch(err){
+    console.error('battle chat post error', err);
+    return res.status(500).json({ error:'Battle chat send failed' });
+  }
+});
+
+function sendTournamentResult(res, result, okStatus = 200){
+  if(result.schemaMissing) return sendSchemaMissing(res, result);
+  if(result.forbidden) return res.status(403).json({ error:'Only the host or the DJs in this match can do that' });
+  if(result.notFound) return res.status(404).json({ error:'Tournament is unavailable' });
+  if(result.rateLimited) return res.status(429).json({ error:'You\'ve created a few tournaments already. Try again later.' });
+  if(result.validationError) return res.status(422).json({ error:result.validationError });
+  if(result.conflict) return res.status(409).json({ error:result.reason || 'Tournament changed, refresh and try again' });
+  if(result.error) throw result.error;
+  return null;
+}
+
+app.get('/api/tournaments', optionalAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await Tournaments.listTournaments(supabaseService, req.authUser && req.authUser.id);
+    if(sendTournamentResult(res, result)) return;
+    return res.json({ success:true, tournaments:result.tournaments });
+  }catch(err){
+    console.error('tournament list error', err);
+    return res.status(500).json({ error:'Tournament list request failed' });
+  }
+});
+
+app.get('/api/tournaments/:tournamentId', optionalAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await Tournaments.getTournament(supabaseService, req.params.tournamentId, req.authUser && req.authUser.id);
+    if(sendTournamentResult(res, result)) return;
+    return res.json({ success:true, tournament:result.tournament });
+  }catch(err){
+    console.error('tournament read error', err);
+    return res.status(500).json({ error:'Tournament request failed' });
+  }
+});
+
+app.post('/api/tournaments', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  if(!guardProtectedWrite(req, res, 'tournamentCreate', { payload:{ userId:req.authUser.id }, fingerprintReplay:false, idempotencyReplay:false })) return;
+  try{
+    const result = await Tournaments.createTournament(supabaseService, req.authUser.id, req.body || {});
+    if(sendTournamentResult(res, result)) return;
+    return res.status(201).json({ success:true, tournament:result.tournament });
+  }catch(err){
+    console.error('tournament create error', err);
+    return res.status(500).json({ error:'Tournament create failed' });
+  }
+});
+
+for(const action of ['join', 'leave', 'start']){
+  app.post(`/api/tournaments/:tournamentId/${action}`, requireAuth, async (req, res) => {
+    if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+    if(!guardProtectedWrite(req, res, `tournament_${action}`, { payload:{ userId:req.authUser.id, tournamentId:req.params.tournamentId }, fingerprintReplay:false, idempotencyReplay:false })) return;
+    try{
+      const fn = { join:Tournaments.joinTournament, leave:Tournaments.leaveTournament, start:Tournaments.startTournament }[action];
+      const result = await fn(supabaseService, req.authUser.id, req.params.tournamentId);
+      if(sendTournamentResult(res, result)) return;
+      const fresh = await Tournaments.getTournament(supabaseService, req.params.tournamentId, req.authUser.id);
+      if(fresh.error) throw fresh.error;
+      return res.json({ success:true, tournament:fresh.tournament, duplicate:Boolean(result.duplicate) });
+    }catch(err){
+      console.error(`tournament ${action} error`, err);
+      return res.status(500).json({ error:'Tournament request failed' });
+    }
+  });
+}
+
+app.post('/api/tournaments/:tournamentId/matches/:matchId/battle', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  if(!guardProtectedWrite(req, res, 'tournamentMatchBattle', { payload:{ userId:req.authUser.id, matchId:req.params.matchId }, fingerprintReplay:false, idempotencyReplay:false })) return;
+  try{
+    const result = await Tournaments.playTournamentMatch(supabaseService, req.authUser.id, req.params.tournamentId, req.params.matchId, req.body || {}, {
+      createBattle:createBattleWithPrepSnapshot, joinBattle:joinBattleWithPrepSnapshot, roomState:buildBattleRoomState
+    });
+    if(result.unavailable) return res.status(404).json({ error:'Battle Prep crate is unavailable' });
+    if(sendTournamentResult(res, result)) return;
+    return res.json({ success:true, battleId:result.battleId, battle:result.battle, entry:result.entry, room:result.room });
+  }catch(err){
+    console.error('tournament match battle error', err);
+    return res.status(500).json({ error:'Tournament match request failed' });
+  }
+});
+
+function sendTimedResult(res, result){
+  if(result.schemaMissing) return sendSchemaMissing(res, result);
+  if(result.private) return res.status(403).json({ error:'Battle result is private' });
+  if(result.notFound) return res.status(404).json({ error:'Comment or result is unavailable' });
+  if(result.forbidden) return res.status(403).json({ error:'You can only change your own comments' });
+  if(result.rateLimited) return res.status(429).json({ error:'Slow down a little before commenting again' });
+  if(result.validationError) return res.status(422).json({ error:result.validationError });
+  if(result.error) throw result.error;
+  return null;
+}
+
+app.get('/api/publicBattleResults/:verifiedResultId/timedComments', optionalAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await TimedComments.listTimedComments(supabaseService, req.params.verifiedResultId, req.authUser && req.authUser.id);
+    if(sendTimedResult(res, result)) return;
+    return res.json({ success:true, comments:result.comments, maxLength:result.maxLength });
+  }catch(err){
+    console.error('timed comments list error', err);
+    return res.status(500).json({ error:'Timed comments request failed' });
+  }
+});
+
+app.post('/api/publicBattleResults/:verifiedResultId/timedComments', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  if(!guardProtectedWrite(req, res, 'timedCommentAdd', { payload:{ userId:req.authUser.id, resultId:req.params.verifiedResultId }, fingerprintReplay:false, idempotencyReplay:false })) return;
+  try{
+    const result = await TimedComments.addTimedComment(supabaseService, req.authUser.id, req.params.verifiedResultId, req.body || {});
+    if(sendTimedResult(res, result)) return;
+    return res.status(201).json({ success:true, comment:result.comment });
+  }catch(err){
+    console.error('timed comment add error', err);
+    return res.status(500).json({ error:'Timed comment failed' });
+  }
+});
+
+app.patch('/api/timedComments/:commentId', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await TimedComments.editTimedComment(supabaseService, req.authUser.id, req.params.commentId, req.body || {});
+    if(sendTimedResult(res, result)) return;
+    return res.json({ success:true, comment:result.comment });
+  }catch(err){
+    console.error('timed comment edit error', err);
+    return res.status(500).json({ error:'Timed comment edit failed' });
+  }
+});
+
+app.delete('/api/timedComments/:commentId', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await TimedComments.deleteTimedComment(supabaseService, req.authUser.id, req.params.commentId);
+    if(sendTimedResult(res, result)) return;
+    return res.json({ success:true, deleted:true, id:result.id });
+  }catch(err){
+    console.error('timed comment delete error', err);
+    return res.status(500).json({ error:'Timed comment delete failed' });
   }
 });
 

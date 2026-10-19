@@ -1,0 +1,41 @@
+/* Light mode (Settings > Appearance). Colours are set as variables here; light-theme.css
+   (generated) flips every hard-coded dark surface. Dark stays the default. */
+:root{--accent-text:var(--accent);color-scheme:dark}
+html[data-theme="light"]{
+  color-scheme:light;
+  --bg:#f3f5f9;
+  --panel:#ffffff;
+  --panel2:#eef1f6;
+  --line:#d3d9e3;
+  --text:#121826;
+  --muted:#4a5568;
+  --accent:#b9ff31;
+  --accent2:#3f7d12;
+  --accent-text:#2f6400;
+  --danger:#c2253a;
+  --lcd-bg:#eef4e6;
+  --lcd-glow:rgba(47,100,0,0.06);
+  --bezel:#e6eaf0;
+  --screw:#c3cad4;
+  --meter-bg:#e3e8ee;
+  --meter-fill:#3f9a12;
+}
+html[data-theme="light"] body{background:var(--bg);color:var(--text)}
+html[data-theme="light"] .accent,html[data-theme="light"] .text-btn{color:var(--accent-text)}
+html[data-theme="light"] .primary{background:#2f6400;color:#fff}
+html[data-theme="light"] .primary:hover{background:#3b7a05}
+html[data-theme="light"] .primary:disabled{background:#9db58a;color:#1e2a12}
+html[data-theme="light"] .danger,html[data-theme="light"] .ghost.danger{color:#a3162b}
+html[data-theme="light"] dialog{color:var(--text)}
+html[data-theme="light"] dialog::backdrop{background:rgba(15,23,42,.45)}
+html[data-theme="light"] input,html[data-theme="light"] select,html[data-theme="light"] textarea{color:var(--text)}
+html[data-theme="light"] input::placeholder,html[data-theme="light"] textarea::placeholder{color:#5f6b7d}
+html[data-theme="light"] .sidebar{box-shadow:1px 0 0 var(--line)}
+html[data-theme="light"] .nav-btn.active{box-shadow:inset 3px 0 #2f6400}
+html[data-theme="light"] .sample-badge,html[data-theme="light"] .demo-tag{color:#7a3d00}
+@media (prefers-reduced-motion:no-preference){html.theme-switching *{transition:background-color .2s,color .2s,border-color .2s}}
+/* JS-built markup that colours text with the bright accent inline. */
+html[data-theme="light"] [style*="color:var(--accent)"],html[data-theme="light"] [style*="color: var(--accent)"]{color:var(--accent-text)!important}
+/* Hot cue pads: keep each pad's colour on the border, use readable text. */
+html[data-theme="light"] .hotcue-pad:not(.set){color:var(--text);border-width:2px}
+html[data-theme="light"] .hotcue-pad.set{color:#0b0f14}

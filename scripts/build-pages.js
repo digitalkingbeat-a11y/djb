@@ -12,7 +12,9 @@ const root = path.join(__dirname, '..');
 // Individual files at the repo root.
 const PAGES_FILES = [
   'index.html', 'offline.html', 'manifest.webmanifest', 'sw.js', 'window.js',
-  'api_client.js', 'submission_upload.js', 'battle_modes.js', 'app.js'
+  'api_client.js', 'submission_upload.js', 'battle_modes.js', 'app.js', 'social.js',
+  // Embeddable player that other sites can iframe (see embed.html).
+  'embed.html', 'embed.js'
 ];
 // Whole folders the browser loads.
 const PAGES_DIRS = ['studio', 'judge', 'assets'];

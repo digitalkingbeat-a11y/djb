@@ -38,7 +38,19 @@ const CSP = [
   "frame-ancestors 'none'"
 ].join('; ');
 
+// Only the embed player may be framed by other sites; the app itself stays unframeable.
+const EMBED_PATHS = new Set(['/embed.html', '/embed.css', '/embed.js']);
+const EMBED_CSP = CSP.replace("frame-ancestors 'none'", 'frame-ancestors *');
+function isEmbedPath(path){ return EMBED_PATHS.has(String(path || '')); }
+
 function securityHeaders(req, res, next){
+  if(isEmbedPath(req.path)){
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Content-Security-Policy', EMBED_CSP);
+    res.removeHeader('X-Powered-By');
+    return next();
+  }
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
@@ -48,4 +60,4 @@ function securityHeaders(req, res, next){
   next();
 }
 
-module.exports = { parseAllowedOrigins, buildCorsOptions, securityHeaders, CSP };
+module.exports = { parseAllowedOrigins, buildCorsOptions, securityHeaders, CSP, EMBED_CSP, isEmbedPath };

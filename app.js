@@ -1042,7 +1042,7 @@ async function fetchLeaderboardLive(opts={}){
   }
 }
 
-const pageTitles={dashboard:'Battle Home',battles:'Battles',studio:'Battle Studio',library:'Music Library',community:'Community','verified-results':'Verified Results',rankings:'Rankings',notifications:'Notifications',activity:'Activity',tour:'Virtual Tour',settings:'Settings',operations:'Judging Operations',profile:'Profile',store:'Beat Store',practice:'Practice Log'};
+const pageTitles={dashboard:'Battle Home',battles:'Battles',studio:'Battle Studio',library:'Music Library',community:'Community','verified-results':'Verified Results',rankings:'Rankings',notifications:'Notifications',activity:'Activity',tour:'Virtual Tour',settings:'Settings',operations:'Judging Operations',profile:'Profile',store:'Beat Store',practice:'Practice Log',tournaments:'Tournaments'};
 
 function sanitizedTrackForStorage(track){
   if(!track || typeof track !== 'object') return track;
@@ -1173,6 +1173,7 @@ function installProfessionalShell(){
       ['library','ML','Music Library'],
       ['community','CM','Community'],
       ['rankings','RK','Rankings'],
+      ['tournaments','TN','Tournaments'],
       ['activity','AC','Activity'],
       ['store','BS','Beat Store'],
       ['practice','PL','Practice Log'],
@@ -1416,7 +1417,7 @@ function libraryPlayerMinimized(){ const p = document.getElementById('library-pl
   if(btn) btn.onclick = () => setLibraryPlayerMinimized(!libraryPlayerMinimized());
 })();
 // ---- Address bar routing: every page lives at #<view> so Back/Forward, refresh and shared links work. ----
-const ROUTABLE_VIEWS = ['dashboard','battles','studio','library','community','verified-results','rankings','notifications','activity','settings','operations','profile','store','practice'];
+const ROUTABLE_VIEWS = ['dashboard','battles','studio','library','community','verified-results','rankings','notifications','activity','settings','operations','profile','store','practice','tournaments'];
 function viewFromHash(hash = window.location && window.location.hash){
   const raw = String(hash || '').replace(/^#\/?/, '');
   if(!raw) return '';
@@ -1499,6 +1500,7 @@ function switchView(view, options = {}){
     renderChallengeCountPill();
     loadDjChallengeCount().catch(()=>{});
   }
+  if(window.DJBSocial) window.DJBSocial.onView(view);
   window.scrollTo({top:0,behavior:'smooth'});
   return true;
 }
@@ -3670,6 +3672,7 @@ function renderSettingsPage(){
   if(typeof loadSafetyLists === 'function') loadSafetyLists().catch(err => console.warn('Blocked & muted list failed', err));
   const replay = document.getElementById('settings-replay-tour');
   if(replay) replay.onclick = () => replayGuidedTour();
+  if(window.DJBSocial) window.DJBSocial.renderThemePanel();
 }
 
 const aiFilterButtons=document.querySelectorAll('[data-ai-filter]');
@@ -8576,6 +8579,7 @@ function renderPublicVerifiedResultProfile(result, status){
     const button = document.querySelector('[data-public-result-ranking-impact]');
     if(button) button.onclick = () => openPublicProfileRankingImpactFromResult(result, { returnTo:'verified-result' });
   },0);
+  if(window.DJBSocial) window.DJBSocial.onPublicResult(result);
   return safe;
 }
 
@@ -12557,6 +12561,7 @@ function renderBattleRoom(session){
 
   document.getElementById('br-leave').onclick = ()=>{ if(timerInt){ clearInterval(timerInt); timerInt=null; } switchView('battles'); };
   wireLifecycleBattleRoom(session);
+  if(window.DJBSocial) window.DJBSocial.onBattleRoom(session);
 }
 
 function wireLifecycleBattleRoom(session){
@@ -15089,6 +15094,7 @@ function renderBeatStorePage(){
   grid.querySelectorAll('[data-store-paid-download]').forEach(btn => { btn.onclick = () => downloadPurchasedBeat(btn.dataset.storePaidDownload).catch(err => showErrorToast(err)); });
   const more = document.getElementById('store-load-more');
   if(more){ more.classList.toggle('hidden', !store.pagination.hasMore); more.onclick = () => loadBeatStore({ append:true }); }
+  if(window.DJBSocial) window.DJBSocial.decorateBeatStore();
   renderBeatStoreMine();
 }
 function renderBeatStoreMine(){

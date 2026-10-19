@@ -1047,14 +1047,23 @@ async function toggleCommunityReaction(dataClient, userId, input = {}, now = new
   return { reaction:{ type, targetType, targetId, active:Boolean(active), id:String(reaction.id) }, counts, toggled:true };
 }
 
+// Battle chat messages and timed result comments share the community report queue.
+const EXTRA_REPORT_TARGETS = {
+  battle_chat_message:(dataClient, userId, id) => require('./battle_chat').chatMessageReportTarget(dataClient, userId, id),
+  timed_comment:(dataClient, userId, id) => require('./timed_comments').timedCommentReportTarget(dataClient, userId, id)
+};
+
 async function reportCommunityTarget(dataClient, userId, input = {}, now = new Date()){
-  const targetType = safeTargetType(input.targetType || input.target_type);
+  const rawType = String(input.targetType || input.target_type || '').toLowerCase();
+  const targetType = EXTRA_REPORT_TARGETS[rawType] ? rawType : safeTargetType(rawType);
   const targetId = cleanString(input.targetId || input.target_id, 128);
   const reason = cleanString(input.reason, 40);
   if(!targetType || !targetId || !COMMUNITY_REPORT_REASONS.has(reason)) return { validationError:'Choose a valid report target and reason.' };
   const rate = checkCommunityRateLimit(`report:${userId}`, now, { max:10, windowMs:5 * 60 * 1000 });
   if(rate.rateLimited) return rate;
-  const target = await validateReactionTarget(dataClient, userId, targetType, targetId);
+  const target = EXTRA_REPORT_TARGETS[targetType]
+    ? await EXTRA_REPORT_TARGETS[targetType](dataClient, userId, targetId)
+    : await validateReactionTarget(dataClient, userId, targetType, targetId);
   if(target.error || target.notFound || target.unavailable || target.forbidden) return target;
   const existing = await tableQuery(dataClient, COMMUNITY_REPORTS_TABLE)
     .eq('reporter_user_id', userId)

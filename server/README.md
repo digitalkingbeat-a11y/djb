@@ -85,3 +85,14 @@ With `STRIPE_SECRET_KEY` (or the webhook secret, or the return URLs) missing, th
 | `APP_PUBLIC_URL` | yes | The confirm link in the email points to `APP_PUBLIC_URL/?beatConfirm=1&lead=…&token=…#store`. |
 
 When all of these are set, new free beats are created with confirmation required: fans get a "Confirm and download" email, the app calls `POST /api/marketplace/freeEmail/verify`, then downloads. Without them, claims stay instant and owners see those emails marked "Unconfirmed". Free beats listed before email was set up keep their original instant setting.
+
+## Battle chat, tournaments, timed comments and embeds (Oct 19)
+
+Run these in the Supabase SQL editor, in order, then redeploy the server:
+
+- `server/sql/031_create_battle_chat_messages.sql` — battle room chat (and lets chat messages and timed comments be reported)
+- `server/sql/032_create_tournaments.sql` — 8/16-DJ knockout tournaments (replaces the unmerged `028_create_tournaments.sql` draft on the `tranche11-tournament-foundation` branch; that draft was never applied)
+- `server/sql/033_create_result_timed_comments.sql` — comments pinned to a moment of a public battle result
+
+Until a file is applied, its feature answers `503` with the SQL file name, and the app shows a "needs the server" note.
+The embed player (`embed.html`) is the only page the server lets other sites frame (`frame-ancestors *`); everything else keeps `X-Frame-Options: DENY`.
