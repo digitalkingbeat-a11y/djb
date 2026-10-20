@@ -2229,3 +2229,17 @@ a.mention-link:hover{text-decoration:underline}
 @media (hover:none) and (pointer:coarse){
   #studio-shortcuts-button{display:none!important}
 }
+/* Passkeys: sign-in button and Settings > Security list */
+.passkey-signin{display:flex;flex-direction:column;gap:6px;margin:6px 0 4px}
+.passkey-signin .passkey-btn{width:100%;min-height:48px;font-size:1rem}
+.passkey-signin small{color:var(--muted)}
+.passkey-or{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:.82rem;margin-top:6px}
+.passkey-or::before,.passkey-or::after{content:"";flex:1;border-top:1px solid var(--line)}
+.passkey-list{list-style:none;margin:10px 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.passkey-row{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--line);border-radius:12px;flex-wrap:wrap}
+.passkey-icon{font-size:1.3rem}
+.passkey-meta{display:flex;flex-direction:column;flex:1;min-width:150px}
+.passkey-meta small{color:var(--muted)}
+.passkey-actions{display:flex;gap:6px}
+.passkey-actions button{min-height:40px}
+.passkey-status:empty{display:none}
