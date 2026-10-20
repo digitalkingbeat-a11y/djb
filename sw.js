@@ -2,20 +2,33 @@
 // offline page instead of a blank screen. API, auth and any cross-origin (Supabase) traffic is
 // never cached. CACHE_VERSION is stamped by `npm run build` (scripts/stamp-sw-version.js) from a
 // hash of every shell file, so each change ships a new worker and the app shows "Update ready".
-const CACHE_VERSION = 'djb-shell-481c56777ec9';
+const CACHE_VERSION = 'djb-shell-d13faffd0d90';
 const CACHE_PREFIX = 'djb-shell-';
 const OFFLINE_URL = 'offline.html';
 const SHELL_FILES = [
+  OFFLINE_URL,
   './',
   'index.html',
-  OFFLINE_URL,
   'manifest.webmanifest',
-  'styles.css', 'battle-room.css', 'battle-results.css', 'battle-history.css', 'verified-results.css', 'rankings.css',
-  'music-library.css', 'challenges.css', 'hardware.css', 'operations.css', 'professional-redesign.css',
-  'api_client.js', 'submission_upload.js', 'battle_modes.js', 'app.js', 'window.js',
-  'studio/studio_pro.js', 'studio/studio_recording.js', 'studio/controller_mapping.js', 'studio/audio_setup.js',
-  'studio/streaming.js', 'studio/playlist_transfer.js', 'studio/studio_browser.js', 'studio/deck_runtime.js',
-  'assets/favicon.svg', 'assets/favicon-64.png', 'assets/icon-192.png', 'assets/icon-512.png', 'assets/icon-maskable-512.png'
+  'styles.bundle.eb234c1a97.css',
+  'api_client.20bb2c98c3.js',
+  'submission_upload.85e64f5894.js',
+  'battle_modes.6bd2a08bd2.js',
+  'app.4b3d98d861.js',
+  'window.js',
+  'studio/studio_pro.c4196939dd.js',
+  'studio/studio_recording.27debd0b4a.js',
+  'studio/controller_mapping.83d34c3c68.js',
+  'studio/audio_setup.25b83d1b96.js',
+  'studio/streaming.38e7817992.js',
+  'studio/playlist_transfer.b366f21f26.js',
+  'studio/studio_browser.d52839162b.js',
+  'studio/deck_runtime.9841153da3.js',
+  'assets/favicon.svg',
+  'assets/favicon-64.png',
+  'assets/icon-192.png',
+  'assets/icon-512.png',
+  'assets/icon-maskable-512.png'
 ];
 
 // Never cache these: live data, sign-in, uploads, and anything carrying credentials.

@@ -1,2 +1,1 @@
-window.DJ_BATTLE_SUPABASE_CONFIG = {};
-
+window.DJ_BATTLE_SUPABASE_CONFIG={};

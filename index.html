@@ -25,17 +25,7 @@
   <meta name="twitter:description" content="Battle other DJs, get AI-judged scores and climb the rankings." />
   <meta name="twitter:image" content="assets/og-image.png" />
   <title>DJ Battle — Battle Studio</title>
-  <link rel="stylesheet" href="styles.css" />
-  <link rel="stylesheet" href="battle-room.css" />
-  <link rel="stylesheet" href="hardware.css" />
-  <link rel="stylesheet" href="operations.css" />
-  <link rel="stylesheet" href="battle-results.css" />
-  <link rel="stylesheet" href="battle-history.css" />
-  <link rel="stylesheet" href="verified-results.css" />
-  <link rel="stylesheet" href="rankings.css" />
-  <link rel="stylesheet" href="challenges.css" />
-  <link rel="stylesheet" href="music-library.css" />
-  <link rel="stylesheet" href="professional-redesign.css" />
+  <link rel="stylesheet" href="styles.bundle.eb234c1a97.css" />
   <style>
     /* Ensure battle meta has 4 columns for additional metadata */
     .battle-meta{grid-template-columns:repeat(4,1fr) !important}
@@ -516,8 +506,8 @@
     <audio id="library-player-audio"></audio>
   </div>
 
-  <script src="judge/how_close.js"></script>
-  <script src="judge/analysis.js"></script>
+  <script src="judge/how_close.f3404ed22d.js"></script>
+  <script src="judge/analysis.454eeba990.js"></script>
   <script src="supabase-browser-config.local.js"></script>
   <script type="module">
     // Local configuration supplies only browser-safe project values.
@@ -549,18 +539,18 @@
       window.setCurrentBelt = (b) => { localStorage.setItem('dj_battle_belt', b); setBelt(b); if(typeof window.renderCurrentUserUI === 'function') window.renderCurrentUserUI(); };
     })();
   </script>
-  <script src="api_client.js"></script>
-  <script src="submission_upload.js"></script>
-  <script src="battle_modes.js"></script>
-  <script src="studio/studio_pro.js"></script>
-  <script src="studio/studio_recording.js"></script>
-  <script src="studio/controller_mapping.js"></script>
-  <script src="studio/audio_setup.js"></script>
-  <script src="studio/streaming.js"></script>
-  <script src="studio/playlist_transfer.js"></script>
-  <script src="studio/studio_browser.js"></script>
-  <script src="studio/deck_runtime.js"></script>
-  <script src="app.js"></script>
+  <script src="api_client.20bb2c98c3.js"></script>
+  <script src="submission_upload.85e64f5894.js"></script>
+  <script src="battle_modes.6bd2a08bd2.js"></script>
+  <script src="studio/studio_pro.c4196939dd.js"></script>
+  <script src="studio/studio_recording.27debd0b4a.js"></script>
+  <script src="studio/controller_mapping.83d34c3c68.js"></script>
+  <script src="studio/audio_setup.25b83d1b96.js"></script>
+  <script src="studio/streaming.38e7817992.js"></script>
+  <script src="studio/playlist_transfer.b366f21f26.js"></script>
+  <script src="studio/studio_browser.d52839162b.js"></script>
+  <script src="studio/deck_runtime.9841153da3.js"></script>
+  <script src="app.4b3d98d861.js"></script>
   <script>
     // Wire timing analysis to create practice events from loaded audio.
     const timingInspectorButton = document.getElementById('hc-run-timing');
