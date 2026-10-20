@@ -3318,6 +3318,124 @@ app.delete('/api/battles/:battleId/chat/:messageId', requireAuth, async (req, re
   }
 });
 
+/* ---------- Oct 19c: direct messages, Find DJs, live watching, shared tracklists, weekly goals ---------- */
+const Connect = require('./connect');
+function sendConnectResult(res, result, messages = {}){
+  if(result.schemaMissing) return sendSchemaMissing(res, result), true;
+  if(result.notFound) return res.status(404).json({ error:messages.notFound || 'Not found' }), true;
+  if(result.forbidden) return res.status(403).json({ error:messages.forbidden || 'You can\'t do that' }), true;
+  if(result.blocked) return res.status(403).json({ error:'You can\'t message this DJ', blocked:true }), true;
+  if(result.rateLimited) return res.status(429).json({ error:'Slow down a little before sending more' }), true;
+  if(result.validationError) return res.status(422).json({ error:result.validationError }), true;
+  if(result.error) throw result.error;
+  return false;
+}
+const connectRoute = (label, handler) => async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{ await handler(req, res); }catch(err){
+    console.error(`${label} error`, err);
+    if(!res.headersSent) res.status(500).json({ error:`${label} failed` });
+  }
+};
+const connectWrite = (req, res, action, extra = {}) => guardProtectedWrite(req, res, action, { payload:{ userId:req.authUser.id, ...extra }, fingerprintReplay:false, idempotencyReplay:false });
+
+app.get('/api/messages', requireAuth, connectRoute('Messages list', async (req, res) => {
+  const result = await Connect.listConversations(supabaseService, req.authUser.id);
+  if(sendConnectResult(res, result)) return;
+  res.json({ success:true, conversations:result.conversations, unread:result.unread });
+}));
+app.delete('/api/messages/item/:messageId', requireAuth, connectRoute('Message unsend', async (req, res) => {
+  if(!connectWrite(req, res, 'directMessageUnsend', { messageId:req.params.messageId })) return;
+  const result = await Connect.unsendDirectMessage(supabaseService, req.authUser.id, req.params.messageId);
+  if(sendConnectResult(res, result, { notFound:'That message is already gone', forbidden:'You can only unsend your own messages' })) return;
+  res.json({ success:true, unsent:true, id:result.id });
+}));
+app.get('/api/messages/:publicProfileId', requireAuth, connectRoute('Conversation', async (req, res) => {
+  const result = await Connect.readConversation(supabaseService, req.authUser.id, req.params.publicProfileId);
+  if(sendConnectResult(res, result, { notFound:'That DJ is unavailable' })) return;
+  res.json({ success:true, ...result });
+}));
+app.post('/api/messages/:publicProfileId', requireAuth, connectRoute('Message send', async (req, res) => {
+  if(!connectWrite(req, res, 'directMessageSend', { to:req.params.publicProfileId })) return;
+  const result = await Connect.sendDirectMessage(supabaseService, req.authUser.id, req.params.publicProfileId, req.body || {});
+  if(sendConnectResult(res, result, { notFound:'That DJ is unavailable' })) return;
+  res.status(201).json({ success:true, message:result.message });
+}));
+
+app.get('/api/djs/search', optionalAuth, connectRoute('DJ search', async (req, res) => {
+  const result = await Connect.searchDjs(supabaseService, req.authUser && req.authUser.id, req.query || {});
+  if(sendConnectResult(res, result)) return;
+  res.json({ success:true, results:result.results });
+}));
+app.put('/api/me/searchProfile', requireAuth, connectRoute('Search profile', async (req, res) => {
+  if(!connectWrite(req, res, 'searchProfileUpdate')) return;
+  const result = await Connect.updateSearchProfile(supabaseService, req.authUser.id, req.body || {});
+  if(sendConnectResult(res, result)) return;
+  res.json({ success:true, profile:result.profile });
+}));
+
+app.get('/api/liveBattles', connectRoute('Live battles', async (req, res) => {
+  const result = await Connect.liveBattles(supabaseService);
+  if(sendConnectResult(res, result)) return;
+  res.json({ success:true, battles:result.battles });
+}));
+app.get('/api/battles/:battleId/live', optionalAuth, connectRoute('Live battle', async (req, res) => {
+  const result = await Connect.liveBattle(supabaseService, req.params.battleId, { viewerId:req.authUser && req.authUser.id });
+  if(sendConnectResult(res, result, { notFound:'This battle is private or no longer exists' })) return;
+  res.json({ success:true, ...result });
+}));
+app.post('/api/battles/:battleId/live/vote', requireAuth, connectRoute('Live crowd vote', async (req, res) => {
+  if(!connectWrite(req, res, 'liveCrowdVote', { battleId:req.params.battleId })) return;
+  const result = await Connect.liveCrowdVote(supabaseService, req.authUser.id, req.params.battleId, req.body && req.body.publicProfileId);
+  if(result.votingClosed) return res.status(409).json({ error:result.reason });
+  if(result.forbidden) return res.status(403).json({ error:result.reason || 'You can\'t vote on this battle' });
+  if(result.schemaMissing) return res.status(503).json({ error:'Run server/sql/028_create_battle_crowd_votes.sql in Supabase to turn this on', schemaMissing:true, schema:'028_create_battle_crowd_votes' });
+  if(sendConnectResult(res, result)) return;
+  res.json({ success:true, duplicate:Boolean(result.duplicate) });
+}));
+app.post('/api/battles/:battleId/watch', connectRoute('Watch heartbeat', async (req, res) => {
+  const battleId = String(req.params.battleId || '').slice(0, 128);
+  if(!/^[A-Za-z0-9._:-]{1,128}$/.test(battleId)) return res.status(404).json({ error:'Battle not found' });
+  const result = Connect.heartbeat(battleId, req.body && req.body.viewerKey);
+  if(sendConnectResult(res, result)) return;
+  res.json({ success:true, watching:result.watching });
+}));
+
+app.get('/api/sharedCrates', requireAuth, connectRoute('Shared tracklists', async (req, res) => {
+  const result = await Connect.myTracklists(supabaseService, req.authUser.id);
+  if(sendConnectResult(res, result)) return;
+  res.json({ success:true, tracklists:result.tracklists });
+}));
+app.post('/api/sharedCrates', requireAuth, connectRoute('Share tracklist', async (req, res) => {
+  if(!connectWrite(req, res, 'sharedCrateCreate', { crateId:req.body && req.body.crateId })) return;
+  const result = await Connect.shareTracklist(supabaseService, req.authUser.id, req.body || {});
+  if(sendConnectResult(res, result)) return;
+  res.status(201).json({ success:true, tracklist:result.tracklist });
+}));
+app.get('/api/sharedCrates/:id', optionalAuth, connectRoute('Tracklist', async (req, res) => {
+  const result = await Connect.getTracklist(supabaseService, req.params.id, req.authUser && req.authUser.id);
+  if(sendConnectResult(res, result, { notFound:'This tracklist was removed or the link is wrong' })) return;
+  res.json({ success:true, tracklist:result.tracklist });
+}));
+app.delete('/api/sharedCrates/:id', requireAuth, connectRoute('Stop sharing', async (req, res) => {
+  if(!connectWrite(req, res, 'sharedCrateRemove', { id:req.params.id })) return;
+  const result = await Connect.stopSharingTracklist(supabaseService, req.authUser.id, req.params.id);
+  if(sendConnectResult(res, result, { forbidden:'Only the DJ who shared this list can remove it' })) return;
+  res.json({ success:true, removed:true, id:result.id });
+}));
+
+app.get('/api/practiceGoal', requireAuth, connectRoute('Practice goal', async (req, res) => {
+  const result = await Connect.getPracticeGoal(supabaseService, req.authUser.id);
+  if(sendConnectResult(res, result)) return;
+  res.json({ success:true, goal:result.goal });
+}));
+app.put('/api/practiceGoal', requireAuth, connectRoute('Practice goal save', async (req, res) => {
+  if(!connectWrite(req, res, 'practiceGoalSave')) return;
+  const result = await Connect.setPracticeGoal(supabaseService, req.authUser.id, req.body || {});
+  if(sendConnectResult(res, result)) return;
+  res.json({ success:true, goal:result.goal });
+}));
+
 /* ---------- Oct 19b: host controls, tournament history, notification switches ---------- */
 async function tournamentHostRoute(req, res, label, run){
   if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;

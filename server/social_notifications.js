@@ -6,11 +6,12 @@ const { cleanText, profilesFor, isMissingTable } = require('./social_helpers');
 
 const NOTIFICATIONS_TABLE = 'dj_notifications';
 const MUTES_TABLE = 'dj_notification_mutes';
-const SOCIAL_NOTIFICATION_TYPES = Object.freeze(['tournament_match_ready', 'battle_chat_message', 'timed_comment_received']);
+const SOCIAL_NOTIFICATION_TYPES = Object.freeze(['tournament_match_ready', 'battle_chat_message', 'timed_comment_received', 'direct_message']);
 const SOCIAL_NOTIFICATION_LABELS = Object.freeze({
   tournament_match_ready:'Tournament match is ready',
   battle_chat_message:'New battle chat message',
-  timed_comment_received:'Someone commented on your mix'
+  timed_comment_received:'Someone commented on your mix',
+  direct_message:'New direct message'
 });
 
 const hash = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');

@@ -127,6 +127,7 @@
       body = `<ul class="battle-chat-list" id="battle-chat-list" aria-live="polite">${shown.length ? '' : `<li class="battle-chat-empty">${chat.status === 'loading' ? 'Loading chat…' : 'No messages yet. Say good luck!'}</li>`}</ul>
         ${hiddenCount ? `<p class="battle-chat-note">${hiddenCount} message${hiddenCount === 1 ? '' : 's'} hidden while chat is muted.</p>` : ''}
         ${chat.error ? `<p class="social-note" role="alert">${escHtml(chat.error)}</p>` : ''}
+        <p class="battle-chat-note" id="battle-chat-public-note">Fans watching this battle live can read this chat.</p>
         ${chat.canSend ? `<form class="battle-chat-form" id="battle-chat-form"><input id="battle-chat-input" type="text" maxlength="${CHAT_MAX}" autocomplete="off" placeholder="Message your opponent" aria-label="Chat message"><button class="primary small" type="submit">Send</button></form>` : '<p class="battle-chat-note">You can\'t message this DJ.</p>'}`;
       populate = () => {
         const list = D.getElementById('battle-chat-list');
