@@ -122,6 +122,144 @@
       return { ok:true };
     }
 
+
+    /* ---- Oct 20: Rekordbox XML and Serato crate import ---- */
+    const XML_ENTITIES = { amp:'&', lt:'<', gt:'>', quot:'"', apos:"'" };
+    function xmlDecode(value){
+      return String(value || '').replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (m, e) => {
+        if(e[0] === '#') return String.fromCodePoint(e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10));
+        return XML_ENTITIES[e.toLowerCase()] || m;
+      });
+    }
+    function xmlAttrs(tag){
+      const out = {};
+      String(tag || '').replace(/([A-Za-z_][\w.-]*)\s*=\s*("([^"]*)"|'([^']*)')/g, (m, name, q, a, b) => { out[name] = xmlDecode(a != null ? a : b); return m; });
+      return out;
+    }
+    function fileNameFromLocation(location){
+      let text = String(location || '');
+      try{ text = decodeURIComponent(text); }catch(e){}
+      return text.replace(/^file:\/\/(localhost)?/i, '').split(/[\\/]/).pop() || '';
+    }
+    function camelotOrKey(value){ return String(value || '').trim(); }
+    function secondsToDuration(sec){
+      const n = Math.round(Number(sec) || 0);
+      return n > 0 ? `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}` : '';
+    }
+    // Returns { playlists:[{ name, items }], tracks:[item], source:'Rekordbox' }.
+    function parseRekordboxXml(text){
+      const xml = String(text || '');
+      if(!/<DJ_PLAYLISTS[\s>]/i.test(xml)) return { error:'That XML file is not a Rekordbox library export (File > Export Collection in xml format).' };
+      const collection = (xml.match(/<COLLECTION[\s\S]*?<\/COLLECTION>/i) || [''])[0];
+      const byId = new Map();
+      const trackRe = /<TRACK\b([^>]*?)(\/>|>([\s\S]*?)<\/TRACK>)/gi;
+      let m;
+      while((m = trackRe.exec(collection))){
+        const a = xmlAttrs(m[1]);
+        if(!a.TrackID) continue;
+        const cuePoints = [];
+        String(m[3] || '').replace(/<POSITION_MARK\b([^>]*)\/?>/gi, (x, attrs) => {
+          const c = xmlAttrs(attrs);
+          const start = Number(c.Start);
+          if(Number.isFinite(start)) cuePoints.push({ name:c.Name || '', seconds:Math.round(start * 1000) / 1000, type:Number(c.Type) === 4 ? 'loop' : 'cue', hotCue:Number(c.Num) >= 0 ? Number(c.Num) : null });
+          return x;
+        });
+        const bpm = Number(a.AverageBpm);
+        const item = {
+          title:a.Name || fileNameFromLocation(a.Location) || `Track ${a.TrackID}`,
+          artist:a.Artist || '', album:a.Album || '', genre:a.Genre || '',
+          bpm:Number.isFinite(bpm) && bpm > 0 ? String(Math.round(bpm * 100) / 100) : '',
+          key:camelotOrKey(a.Tonality), duration:secondsToDuration(a.TotalTime),
+          fileName:fileNameFromLocation(a.Location), cuePoints,
+          source:'Rekordbox', sourceTrackId:String(a.TrackID), transferType:'metadata_only'
+        };
+        byId.set(String(a.TrackID), item);
+      }
+      const playlists = [];
+      const playlistsXml = (xml.match(/<PLAYLISTS[\s\S]*<\/PLAYLISTS>/i) || [''])[0];
+      const nodeRe = /<NODE\b([^>]*)>([\s\S]*?)<\/NODE>/gi;
+      // Leaf playlists (Type="1") only contain TRACK Key="..." children.
+      String(playlistsXml).replace(/<NODE\b([^>]*Type="1"[^>]*)>([\s\S]*?)<\/NODE>/gi, (x, attrs, body) => {
+        const a = xmlAttrs(attrs);
+        const items = [];
+        body.replace(/<TRACK\b([^>]*)\/?>/gi, (y, t) => { const k = xmlAttrs(t).Key; if(byId.has(String(k))) items.push(byId.get(String(k))); return y; });
+        playlists.push({ name:a.Name || 'Rekordbox playlist', items });
+        return x;
+      });
+      void nodeRe;
+      const tracks = [...byId.values()];
+      if(!playlists.length && tracks.length) playlists.push({ name:'Rekordbox collection', items:tracks });
+      return { playlists, tracks, source:'Rekordbox' };
+    }
+    // Serato .crate files are binary: 4-letter tag + 4-byte length + data, strings in UTF-16BE.
+    // A crate only lists file paths; BPM, key and cues live in the audio files' own tags, so we
+    // fill those from tracks already in your library with the same file name.
+    function readUtf16BE(bytes, start, end){
+      let out = '';
+      for(let i = start; i + 1 < end; i += 2) out += String.fromCharCode((bytes[i] << 8) | bytes[i + 1]);
+      return out;
+    }
+    function parseSeratoCrate(buffer, fileName){
+      const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer || []);
+      const tag = i => String.fromCharCode(bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]);
+      const len = i => ((bytes[i] << 24) >>> 0) + (bytes[i + 1] << 16) + (bytes[i + 2] << 8) + bytes[i + 3];
+      if(bytes.length < 8 || tag(0) !== 'vrsn') return { error:'That file is not a Serato crate (look in your _Serato_/Subcrates folder for .crate files).' };
+      const items = [];
+      let i = 0;
+      while(i + 8 <= bytes.length){
+        const t = tag(i); const n = len(i + 4); const start = i + 8; const end = Math.min(bytes.length, start + n);
+        if(t === 'otrk'){
+          let j = start;
+          while(j + 8 <= end){
+            const it = tag(j); const il = len(j + 4);
+            if(it === 'ptrk'){
+              const path = readUtf16BE(bytes, j + 8, Math.min(end, j + 8 + il));
+              const base = path.split(/[\\/]/).pop() || path;
+              const clean = base.replace(/\.[a-z0-9]{2,4}$/i, '');
+              const parts = clean.split(' - ');
+              items.push({ title:parts.length > 1 ? parts.slice(1).join(' - ') : clean, artist:parts.length > 1 ? parts[0] : '', fileName:base, source:'Serato', sourceTrackId:path, transferType:'metadata_only', cuePoints:[] });
+            }
+            j += 8 + il;
+          }
+        }
+        i = end;
+      }
+      const name = String(fileName || 'Serato crate').replace(/\.crate$/i, '').replace(/%%/g, ' / ');
+      return { playlists:[{ name, items }], tracks:items, source:'Serato' };
+    }
+    function importDjSoftwareFile(file){
+      if(!file) return { ok:false, error:'Choose a Rekordbox XML or Serato .crate file.' };
+      const Reader = deps.FileReader || win.FileReader;
+      if(!Reader) return { ok:false, error:'Import is unavailable in this browser.' };
+      const isCrate = /\.crate$/i.test(file.name || '');
+      const reader = new Reader();
+      reader.onload = () => applyDjSoftwareImport(isCrate ? parseSeratoCrate(reader.result, file.name) : parseRekordboxXml(reader.result), file.name);
+      reader.onerror = () => deps.setStudioRuleStatus('Import failed in this browser.', 'denied');
+      if(isCrate) reader.readAsArrayBuffer(file); else reader.readAsText(file);
+      return { ok:true };
+    }
+    function applyDjSoftwareImport(parsed, fileName){
+      if(!parsed || parsed.error){ deps.setStudioRuleStatus(parsed && parsed.error || 'Nothing to import.', 'denied'); return { ok:false, error:parsed && parsed.error }; }
+      const at = new Date(now()).toISOString();
+      const merge = typeof deps.mergeImportedTrackDetails === 'function' ? deps.mergeImportedTrackDetails(parsed.tracks) : { matched:0, needsAudio:parsed.tracks.length };
+      parsed.playlists.forEach((pl, index) => {
+        state.playlists.unshift({
+          id:`${parsed.source.toLowerCase()}-import-${now()}-${index}`, name:pl.name, type:'playlist', sourceType:`${parsed.source.toLowerCase()}_import`,
+          visibility:'private', trackIds:[], items:pl.items, createdAt:at, updatedAt:at, syncStatus:'local',
+          transferNotice:`Imported from ${parsed.source}: names, BPMs, keys and cue points. Audio files are not transferred.`
+        });
+      });
+      const added = typeof deps.addImportedItemsToLibrary === 'function' ? deps.addImportedItemsToLibrary(parsed.tracks, fileName) : 0;
+      deps.persist();
+      deps.renderLibrary();
+      if(typeof deps.renderStudioLibrary === 'function') deps.renderStudioLibrary();
+      const cues = parsed.tracks.reduce((n, t) => n + (t.cuePoints || []).length, 0);
+      const summary = `${parsed.playlists.length} playlist(s), ${parsed.tracks.length} track(s)${cues ? `, ${cues} cue point(s)` : ''} imported from ${parsed.source}. ${merge.matched} matched audio already in your library; ${Math.max(0, parsed.tracks.length - merge.matched)} still need their audio file uploaded.`;
+      deps.setStudioRuleStatus(summary, 'ok');
+      if(typeof deps.onImported === 'function') deps.onImported({ items:parsed.tracks, added, source:parsed.source, summary });
+      return { ok:true, playlists:parsed.playlists.length, tracks:parsed.tracks.length, cues, matched:merge.matched, added, summary };
+    }
+
     function exportRowsForCrate(crate){
       const trackRows = (crate.libraryTracks || deps.resolveCrateTrackIds(crate).map(id => deps.getLibraryTrackById(id))).map((track, index) => {
         return track ? {
@@ -197,6 +335,10 @@
       const exportButton = doc.getElementById('export-playlist');
       const exportFormat = doc.getElementById('playlist-export-format');
       if(exportButton) exportButton.onclick = () => exportActiveStudioPlaylist(exportFormat && exportFormat.value);
+      const djButton = doc.getElementById('import-dj-software');
+      const djInput = doc.getElementById('dj-software-import-file');
+      if(djButton && djInput) djButton.onclick = () => djInput.click();
+      if(djInput) djInput.onchange = event => { importDjSoftwareFile(event.currentTarget.files && event.currentTarget.files[0]); event.currentTarget.value = ''; };
     }
 
     return {
@@ -204,6 +346,10 @@
       parseCsvLine,
       parsePlaylistText,
       importPlaylistFile,
+      parseRekordboxXml,
+      parseSeratoCrate,
+      importDjSoftwareFile,
+      applyDjSoftwareImport,
       exportRowsForCrate,
       rowsToCsv,
       rowsToM3u,

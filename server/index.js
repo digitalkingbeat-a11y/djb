@@ -3579,6 +3579,106 @@ app.delete('/api/timedComments/:commentId', requireAuth, async (req, res) => {
   }
 });
 
+/* ================= Oct 20: lock-screen alerts, result reviews, my data ================= */
+const PushAlerts = require('./push_alerts');
+const ResultReviews = require('./result_reviews');
+const AccountData = require('./account_data');
+const { setPushHook } = require('./push_hook');
+const pushSender = (() => { try{ return PushAlerts.createPushSender(process.env); }catch(err){ console.warn('Web push disabled:', err && err.message); return null; } })();
+if(pushSender) setPushHook((client, row) => PushAlerts.deliverPush(client, row, pushSender));
+
+function sendOct20Result(res, result){
+  if(result.schemaMissing) return sendSchemaMissing(res, result);
+  if(result.forbidden) return res.status(403).json({ error:'That result belongs to another DJ' });
+  if(result.notFound) return res.status(404).json({ error:'Not found' });
+  if(result.validationError) return res.status(422).json({ error:result.validationError });
+  if(result.error) throw result.error;
+  return null;
+}
+const oct20Route = (label, fn) => async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{ await fn(req, res); }catch(err){ console.error(`${label} error`, err); if(!res.headersSent) res.status(500).json({ error:`${label} failed` }); }
+};
+
+// Public: whether alerts are set up, and the PUBLIC VAPID key the browser needs to subscribe.
+app.get('/api/push/config', (req, res) => res.json({ success:true, ...PushAlerts.publicStatus(process.env) }));
+app.get('/api/push/subscriptions', requireAuth, oct20Route('Push devices', async (req, res) => {
+  const r = await PushAlerts.listSubscriptions(supabaseService, req.authUser.id);
+  if(sendOct20Result(res, r)) return;
+  res.json({ success:true, subscriptions:r.subscriptions, ...PushAlerts.publicStatus(process.env) });
+}));
+app.post('/api/push/subscriptions', requireAuth, oct20Route('Push subscribe', async (req, res) => {
+  if(!PushAlerts.vapidConfig(process.env).configured) return res.status(503).json({ error:'Lock-screen alerts are not set up on the server yet (VAPID keys missing)', pushNotConfigured:true });
+  if(!guardProtectedWrite(req, res, 'pushSubscribe', { payload:{ userId:req.authUser.id }, fingerprintReplay:false, idempotencyReplay:false })) return;
+  const r = await PushAlerts.saveSubscription(supabaseService, req.authUser.id, req.body || {});
+  if(sendOct20Result(res, r)) return;
+  res.status(r.created ? 201 : 200).json({ success:true, subscription:r.subscription });
+}));
+app.delete('/api/push/subscriptions', requireAuth, oct20Route('Push unsubscribe', async (req, res) => {
+  const r = await PushAlerts.removeSubscription(supabaseService, req.authUser.id, (req.body || {}).endpoint);
+  if(sendOct20Result(res, r)) return;
+  res.json({ success:true, removed:true });
+}));
+app.post('/api/push/test', requireAuth, oct20Route('Push test', async (req, res) => {
+  if(!pushSender) return res.status(503).json({ error:'Lock-screen alerts are not set up on the server yet (VAPID keys missing)', pushNotConfigured:true });
+  const r = await PushAlerts.deliverPush(supabaseService, { user_id:req.authUser.id, type:'direct_message', actor_profile:{ displayName:'DJ Battle' }, destination:{ type:'messages' } }, pushSender);
+  if(sendOct20Result(res, r)) return;
+  res.json({ success:true, sent:r.sent || 0 });
+}));
+
+app.post('/api/battleResults/:submissionId/review', requireAuth, oct20Route('Review request', async (req, res) => {
+  if(!guardProtectedWrite(req, res, 'resultReviewRequest', { payload:{ userId:req.authUser.id, submissionId:req.params.submissionId }, fingerprintReplay:false, idempotencyReplay:false })) return;
+  const r = await ResultReviews.requestReview(supabaseService, req.authUser.id, req.params.submissionId, req.body || {});
+  if(sendOct20Result(res, r)) return;
+  res.status(r.created ? 201 : 200).json({ success:true, duplicate:Boolean(r.duplicate), review:r.review });
+}));
+app.get('/api/resultReviews/mine', requireAuth, oct20Route('My reviews', async (req, res) => {
+  const r = await ResultReviews.listMyReviews(supabaseService, req.authUser.id);
+  if(sendOct20Result(res, r)) return;
+  res.json({ success:true, reviews:r.reviews, reasons:ResultReviews.REVIEW_REASONS });
+}));
+app.get('/api/operations/resultReviews', requireAuth, requireOperatorUser, oct20Route('Review queue', async (req, res) => {
+  const r = await ResultReviews.listReviewQueue(supabaseService, req.query.status);
+  if(sendOct20Result(res, r)) return;
+  res.json({ success:true, reviews:r.reviews, reasons:r.reasons });
+}));
+app.post('/api/operations/resultReviews/:reviewId/decision', requireAuth, requireOperatorUser, oct20Route('Review decision', async (req, res) => {
+  const r = await ResultReviews.decideReview(supabaseService, req.authUser.id, req.params.reviewId, req.body || {});
+  if(sendOct20Result(res, r)) return;
+  res.json({ success:true, review:r.review });
+}));
+
+app.get('/api/account/export', requireAuth, oct20Route('Data export', async (req, res) => {
+  const r = await AccountData.exportAccountData(supabaseService, req.authUser);
+  if(sendOct20Result(res, r)) return;
+  res.set('Cache-Control', 'no-store');
+  res.set('Content-Disposition', `attachment; filename="djb-my-data-${new Date().toISOString().slice(0, 10)}.json"`);
+  res.json(r.file);
+}));
+app.get('/api/account/deletion', requireAuth, oct20Route('Deletion status', async (req, res) => {
+  const r = await AccountData.getDeletion(supabaseService, req.authUser.id);
+  if(sendOct20Result(res, r)) return;
+  res.json({ success:true, deletion:r.deletion, confirmPhrase:AccountData.CONFIRM_PHRASE, graceDays:AccountData.GRACE_DAYS });
+}));
+app.post('/api/account/deletion', requireAuth, oct20Route('Delete account', async (req, res) => {
+  if(!guardProtectedWrite(req, res, 'accountDeletion', { payload:{ userId:req.authUser.id }, fingerprintReplay:false, idempotencyReplay:false })) return;
+  const r = await AccountData.requestDeletion(supabaseService, req.authUser.id, req.body || {});
+  if(sendOct20Result(res, r)) return;
+  res.status(r.created ? 201 : 200).json({ success:true, deletion:r.deletion });
+}));
+app.delete('/api/account/deletion', requireAuth, oct20Route('Cancel deletion', async (req, res) => {
+  const r = await AccountData.cancelDeletion(supabaseService, req.authUser.id);
+  if(sendOct20Result(res, r)) return;
+  res.json({ success:true, cancelled:true });
+}));
+// Deletes accounts whose 7-day grace period is over. Checked hourly while the server runs.
+if(process.env.NODE_ENV !== 'test' && supabaseService && typeof supabaseService.from === 'function'){
+  const sweepDeletions = () => AccountData.runDueDeletions(supabaseService, supabaseService.auth && supabaseService.auth.admin, supabaseService.storage).catch(err => console.warn('account deletion sweep failed', err && err.message));
+  const sweepTimer = setInterval(sweepDeletions, 60 * 60 * 1000);
+  if(sweepTimer.unref) sweepTimer.unref();
+  setTimeout(sweepDeletions, 30000).unref?.();
+}
+
 // Serve the static front end (index.html, app.js, CSS) from the same origin unless SERVE_FRONTEND=false.
 if(shouldServeFrontend()) app.use(createFrontendRouter());
 

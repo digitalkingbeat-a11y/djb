@@ -1293,6 +1293,8 @@ function installProfessionalShell(){
             <select id="playlist-export-format" aria-label="Playlist export format"><option value="csv">CSV</option><option value="m3u">M3U</option><option value="m3u8">M3U8</option></select>
             <button class="ghost small" id="export-playlist" type="button">Export Playlist</button>
             <input id="playlist-import-file" type="file" accept=".m3u,.m3u8,.csv,text/csv,audio/x-mpegurl" hidden>
+            <button class="ghost small" id="import-dj-software" type="button" title="Rekordbox XML or Serato .crate">Import Rekordbox / Serato</button>
+            <input id="dj-software-import-file" type="file" accept=".xml,.crate,text/xml,application/xml" hidden>
           </div>
           <div id="studio-library-rule-status" class="library-rule-status"></div>
           <div id="streaming-services" class="streaming-service-selector"></div>
@@ -1505,6 +1507,7 @@ function switchView(view, options = {}){
   }
   if(window.DJBSocial) window.DJBSocial.onView(view);
   if(window.DJBConnect) window.DJBConnect.onView(view);
+  if(window.DJBOct20) window.DJBOct20.onView(view);
   window.scrollTo({top:0,behavior:'smooth'});
   return true;
 }
@@ -7912,6 +7915,7 @@ function handleLibraryFilesWithMeta(files, prefillMap){
 }
 // The file picker uses the same tag / "Artist - Title" autofill as drag-and-drop.
 document.getElementById('library-upload').onchange=e=>handleLibraryPickedFiles(e.target.files);
+{ const djImport = document.getElementById('library-import-dj-software'); if(djImport) djImport.onclick = () => { const input = document.getElementById('dj-software-import-file'); if(input) input.click(); }; }
 document.getElementById('quick-upload').onclick=()=>{switchView('library');document.getElementById('library-upload').click();};
 
 function renderLibrary(){
@@ -8336,6 +8340,7 @@ function renderBattleHistory(){
     button.onclick = event => openRematchSetupFromHistory(event.currentTarget.dataset.historyRematch);
   });
   document.querySelectorAll('[data-profile-tab]').forEach(button=>button.classList.toggle('active',button.dataset.profileTab===activeProfileTab));
+  if(window.DJBOct20 && typeof window.DJBOct20.decorateHistory === 'function') window.DJBOct20.decorateHistory(target);
 }
 
 function evidenceRowsFromObject(object){
@@ -11794,7 +11799,7 @@ function challengeRowHtml(challenge){
     </div>
     <div>
       <span class="challenge-lcd">${esc(readableComponentName(challenge.status))}</span>
-      <div class="challenge-meta">${esc(challengeRulesSummary(challenge.rules))}<br>Expires ${esc(challengeDate(challenge.expiresAt))}</div>
+      <div class="challenge-meta">${esc(challengeRulesSummary(challenge.rules))}<br>Expires ${esc(challengeDate(challenge.expiresAt))}${calendarButtonHtml({ title:`DJ challenge: ${challengeProfileSummary(other)}`, start:challenge.expiresAt, kind:'Challenge respond-by deadline', details:challengeRulesSummary(challenge.rules) })}</div>
     </div>
     <div class="challenge-actions">
       ${crateSelect}
@@ -12306,7 +12311,8 @@ playlistTransferManager = StudioModules.playlistTransfer.create({
   rawServerTrackIdForMembership,
   securePlaybackSource,
   addImportedItemsToLibrary: (items, fileName) => addImportedItemsToLibrary(items, fileName),
-  onImported: result => showAppToast('Playlist imported', `${result.items.length} item(s) read${result.added ? `, ${result.added} added to your library` : ''}.`)
+  mergeImportedTrackDetails: items => mergeImportedTrackDetails(items),
+  onImported: result => result.source ? showAppToast(`Imported from ${result.source}`, result.summary) : showAppToast('Playlist imported', `${result.items.length} item(s) read${result.added ? `, ${result.added} added to your library` : ''}.`)
 });
 studioBrowserManager = StudioModules.browser.create({
   window,
@@ -13330,7 +13336,10 @@ document.addEventListener('keydown', handleStudioShortcut);
   strip.appendChild(btn);
 })();
 
+// Oct 20: lets oct20.js know whether Judging Operations is available to this account.
+window.djbIsOperator = () => Boolean(state.operatorUser);
 window.__DJBattleTestHooks = {
+  getAppState: () => state, getPlaylistTransfer: () => playlistTransferManager,
   isSafeAvatarUrl, validateAvatarFile, processAvatarFile, syncAvatarToServer, avatarUrlForDj, djAvatarHtml, setAvatarCropper: fn => { avatarCropper = fn || cropAvatarToSquare; }, editProfileModalState,
   STUDIO_SHORTCUTS, handleStudioShortcut, openShortcutHelp, closeShortcutHelp, toggleShortcutHelp, shortcutHelpOpen,
   syncBeltBadges, beltTapOffsets, beltTapPreviewScore, createBeltTapTest, loadBeltPromotion, renderBeltPromotion, startBeltTest, submitBeltTestAttempt, currentBeltName, getBeltPromotionState: () => state.beltPromotion,
@@ -13707,6 +13716,31 @@ function findDuplicateUpload(file, pending){
     return !item.fileName && title && title === base && Number(item.size) === Number(file.size);
   }) || null;
 }
+// Oct 20: Rekordbox/Serato import. A track that already has its audio in your library (same
+// file name, or same title + artist) gets the imported BPM, key and cue points; the rest are
+// added as "needs audio" entries you can upload later.
+function libraryFileNameKey(t){
+  const name = String(t && (t.importedFileName || t.fileName || t.originalFileName || t.file && t.file.name || '') || '').split(/[\\/]/).pop().toLowerCase();
+  return name ? name.replace(/\.[a-z0-9]{2,4}$/, '') : '';
+}
+function mergeImportedTrackDetails(items){
+  let matched = 0;
+  const lib = (state.library || []).filter(t => t && !t.metadataOnly);
+  const tk = t => `${String(t.title || t.name || '').trim().toLowerCase()}::${String(t.artist || '').trim().toLowerCase()}`;
+  (items || []).forEach(item => {
+    const fk = libraryFileNameKey(item);
+    const hit = lib.find(t => (fk && libraryFileNameKey(t) === fk) || tk(t) === tk(item));
+    if(!hit) return;
+    matched += 1;
+    item.matchedLibraryId = hit.id;
+    if(item.bpm && (!hit.bpm || hit.bpm === '--')) hit.bpm = item.bpm;
+    if(item.key && (!hit.key || hit.key === '--')) hit.key = item.key;
+    if(!item.bpm && hit.bpm && hit.bpm !== '--') item.bpm = String(hit.bpm);
+    if(!item.key && hit.key && hit.key !== '--') item.key = hit.key;
+    if(Array.isArray(item.cuePoints) && item.cuePoints.length && !(hit.cuePoints && hit.cuePoints.length)) hit.cuePoints = item.cuePoints.slice(0, 64);
+  });
+  return { matched, needsAudio:(items || []).length - matched };
+}
 function addImportedItemsToLibrary(items, fileName){
   let added = 0;
   const key = item => `${String(item.title || item.name || '').trim().toLowerCase()}::${String(item.artist || '').trim().toLowerCase()}`;
@@ -13715,8 +13749,10 @@ function addImportedItemsToLibrary(items, fileName){
     if(!item || !item.title) return;
     const k = key(item);
     if(known.has(k)) return;
+    if(item.fileName && (state.library || []).some(t => libraryFileNameKey(t) === libraryFileNameKey(item))) return;
     known.add(k);
     state.library.push({
+      cuePoints:Array.isArray(item.cuePoints) ? item.cuePoints.slice(0, 64) : [], importedFileName:item.fileName || null,
       id:`pl-${Date.now()}-${index}`,
       title:item.title, name:item.title, artist:item.artist || 'Unknown', album:item.album || null,
       genre:item.genre || 'Unsorted', bpm:item.bpm || '--', key:item.key || '--', duration:item.duration || '--',
@@ -14670,7 +14706,13 @@ function battleReminderButtonHtml(b){
   const target = reminderTarget(b);
   const on = Boolean(loadReminders()[String(b && b.id)]);
   if(!target && !on) return '';
-  return `<button class="ghost small remind-btn${on ? ' on' : ''}" type="button" data-battle-remind="${esc(b.id)}" aria-pressed="${on}">${on ? '🔔 Reminder on' : '🔔 Remind me'}</button>`;
+  return `<button class="ghost small remind-btn${on ? ' on' : ''}" type="button" data-battle-remind="${esc(b.id)}" aria-pressed="${on}">${on ? '🔔 Reminder on' : '🔔 Remind me'}</button>${target ? calendarButtonHtml({ title:b.title || 'DJ battle', start:new Date(target.at).toISOString(), kind:target.kind === 'start' ? 'Battle start' : 'Battle submission deadline', details:`${b.title || 'DJ battle'} on DJ Battle` }) : ''}`;
+}
+// Oct 20: "Add to calendar" button. The menu itself lives in oct20.js (loaded after app.js).
+function calendarButtonHtml(event){
+  if(!event || !event.start || !Number.isFinite(new Date(event.start).getTime())) return '';
+  const data = encodeURIComponent(JSON.stringify({ title:String(event.title || 'DJ Battle').slice(0, 120), start:new Date(event.start).toISOString(), end:event.end || null, kind:String(event.kind || '').slice(0, 60), details:String(event.details || '').slice(0, 300) }));
+  return ` <button class="ghost small cal-btn" type="button" data-cal-event="${esc(data)}" aria-haspopup="menu" title="Add to calendar">📅 Add to calendar</button>`;
 }
 function toggleBattleReminder(battleId, now = Date.now()){
   const id = String(battleId);

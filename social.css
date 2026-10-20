@@ -162,3 +162,35 @@
   .goal-body{flex-direction:column;text-align:center}
   .tracklist-table .tl-col{display:none}.tl-meta-inline{display:block}
 }
+
+/* ---- Oct 20: lock-screen alerts, calendar, result reviews, my data ---- */
+.push-switch{display:flex;align-items:center;gap:8px;font-weight:600;margin:8px 0}
+.push-types{border:1px solid var(--line, rgba(255,255,255,.12));border-radius:10px;padding:8px 12px;margin:8px 0;display:grid;gap:6px}
+.push-types[disabled]{opacity:.55}
+.push-types label{display:flex;gap:8px;align-items:center}
+.push-ios-note{font-size:.9em;color:var(--muted)}
+.cal-btn{margin-left:6px}
+.cal-menu{position:absolute;z-index:60;display:grid;gap:6px;min-width:220px;max-width:min(92vw,320px);padding:12px;border-radius:12px;background:var(--panel, #151821);border:1px solid var(--line, rgba(255,255,255,.14));box-shadow:0 12px 32px rgba(0,0,0,.4)}
+.cal-menu a,.cal-menu button{text-align:left;text-decoration:none}
+.cal-menu [data-cal-close]{position:absolute;top:6px;right:6px;padding:2px 8px}
+.cal-menu small{color:var(--muted)}
+.review-badge{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;font-size:.8em;font-weight:700;background:rgba(255,196,0,.15);color:#ffcf40;border:1px solid rgba(255,196,0,.4)}
+.review-badge.rescored{background:rgba(0,200,140,.14);color:#3fe0a5;border-color:rgba(0,200,140,.4)}
+.review-badge.confirmed{background:rgba(140,160,255,.14);color:#aab6ff;border-color:rgba(140,160,255,.4)}
+.review-form fieldset{display:grid;gap:6px;border:0;padding:0;margin:8px 0}
+.review-form textarea{width:100%}
+.review-queue{list-style:none;padding:0;margin:8px 0;display:grid;gap:10px}
+.review-item{display:grid;grid-template-columns:1fr auto;gap:12px;padding:12px;border:1px solid var(--line, rgba(255,255,255,.12));border-radius:10px}
+.review-item blockquote{margin:6px 0 0;padding-left:10px;border-left:3px solid var(--accent, #ff3b6b);color:var(--muted)}
+.review-decide{display:flex;flex-wrap:wrap;gap:6px;align-items:center;max-width:420px}
+.review-decide input[type=text]{flex:1 1 100%}
+.review-rescore input{width:70px}
+.account-actions{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+button.danger,.danger.ghost{color:#ff6b6b;border-color:rgba(255,107,107,.5)}
+button.danger:not(.ghost){background:#c0392b;color:#fff}
+button.danger[disabled]{opacity:.45}
+.danger-dialog code{font-weight:700}
+.danger-dialog input{width:100%;margin-top:4px}
+.deletion-banner{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:10px 14px;margin:0 0 12px;border-radius:10px;background:rgba(192,57,43,.18);border:1px solid rgba(255,107,107,.45)}
+.library-head-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+@media (max-width:640px){.review-item{grid-template-columns:1fr}.review-decide{max-width:none}.cal-menu{left:4vw;right:4vw}}
