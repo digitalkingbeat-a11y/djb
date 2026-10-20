@@ -6,6 +6,7 @@
 // same files work under the /djb/ subpath without changes.
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const root = path.join(__dirname, '..');
 
@@ -46,7 +47,7 @@ function copyDir(src, dest){
   }
 }
 
-function buildPages(outDir = path.join(root, '_site')){
+function buildPages(outDir = path.join(root, '_site'), options = {}){
   fs.rmSync(outDir, { recursive:true, force:true });
   fs.mkdirSync(outDir, { recursive:true });
   for(const file of pagesFileList()){
@@ -63,10 +64,96 @@ function buildPages(outDir = path.join(root, '_site')){
   if(fs.existsSync(localConfig)) fs.copyFileSync(localConfig, path.join(outDir, LOCAL_CONFIG));
   else fs.writeFileSync(path.join(outDir, LOCAL_CONFIG), LOCAL_CONFIG_PLACEHOLDER);
   fs.writeFileSync(path.join(outDir, '.nojekyll'), '');
+  if(options.optimize !== false) optimizePages(outDir);
   return outDir;
 }
 
-module.exports = { PAGES_FILES, PAGES_DIRS, LOCAL_CONFIG, pagesFileList, buildPages };
+// ---- Faster first load (Pages output only; source files on main stay readable) ----
+// 1. Minify every shipped JS file with esbuild (top-level names are kept, so scripts that
+//    share globals keep working; function names are kept too).
+// 2. Combine the root stylesheets, in the exact order index.html loads them, into one minified
+//    bundle so the cascade is unchanged.
+// 3. Give everything index.html loads a content-hashed name (app.<hash>.js), so browsers can
+//    cache them and every change still arrives as a new URL.
+// 4. Rewrite index.html and the service worker's precache list to the new names, and re-stamp
+//    the worker's CACHE_VERSION for the built files so "Update ready" keeps working.
+const UNHASHED = new Set([LOCAL_CONFIG, 'sw.js']);
+const CSS_BUNDLE_BASE = 'styles.bundle';
+
+function contentHash(text){ return crypto.createHash('sha256').update(text).digest('hex').slice(0, 10); }
+
+function hashedName(file, text){
+  const ext = path.extname(file);
+  return `${file.slice(0, -ext.length)}.${contentHash(text)}${ext}`;
+}
+
+function listFiles(dir, base = dir){
+  const out = [];
+  for(const entry of fs.readdirSync(dir, { withFileTypes:true })){
+    const full = path.join(dir, entry.name);
+    if(entry.isDirectory()) out.push(...listFiles(full, base));
+    else out.push(path.relative(base, full).split(path.sep).join('/'));
+  }
+  return out;
+}
+
+function optimizePages(outDir){
+  const esbuild = require('esbuild');
+  let html = fs.readFileSync(path.join(outDir, 'index.html'), 'utf8');
+
+  // Minify JS in place (sw.js is left as-is so its precache list and version stamp stay readable).
+  for(const rel of listFiles(outDir).filter(f => f.endsWith('.js') && !UNHASHED.has(f))){
+    const file = path.join(outDir, rel);
+    const { code } = esbuild.transformSync(fs.readFileSync(file, 'utf8'), { loader:'js', minify:true, keepNames:true, legalComments:'none', charset:'utf8' });
+    fs.writeFileSync(file, code);
+  }
+
+  // CSS bundle in index.html order.
+  const linkRe = /^[ \t]*<link rel="stylesheet" href="([^"]+\.css)" \/>\r?\n/gm;
+  const cssFiles = [...html.matchAll(linkRe)].map(m => m[1]);
+  if(!cssFiles.length) throw new Error('build-pages: no stylesheets found in index.html');
+  const combined = cssFiles.map(f => fs.readFileSync(path.join(outDir, f), 'utf8')).join('\n');
+  const { code:css } = esbuild.transformSync(combined, { loader:'css', minify:true, legalComments:'none', charset:'utf8' });
+  const cssName = hashedName(`${CSS_BUNDLE_BASE}.css`, css);
+  fs.writeFileSync(path.join(outDir, cssName), css);
+  for(const f of cssFiles) fs.rmSync(path.join(outDir, f));
+  let first = true;
+  html = html.replace(linkRe, (m) => {
+    if(!first) return '';
+    first = false;
+    return `  <link rel="stylesheet" href="${cssName}" />\n`;
+  });
+
+  // Hash every script index.html loads.
+  const renamed = new Map();
+  html = html.replace(/<script src="([^"]+\.js)"><\/script>/g, (m, src) => {
+    if(UNHASHED.has(src)) return m;
+    const text = fs.readFileSync(path.join(outDir, src), 'utf8');
+    const name = hashedName(src, text);
+    fs.renameSync(path.join(outDir, src), path.join(outDir, name));
+    renamed.set(src, name);
+    return `<script src="${name}"></script>`;
+  });
+  fs.writeFileSync(path.join(outDir, 'index.html'), html);
+
+  // Service worker: precache exactly the built files, then re-stamp the version.
+  const swPath = path.join(outDir, 'sw.js');
+  const sw = fs.readFileSync(swPath, 'utf8');
+  const listRe = /const SHELL_FILES = \[([\s\S]*?)\];/;
+  const oldList = Array.from(sw.match(listRe)[1].matchAll(/'([^']+)'/g)).map(m => m[1]);
+  const cssSet = new Set(cssFiles);
+  const next = [];
+  for(const name of oldList){
+    if(cssSet.has(name)){ if(!next.includes(cssName)) next.push(cssName); continue; }
+    next.push(renamed.get(name) || name);
+  }
+  const listSrc = '\n  OFFLINE_URL,\n' + next.filter(n => n !== 'offline.html').map(n => `  '${n}'`).join(',\n') + '\n';
+  fs.writeFileSync(swPath, sw.replace(listRe, `const SHELL_FILES = [${listSrc}];`));
+  require('./stamp-sw-version.js').stamp(outDir);
+  return { cssName, renamed };
+}
+
+module.exports = { PAGES_FILES, PAGES_DIRS, LOCAL_CONFIG, pagesFileList, buildPages, optimizePages };
 
 if(require.main === module){
   const out = buildPages(process.argv[2] ? path.resolve(process.argv[2]) : undefined);

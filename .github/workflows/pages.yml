@@ -23,6 +23,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install build tools
+        run: npm ci
       - name: Build check
         run: npm run build
       - name: Assemble site
