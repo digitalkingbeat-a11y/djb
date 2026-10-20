@@ -94,3 +94,7 @@ Keep AI, community, and expert scores separate. Calculate final hybrid scores fr
 
 - `ALLOWED_ORIGINS` — comma-separated list of front-end addresses allowed to call the API from a browser (e.g. `https://djbattle.example.com`). Set this on your deployed server. In development, `localhost`/`127.0.0.1` on any port are always allowed. If it is unset in production the server logs a warning and only same-origin (bundled front end) and non-browser requests work.
 - The server sends standard security headers (Content-Security-Policy, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`). If you load scripts from a new CDN, add it to `server/security.js`.
+
+## Beatmatching lessons (Oct 20b) and audio licensing
+
+Battle Studio → Learn has four hands-on beatmatching lessons (match the tempo, line up the beats, a clean transition, an EQ bass swap), each with a pass or a tip. **No recorded audio is used.** Every kick, hi-hat and bass note is synthesized live in the browser with the Web Audio API (`studio/beatmatch_lessons.js`: sine-sweep kicks, filtered white-noise hats, sine bass lines). There are no sample files, so there is nothing copyrighted and no third-party licence to track. If real loops are ever added, only use ones you made yourself or ones under CC0, and record the source and licence here.
