@@ -1,0 +1,76 @@
+/* Oct 19: battle chat, tournaments, timed comments, appearance switch, embed button. */
+.battle-chat{margin-top:14px}
+.battle-chat-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.battle-chat-head h3{margin:4px 0 0;font-size:16px}
+.battle-chat-list{list-style:none;margin:12px 0;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);max-height:240px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;overscroll-behavior:contain}
+.battle-chat-msg{max-width:85%;padding:8px 10px;border-radius:10px;background:var(--panel);border:1px solid var(--line);overflow-wrap:anywhere}
+.battle-chat-msg.mine{align-self:flex-end;border-color:var(--accent2)}
+.battle-chat-msg small{display:block;color:var(--muted);font-size:11px;margin-bottom:2px}
+.battle-chat-msg p{margin:0;font-size:14px;line-height:1.4}
+.battle-chat-msg .chat-report{margin-top:4px;min-height:32px;padding:4px 8px;font-size:12px}
+.battle-chat-empty,.battle-chat-note{color:var(--muted);font-size:13px;margin:0}
+.battle-chat-form{display:flex;gap:8px}
+.battle-chat-form input{flex:1;min-width:0;min-height:44px;padding:10px;border-radius:9px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font:inherit}
+.battle-chat-form button,.battle-chat-head button{min-height:44px}
+.battle-chat-count{color:var(--muted);font-size:11px;text-align:right;margin-top:4px}
+
+.tournament-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.tournament-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-top:14px}
+.tournament-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:8px}
+.tournament-card h4{margin:0;font-size:17px}
+.tournament-card p{margin:0;color:var(--muted);font-size:13px}
+.tournament-card button,.tournament-actions button{min-height:44px}
+.tournament-status{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-text)}
+.tournament-actions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.bracket-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:12px;background:var(--panel2);padding:12px;max-width:100%}
+.bracket{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(190px,1fr);gap:16px;min-width:max-content}
+.bracket-round{display:flex;flex-direction:column;justify-content:space-around;gap:10px}
+.bracket-round h5{margin:0 0 4px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.bracket-match{border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}
+.bracket-match.is-ready{border-color:var(--accent2)}
+.bracket-slot{display:flex;justify-content:space-between;gap:8px;padding:8px 10px;font-size:13px;min-height:36px;align-items:center}
+.bracket-slot+.bracket-slot{border-top:1px solid var(--line)}
+.bracket-slot.winner{font-weight:800}
+.bracket-slot.winner::after{content:"✓";color:var(--accent-text)}
+.bracket-slot.empty{color:var(--muted);font-style:italic}
+.bracket-slot.you{background:rgba(185,255,49,.1)}
+.bracket-match-foot{padding:6px 10px;font-size:11px;color:var(--muted);border-top:1px solid var(--line)}
+.bracket-match-foot button{width:100%;min-height:44px}
+.tournament-champion{display:flex;align-items:center;gap:12px;padding:14px;border-radius:12px;border:1px solid var(--accent2);background:var(--panel);margin:12px 0}
+.tournament-champion strong{font-size:20px}
+.tournament-entrants{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;padding:0;list-style:none}
+.tournament-entrants li{padding:6px 10px;border:1px solid var(--line);border-radius:999px;font-size:13px}
+.social-note{color:var(--muted);font-size:13px}
+.social-note.warn{color:var(--text);border:1px dashed var(--line);border-radius:10px;padding:10px}
+
+.timed-comments{margin-top:14px}
+.timed-wave{position:relative;height:72px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);cursor:crosshair;touch-action:manipulation;overflow:hidden}
+.timed-wave-bars{position:absolute;inset:8px 6px;display:flex;align-items:center;gap:2px}
+.timed-wave-bars i{flex:1;background:var(--muted);opacity:.55;border-radius:2px;min-width:1px}
+.timed-wave-playhead{position:absolute;top:0;bottom:0;width:2px;background:var(--accent-text);pointer-events:none}
+.timed-marker{position:absolute;top:2px;width:44px;height:44px;margin-left:-22px;border:0;background:transparent;cursor:pointer;padding:0}
+.timed-marker::before{content:"";position:absolute;left:50%;top:4px;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:var(--accent-text);border:2px solid var(--panel)}
+.timed-marker.active::before{transform:scale(1.4)}
+.timed-wave-times{display:flex;justify-content:space-between;color:var(--muted);font-size:11px;margin-top:4px}
+.timed-list{list-style:none;padding:0;margin:10px 0;display:flex;flex-direction:column;gap:8px;max-height:260px;overflow-y:auto}
+.timed-item{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--panel)}
+.timed-item.active{border-color:var(--accent2)}
+.timed-item-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.timed-time{min-height:44px;min-width:56px;font-variant-numeric:tabular-nums}
+.timed-item p{margin:6px 0 0;overflow-wrap:anywhere;font-size:14px}
+.timed-item-actions{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+.timed-item-actions button{min-height:44px}
+.timed-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.timed-form input{flex:1;min-width:0;min-height:44px;padding:10px;border-radius:9px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font:inherit}
+.timed-form button{min-height:44px}
+
+.theme-switch{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.theme-switch button{min-height:44px;flex:1;min-width:90px}
+.theme-switch button[aria-checked="true"]{outline:2px solid var(--accent-text);outline-offset:1px;font-weight:800}
+
+.embed-code{width:100%;min-height:96px;font:12px/1.4 ui-monospace,Menlo,monospace;padding:10px;border-radius:9px;border:1px solid var(--line);background:var(--panel2);color:var(--text);resize:vertical}
+.embed-preview{width:100%;max-width:480px;height:170px;border:1px solid var(--line);border-radius:12px;margin-top:10px;background:var(--panel2)}
+@media (max-width:760px){
+  .bracket{grid-auto-columns:minmax(170px,1fr)}
+  .battle-chat-msg{max-width:95%}
+}

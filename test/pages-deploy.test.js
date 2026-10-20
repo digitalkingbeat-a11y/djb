@@ -75,3 +75,17 @@ test('Pages build minifies, bundles and hashes assets, and keeps the service wor
     assert.ok(fs.readFileSync(path.join(root, 'app.js'), 'utf8').split('\n').length > 1000);
   }finally{ fs.rmSync(out, { recursive:true, force:true }); }
 });
+
+test('every built HTML page only references scripts that exist in the Pages output', () => {
+  const fs = require('fs'); const os = require('os'); const path = require('path');
+  const { buildPages } = require('../scripts/build-pages.js');
+  const out = buildPages(fs.mkdtempSync(path.join(os.tmpdir(), 'pages-html-')));
+  for(const page of fs.readdirSync(out).filter(f => f.endsWith('.html'))){
+    const html = fs.readFileSync(path.join(out, page), 'utf8');
+    for(const m of html.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)){
+      if(/^https?:/.test(m[1])) continue;
+      assert.ok(fs.existsSync(path.join(out, m[1])), `${page} loads missing ${m[1]}`);
+    }
+  }
+  fs.rmSync(out, { recursive:true, force:true });
+});

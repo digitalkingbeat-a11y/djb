@@ -23,3 +23,6 @@ If you want, I can also produce the exact `supabase` CLI commands or an automate
 - 028_create_battle_crowd_votes.sql — creates `battle_crowd_votes` (one winner pick per listener per finished battle; writes go through the server)
 - 029_create_profile_avatars_bucket.sql — creates the public `profile-avatars` storage bucket (512 KB JPG/PNG/WebP profile photos; uploads go through server-signed URLs)
 - 030_create_practice_sessions.sql — creates `practice_sessions` (the full practice log on each DJ's account; writes go through the server)
+- 031_create_battle_chat_messages.sql — creates `battle_chat_messages` (battle room chat between the two DJs) and lets chat messages and timed comments be reported
+- 032_create_tournaments.sql — creates `dj_tournaments`, `dj_tournament_seats` and `dj_tournament_matches` (8- or 16-DJ knockout brackets; each match links to a normal battle)
+- 033_create_result_timed_comments.sql — creates `result_timed_comments` (comments pinned to a moment of a public battle result)

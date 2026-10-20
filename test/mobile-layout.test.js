@@ -9,7 +9,7 @@ const path = require('path');
 const http = require('http');
 
 const root = path.join(__dirname, '..');
-const VIEWS = ['dashboard','battles','studio','library','community','verified-results','rankings','activity','notifications','settings','profile','store','practice','battle-room'];
+const VIEWS = ['dashboard','battles','studio','library','community','verified-results','rankings','activity','notifications','settings','profile','store','practice','tournaments','battle-room'];
 const TYPES = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css', '.json':'application/json', '.svg':'image/svg+xml', '.png':'image/png', '.webmanifest':'application/manifest+json', '.wav':'audio/wav' };
 
 function startServer(){
