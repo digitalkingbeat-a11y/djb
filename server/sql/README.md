@@ -28,3 +28,7 @@ If you want, I can also produce the exact `supabase` CLI commands or an automate
 - 033_create_result_timed_comments.sql — creates `result_timed_comments` (comments pinned to a moment of a public battle result)
 - 034_add_tournament_deadlines_host_controls.sql — adds round deadlines, no-show forfeits, scheduled start dates and cancel support to tournaments (apply after 033)
 - 035_add_social_notification_types.sql — adds the tournament match, battle chat and timed comment notification types plus their Settings on/off switches (apply after 034)
+- 036_create_direct_messages.sql — creates `direct_messages` (one-on-one DJ messages), lets them be reported, and adds the "New direct message" notification type (apply after 035)
+- 037_add_dj_search_fields.sql — adds city, main genre and a "show me in search" switch to DJ profiles for Find DJs (apply after 036)
+- 038_create_shared_crate_tracklists.sql — creates `shared_crate_tracklists` (public crate tracklists: title, artist, BPM and key only, never audio) (apply after 037)
+- 039_create_practice_goals.sql — creates `practice_goals` (weekly practice goal per DJ, synced across devices) (apply after 038)

@@ -1042,7 +1042,7 @@ async function fetchLeaderboardLive(opts={}){
   }
 }
 
-const pageTitles={dashboard:'Battle Home',battles:'Battles',studio:'Battle Studio',library:'Music Library',community:'Community','verified-results':'Verified Results',rankings:'Rankings',notifications:'Notifications',activity:'Activity',tour:'Virtual Tour',settings:'Settings',operations:'Judging Operations',profile:'Profile',store:'Beat Store',practice:'Practice Log',tournaments:'Tournaments'};
+const pageTitles={dashboard:'Battle Home',battles:'Battles',studio:'Battle Studio',library:'Music Library',community:'Community','verified-results':'Verified Results',rankings:'Rankings',notifications:'Notifications',activity:'Activity',tour:'Virtual Tour',settings:'Settings',operations:'Judging Operations',profile:'Profile',store:'Beat Store',practice:'Practice Log',tournaments:'Tournaments',messages:'Messages','find-djs':'Find DJs',watch:'Watch Live'};
 
 function sanitizedTrackForStorage(track){
   if(!track || typeof track !== 'object') return track;
@@ -1174,6 +1174,9 @@ function installProfessionalShell(){
       ['community','CM','Community'],
       ['rankings','RK','Rankings'],
       ['tournaments','TN','Tournaments'],
+      ['watch','WL','Watch Live'],
+      ['find-djs','FD','Find DJs'],
+      ['messages','MS','Messages'],
       ['activity','AC','Activity'],
       ['store','BS','Beat Store'],
       ['practice','PL','Practice Log'],
@@ -1417,7 +1420,7 @@ function libraryPlayerMinimized(){ const p = document.getElementById('library-pl
   if(btn) btn.onclick = () => setLibraryPlayerMinimized(!libraryPlayerMinimized());
 })();
 // ---- Address bar routing: every page lives at #<view> so Back/Forward, refresh and shared links work. ----
-const ROUTABLE_VIEWS = ['dashboard','battles','studio','library','community','verified-results','rankings','notifications','activity','settings','operations','profile','store','practice','tournaments'];
+const ROUTABLE_VIEWS = ['dashboard','battles','studio','library','community','verified-results','rankings','notifications','activity','settings','operations','profile','store','practice','tournaments','messages','find-djs','watch'];
 function viewFromHash(hash = window.location && window.location.hash){
   const raw = String(hash || '').replace(/^#\/?/, '');
   if(!raw) return '';
@@ -1501,6 +1504,7 @@ function switchView(view, options = {}){
     loadDjChallengeCount().catch(()=>{});
   }
   if(window.DJBSocial) window.DJBSocial.onView(view);
+  if(window.DJBConnect) window.DJBConnect.onView(view);
   window.scrollTo({top:0,behavior:'smooth'});
   return true;
 }
@@ -11584,6 +11588,9 @@ async function openDjNotificationDestination(notificationId){
   const notification = (state.djNotifications.rows || []).find(row => String(row.id) === String(notificationId));
   if(!notification) return { skipped:true };
   const destination = notification.destination || {};
+  if(destination.type === 'messages' && destination.publicProfileId && window.DJBConnect){
+    return { opened:'messages', response:await window.DJBConnect.openConversation(destination.publicProfileId) };
+  }
   if(destination.type === 'tournament' && destination.tournamentId && window.DJBSocial){
     return { opened:'tournament', response:await window.DJBSocial.openTournamentFromAnywhere(destination.tournamentId) };
   }

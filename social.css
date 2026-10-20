@@ -109,3 +109,56 @@
 }
 .tournament-host-tools .danger-btn,.tournament-remove-list .danger-btn{background:transparent;border:1px solid #f87171;color:#fca5a5}
 .tournament-host-tools .danger-btn:hover,.tournament-remove-list .danger-btn:hover{background:rgba(248,113,113,.12)}
+
+/* ---------- Oct 19c: messages, Find DJs, watch live, shared tracklists, weekly goals ---------- */
+.dm-layout{display:grid;grid-template-columns:minmax(220px,300px) 1fr;gap:16px;align-items:start}
+.dm-list ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.dm-convo{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:transparent;border:1px solid var(--line,#253041);border-radius:12px;padding:10px;color:inherit;cursor:pointer;min-height:44px}
+.dm-convo.active,.dm-convo:hover{border-color:var(--accent,#4ade80)}
+.dm-convo-text{display:grid;min-width:0;flex:1}.dm-convo-text small{color:var(--muted,#94a3b8);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dm-unread,.dm-nav-count{background:#ef4444;color:#fff;border-radius:999px;font-size:11px;font-weight:700;padding:1px 7px;min-width:18px;text-align:center}
+.dm-nav-count[hidden]{display:none}
+.dm-thread{display:grid;gap:10px;min-height:360px;min-width:0}.dm-list{min-width:0}
+.dm-thread-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.dm-thread-actions{margin-left:auto;display:flex;gap:6px}
+.dm-back{display:none}
+.dm-messages{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;max-height:420px;overflow-y:auto}
+.dm-msg{align-self:flex-start;max-width:78%;background:var(--panel-2,#1a2230);border-radius:14px;padding:8px 12px}
+.dm-msg.mine{align-self:flex-end;background:color-mix(in srgb,var(--accent,#4ade80) 22%,transparent)}
+.dm-msg p{margin:0 0 2px;overflow-wrap:anywhere}.dm-msg small{color:var(--muted,#94a3b8);margin-right:8px}
+.dm-form{display:flex;gap:8px}.dm-form input{flex:1;min-width:0}
+.dm-empty{color:var(--muted,#94a3b8)}
+.find-form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) auto;gap:10px;align-items:end}
+.find-form label,.find-me-grid label{display:grid;gap:4px;font-size:13px;min-width:0}
+.find-form input,.find-form select,.find-me-grid input,.crate-share-row select{width:100%;min-width:0;max-width:100%;box-sizing:border-box}
+#find-djs,#messages,#watch{min-width:0;max-width:100%;overflow-x:hidden}
+.find-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;margin:12px 0}
+.find-card{display:grid;gap:8px}.find-card-top{display:flex;gap:10px;align-items:center}.find-card-top>div{flex:1;display:grid;min-width:0}
+.find-card-top small,.find-card-wins{color:var(--muted,#94a3b8)}
+.find-card-actions{display:flex;gap:6px;flex-wrap:wrap}.find-card-actions button{min-height:40px}
+.find-me-grid{display:grid;grid-template-columns:1fr 1fr auto auto;gap:10px;align-items:end}.find-me-toggle{display:flex!important;align-items:center;gap:6px}
+.watch-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+.watch-card{display:grid;gap:6px;text-align:left;cursor:pointer;color:inherit}
+.watch-live-pill{font-size:11px;font-weight:800;letter-spacing:.06em;color:var(--muted,#94a3b8)}.watch-live-pill.on{color:#ef4444}
+.watch-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.watch-count{margin-left:auto;font-weight:700}
+.watch-djs{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:12px 0}
+.watch-dj{display:grid;justify-items:center;gap:4px;padding:12px;border:1px solid var(--line,#253041);border-radius:14px}
+.watch-dj-status{color:var(--accent,#4ade80);font-weight:700}
+.watch-chat .battle-chat-list{max-height:280px;overflow-y:auto}
+.crate-share-panel{margin-top:16px}.crate-share-row,.crate-share-link{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+.crate-share-link input{flex:1;min-width:0}
+.tofind ol{margin:6px 0 0;padding-left:22px}.tofind-meta{color:var(--muted,#94a3b8)}
+.tracklist-table-wrap{max-height:50vh;overflow:auto}.tracklist-table{width:100%;border-collapse:collapse}.tl-meta-inline{display:none;color:var(--muted,#94a3b8)}
+.tracklist-table td,.tracklist-table th{padding:6px 8px;border-bottom:1px solid var(--line,#253041);text-align:left}
+.practice-goal{margin:16px 0}.goal-body{display:flex;gap:18px;align-items:center}
+.goal-ring{width:110px;height:110px;flex:none}.goal-ring-track{fill:none;stroke:var(--line,#253041);stroke-width:10}
+.goal-ring-fill{fill:none;stroke:var(--accent,#4ade80);stroke-width:10;stroke-linecap:round;transition:stroke-dasharray .4s}
+.goal-ring-num{font-size:20px;font-weight:800;fill:currentColor}.goal-ring-sub{font-size:10px;fill:var(--muted,#94a3b8)}
+.goal-text h3{margin:4px 0}
+@media (max-width:760px){
+  .dm-layout{grid-template-columns:1fr}.dm-layout.has-thread .dm-list{display:none}.dm-layout:not(.has-thread) .dm-thread{display:none}.dm-back{display:inline-flex}
+  .dm-msg{max-width:88%}
+  .dm-thread-head{min-width:0}.dm-thread-actions{margin-left:0;flex-basis:100%}
+  .find-form,.find-me-grid{grid-template-columns:1fr}
+  .goal-body{flex-direction:column;text-align:center}
+  .tracklist-table .tl-col{display:none}.tl-meta-inline{display:block}
+}

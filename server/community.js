@@ -1050,7 +1050,8 @@ async function toggleCommunityReaction(dataClient, userId, input = {}, now = new
 // Battle chat messages and timed result comments share the community report queue.
 const EXTRA_REPORT_TARGETS = {
   battle_chat_message:(dataClient, userId, id) => require('./battle_chat').chatMessageReportTarget(dataClient, userId, id),
-  timed_comment:(dataClient, userId, id) => require('./timed_comments').timedCommentReportTarget(dataClient, userId, id)
+  timed_comment:(dataClient, userId, id) => require('./timed_comments').timedCommentReportTarget(dataClient, userId, id),
+  direct_message:(dataClient, userId, id) => require('./connect').directMessageReportTarget(dataClient, userId, id)
 };
 
 async function reportCommunityTarget(dataClient, userId, input = {}, now = new Date()){
