@@ -19,6 +19,7 @@
     "jsdom": "^21.1.2"
   },
   "devDependencies": {
+    "esbuild": "^0.28.2",
     "playwright": "^1.45.0"
   }
 }
