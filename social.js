@@ -346,7 +346,7 @@
   function deadlineHtml(m){
     if(!m.deadlineAt || m.winner || !['ready', 'active'].includes(m.status)) return '';
     const when = new Date(m.deadlineAt);
-    return `<span class="bracket-deadline" data-deadline="${escHtml(m.deadlineAt)}" title="Play by ${escHtml(when.toLocaleString([], { weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }))}">⏱ ${escHtml(countdownText(m.deadlineAt))}</span>`;
+    return `<span class="bracket-deadline" data-deadline="${escHtml(m.deadlineAt)}" title="Play by ${escHtml(when.toLocaleString([], { weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }))}">⏱ ${escHtml(countdownText(m.deadlineAt))}</span>${typeof W.calendarButtonHtml === 'function' ? W.calendarButtonHtml({ title:`Tournament round ${m.round || ''} deadline`.replace(/\s+/g, ' '), start:m.deadlineAt, kind:'Tournament round deadline', details:'Play your tournament match before this time or it counts as a forfeit.' }) : ''}`;
   }
   function forfeitHtml(m){
     if(!m.forfeit || !m.winner) return '';

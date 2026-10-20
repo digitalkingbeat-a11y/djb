@@ -136,3 +136,39 @@ How it works:
 - **Weekly goals.** `GET`/`PUT /api/practiceGoal` with `{ sessionsPerWeek }` (0–21; 0 turns it off). Progress comes from the practice log and resets every Monday; each week you hit the goal adds to your goal streak.
 
 No new environment variables are needed.
+
+## Lock-screen alerts, Add to calendar, DJ software import, result reviews and my data (Oct 20)
+
+Run these in the Supabase SQL editor, in order (after 036–039 above), then redeploy the server:
+
+- `server/sql/040_create_push_subscriptions.sql` — one row per device that turned on lock-screen alerts, with the alert types it chose
+- `server/sql/041_create_result_review_requests.sql` — "Request a review" of a judged result, plus the "A judge finished reviewing your result" notification type
+- `server/sql/042_create_account_deletion_requests.sql` — "Delete my account" with a 7-day grace period
+
+Until a file is run, the matching feature shows a friendly "needs setup" message instead of failing. Never run the old `028_create_tournaments.sql` from the tournament foundation branch; `032_create_tournaments.sql` replaced it.
+
+### New environment variables (lock-screen alerts only)
+
+Lock-screen alerts use "VAPID" keys: a public/private key pair that proves alerts come from your server. Make them once on your own computer (not in chat, never committed to git):
+
+```
+cd server
+npx web-push generate-vapid-keys
+```
+
+It prints a **Public Key** and a **Private Key**. In your server host's environment settings add:
+
+- `VAPID_PUBLIC_KEY` — the Public Key
+- `VAPID_PRIVATE_KEY` — the Private Key (keep it secret)
+- `VAPID_SUBJECT` — `mailto:` plus an email address you read, e.g. `mailto:Digitalkingbeat@gmail.com` (push services contact this address if something goes wrong; if you leave it out, `EMAIL_FROM` is used)
+
+Then redeploy. Keep the same keys forever: changing them signs every device out of alerts, and DJs have to switch them on again. Nothing else in the app needs a key.
+
+### How it works
+
+- **Lock-screen alerts.** Settings → Phone alerts has an on/off switch for this device plus a checkbox per alert type: tournament match ready, battle chat message, comment on your mix, direct message, and new/accepted challenge. They are the same events as the Activity bell (Oct 19b), so a type switched off under Notifications sends no alert either. `GET /api/push/config` (public: whether the server is set up, the public key and the types), `GET`/`POST`/`DELETE /api/push/subscriptions` (signed in; up to 10 devices), `POST /api/push/test`. Alerts say who it's from but never the message text. Devices that uninstall or block alerts are forgotten automatically. **iPhone:** alerts only work after the DJ adds DJ Battle to the Home Screen (Share → Add to Home Screen) and opens it from there (iOS 16.4+); the Settings panel says so.
+- **Add to calendar.** "📅 Add to calendar" next to battle start times / submission deadlines, challenge respond-by deadlines and tournament round deadlines. It offers Google Calendar, Outlook and an `.ics` file (Apple Calendar and everything else), with a 30-minute reminder. Runs entirely in the browser; no setup.
+- **Import from Rekordbox / Serato.** Music Library → "Import from Rekordbox / Serato", or Battle Studio → "Import Rekordbox / Serato". Rekordbox: File → Export Collection in xml format; brings in playlists, names, BPMs, keys, hot cues and memory cues. Serato: pick a `.crate` file from `Music/_Serato_/Subcrates`; Serato keeps BPM, key and cues inside the audio files, so those are filled in from tracks already in your library with the same file name. Audio is never copied: tracks you already uploaded are matched (same file name, or same title and artist); the rest show as "needs audio" until you upload them. Runs in the browser; no setup.
+- **Request a review.** Profile → battle history → "Request a review" on a judged result. The DJ picks a reason and can add a note; the result shows "⚖ Under review". `POST /api/battleResults/:submissionId/review`, `GET /api/resultReviews/mine`. Operators see the queue at the bottom of Judging Operations (`GET /api/operations/resultReviews`) and confirm the score or rescore it 0–100 (`POST /api/operations/resultReviews/:id/decision`); the DJ gets an Activity-bell notification. One open review per result, two reviews per result at most.
+- **Download my data.** Settings → My data & account → "Download my data" saves one `.json` file with everything stored for the account (profile, results, library, crates, practice, messages, comments, follows, purchases, review requests) plus this device's settings. Other DJs' account ids are replaced with `other-dj`, and secrets (payment ids, push keys, tokens) are left out. Audio files are not inside it. `GET /api/account/export`.
+- **Delete my account.** The DJ types `DELETE MY ACCOUNT`; deletion is scheduled 7 days out and a banner with "Keep my account" shows on every page until then (`GET`/`POST`/`DELETE /api/account/deletion`). The server checks hourly; when the 7 days are up it deletes the DJ's mix audio, their rows in every app table and their sign-in account, using the existing `SUPABASE_SERVICE_KEY`. Sales records (`marketplace_orders`) are kept for tax/legal reasons with the account gone.

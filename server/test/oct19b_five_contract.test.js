@@ -199,7 +199,7 @@ describe('Oct 19b: Activity-bell notifications', () => {
 
   it('a switched-off type is not delivered, and switching back on works', async () => {
     const db = dataClient({ dj_notifications:[], dj_notification_mutes:[], dj_progression_profiles:[] });
-    expect((await Social.getSocialNotificationPrefs(db, 'u')).prefs).to.deep.equal({ tournament_match_ready:true, battle_chat_message:true, timed_comment_received:true, direct_message:true });
+    expect((await Social.getSocialNotificationPrefs(db, 'u')).prefs).to.deep.equal({ tournament_match_ready:true, battle_chat_message:true, timed_comment_received:true, direct_message:true, result_review_decided:true });
     const off = await Social.setSocialNotificationPref(db, 'u', 'battle_chat_message', false);
     expect(off.prefs.battle_chat_message).to.equal(false);
     expect((await Social.emitSocialNotification(db, { recipientUserId:'u', actorUserId:'x', type:'battle_chat_message', eventKey:'k' })).muted).to.equal(true);

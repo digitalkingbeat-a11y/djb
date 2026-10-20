@@ -559,7 +559,10 @@ async function emitChallengeNotifications(dataClient, row, eventType = eventType
     };
     const inserted = await dataClient.from(DJ_NOTIFICATIONS_TABLE).insert([payload]).select('*').single();
     if(inserted.error) errors.push(inserted.error);
-    else notifications.push(inserted.data);
+    else{
+      notifications.push(inserted.data);
+      if(eventType === 'challenge_received' || eventType === 'challenge_accepted') await require('./push_hook').firePush(dataClient, inserted.data || payload);
+    }
   }
   return errors.length ? { notifications, error:errors[0] } : { notifications };
 }
