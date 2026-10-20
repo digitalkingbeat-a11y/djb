@@ -12,6 +12,10 @@
   <meta name="apple-mobile-web-app-title" content="DJ Battle" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#0b0f14" />
+  <script>
+    // Apply the saved theme before anything paints (Settings > Appearance), so light mode never flashes dark.
+    (function(){try{var p=localStorage.getItem('djbTheme');var t=p==='light'?'light':p==='system'&&window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';document.documentElement.setAttribute('data-theme',t);var m=document.querySelector('meta[name="theme-color"]');if(m)m.setAttribute('content',t==='light'?'#f3f5f9':'#0b0f14');}catch(e){}})();
+  </script>
   <meta name="description" content="Battle other DJs, get AI-judged scores and climb the rankings." />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="DJ Battle" />
@@ -25,7 +29,7 @@
   <meta name="twitter:description" content="Battle other DJs, get AI-judged scores and climb the rankings." />
   <meta name="twitter:image" content="assets/og-image.png" />
   <title>DJ Battle — Battle Studio</title>
-  <link rel="stylesheet" href="styles.bundle.eb234c1a97.css" />
+  <link rel="stylesheet" href="styles.bundle.c71fd5099f.css" />
   <style>
     /* Ensure battle meta has 4 columns for additional metadata */
     .battle-meta{grid-template-columns:repeat(4,1fr) !important}
@@ -550,7 +554,8 @@
   <script src="studio/playlist_transfer.b366f21f26.js"></script>
   <script src="studio/studio_browser.d52839162b.js"></script>
   <script src="studio/deck_runtime.9841153da3.js"></script>
-  <script src="app.4b3d98d861.js"></script>
+  <script src="app.ed58bcfcbf.js"></script>
+  <script src="social.1a62f484d0.js"></script>
   <script>
     // Wire timing analysis to create practice events from loaded audio.
     const timingInspectorButton = document.getElementById('hc-run-timing');
