@@ -35,3 +35,7 @@ If you want, I can also produce the exact `supabase` CLI commands or an automate
 - 040_create_push_subscriptions.sql — creates `push_subscriptions` (phone lock-screen alerts: one row per device, with its chosen alert types; server only) (apply after 039)
 - 041_create_result_review_requests.sql — creates `result_review_requests` ("Request a review" of a judged result) and adds the "judge finished reviewing" notification type (apply after 040)
 - 042_create_account_deletion_requests.sql — creates `account_deletion_requests` (Delete my account with a 7-day grace period) (apply after 041)
+- 043_create_crews.sql — creates `crews`, `crew_members` (one crew per DJ, up to 4) and `crew_battles` (2-vs-2 crew battles with combined scores) (apply after 042)
+- 044_create_dj_tips.sql — creates `dj_tips` ("Tip a DJ" through Stripe Checkout) (apply after 043)
+- 045_create_beat_discount_codes.sql — creates `beat_discount_codes` and `beat_discount_redemptions` (Beat Store discount codes) (apply after 044)
+- 046_create_view_events.sql — creates `view_events` ("Who's watching" weekly views and sources; stores no visitor details) (apply after 045)

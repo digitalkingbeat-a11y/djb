@@ -194,3 +194,87 @@ button.danger[disabled]{opacity:.45}
 .deletion-banner{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:10px 14px;margin:0 0 12px;border-radius:10px;background:rgba(192,57,43,.18);border:1px solid rgba(255,107,107,.45)}
 .library-head-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 @media (max-width:640px){.review-item{grid-template-columns:1fr}.review-decide{max-width:none}.cal-menu{left:4vw;right:4vw}}
+
+/* ===== Oct 20b: crews, tips, discount codes, who's watching, beatmatching lessons ===== */
+.crews-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}
+.crew-logo{align-self:center;line-height:1;box-sizing:border-box;display:inline-grid;place-items:center;width:28px;height:28px;border-radius:8px;font-size:16px;vertical-align:middle;object-fit:cover;flex:none}
+.crew-logo.small{width:22px;height:22px;max-height:22px;font-size:13px;border-radius:6px}
+.crew-logo.big{width:56px;height:56px;font-size:30px;border-radius:14px}
+.crew-card-head{display:flex;gap:12px;align-items:center;margin:6px 0 10px}
+.crew-card-head h3{margin:0}
+.crew-card-head .ghost{margin-left:auto}
+.crew-members{list-style:none;padding:0;margin:6px 0 10px;display:grid;gap:6px}
+.crew-members li{padding:6px 10px;border:1px solid var(--line,rgba(255,255,255,.12));border-radius:10px}
+.crew-role{font-size:11px;padding:1px 6px;border-radius:999px;background:#c9184a;color:#fff;margin-left:4px}
+.crew-invite code,.code-list code{font-weight:700;letter-spacing:.06em;padding:2px 6px;border-radius:6px;background:rgba(127,127,127,.18)}
+.crew-actions,.lesson-actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.crew-form{display:grid;gap:8px;margin-bottom:12px}
+.crew-form input,.code-form input,.code-form select,.tip-custom input,#tip-message{width:100%;box-sizing:border-box;min-height:40px}
+.crew-logo-pick{display:flex;flex-wrap:wrap;gap:6px;border:1px solid var(--line,rgba(255,255,255,.12));border-radius:10px;padding:8px}
+.crew-color{width:26px;height:26px;border-radius:50%;display:inline-grid;place-items:center}
+.crew-color input{opacity:.8}
+.crew-logo-url{flex-basis:100%}
+.crew-rank-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.crew-rank{width:100%;border-collapse:collapse}
+.crew-rank th,.crew-rank td{padding:8px 6px;text-align:left;border-bottom:1px solid var(--line,rgba(255,255,255,.1));white-space:nowrap}
+.crew-rank tr.mine td{background:rgba(255,77,109,.12)}
+.crew-link{display:inline-flex;gap:6px;align-items:center}
+.crew-battles{list-style:none;padding:0;margin:0;display:grid;gap:8px}
+.crew-battle{border:1px solid var(--line,rgba(255,255,255,.12));border-radius:12px;padding:10px}
+.crew-battle-sides{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center}
+.crew-side{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.crew-side small{flex-basis:100%;opacity:.8}
+.crew-vs{font-weight:800;opacity:.6}
+.crew-total{font-size:18px;color:var(--accent,#ff4d6d)}
+.crew-battle-foot{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-top:6px;flex-wrap:wrap}
+.crew-lineup-pick{display:block;padding:6px 0}
+.oct20b-dialog{position:fixed;inset:0;margin:auto;width:min(460px,calc(100vw - 24px));max-width:none;height:fit-content;max-height:90vh;overflow:auto;box-sizing:border-box;padding:18px;border-radius:16px;border:1px solid var(--line,rgba(255,255,255,.15));background:var(--panel,#15161c);color:inherit}
+.tip-amounts{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.tip-amount{display:inline-flex;gap:6px;align-items:center;padding:8px 14px;border:1px solid var(--line,rgba(255,255,255,.2));border-radius:999px;font-weight:700;min-height:40px}
+.tip-custom{display:inline-flex;align-items:center;gap:4px;max-width:120px}
+.tip-list{list-style:none;padding:0;margin:6px 0;display:grid;gap:6px}
+.store-code-btn{font-size:12px;margin-left:6px}
+.store-codes{margin-top:14px;border-top:1px solid var(--line,rgba(255,255,255,.1));padding-top:10px}
+.code-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;align-items:end}
+.code-list{list-style:none;padding:0;display:grid;gap:6px}
+.code-list li.code-ended,.code-list li.code-used_up,.code-list li.code-off{opacity:.6}
+.watch-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start}
+.watch-head h3{margin:2px 0}
+.watch-trend{margin:0;font-weight:700}
+.watch-up{color:#2ec4b6}.watch-down{color:#ff4d6d}
+.watch-kinds{display:flex;gap:14px}
+.watch-kinds div{display:grid;text-align:center}
+.watch-kinds strong{font-size:20px}
+.watch-kinds span{font-size:12px;opacity:.75}
+.watch-bars{width:100%;max-width:420px;height:auto;margin:10px 0}
+.watch-bars rect{fill:rgba(127,127,127,.45)}
+.watch-bars rect.now{fill:var(--accent,#ff4d6d)}
+.watch-bars text{font-size:9px;fill:currentColor;opacity:.7}
+.watch-sources{list-style:none;padding:0;display:grid;gap:6px}
+.watch-sources li{display:grid;grid-template-columns:minmax(90px,140px) 1fr auto;gap:8px;align-items:center}
+.watch-meter{height:8px;border-radius:999px;background:rgba(127,127,127,.2);overflow:hidden}
+.watch-meter span{display:block;height:100%;background:var(--accent,#ff4d6d)}
+.studio-lessons{margin-top:16px}
+.lesson-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.lesson-tab{border:1px solid var(--line,rgba(255,255,255,.2));background:transparent;color:inherit;border-radius:999px;padding:8px 12px;min-height:40px;cursor:pointer}
+.lesson-tab.active{background:#c9184a;color:#fff;border-color:transparent}
+.lesson-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:8px 0}
+.lesson-row input[type=range]{min-width:160px;flex:1}
+.lesson-beat{font-variant-numeric:tabular-nums}
+.lesson-result{padding:10px 12px;border-radius:10px;min-height:20px}
+.lesson-result.pass{background:rgba(46,196,182,.15);border:1px solid rgba(46,196,182,.5)}
+.lesson-result.tip{background:rgba(255,183,3,.12);border:1px solid rgba(255,183,3,.45)}
+@media (max-width:760px){
+  .crews-layout{grid-template-columns:minmax(0,1fr)}
+  .crew-battle-sides{grid-template-columns:minmax(0,1fr)}
+  .crew-vs{text-align:center}
+  .watch-sources li{grid-template-columns:1fr auto}
+  .watch-sources .watch-meter{grid-column:1/-1;grid-row:2}
+}
+
+.oct20b-dialog .tip-custom input{width:90px}
+.oct20b-dialog::backdrop{background:rgba(0,0,0,.55)}
+.crew-logo,.crew-logo.small,.crew-logo.big{min-height:0!important;min-width:0!important;padding:0!important}
+.crew-rank td:nth-child(2){white-space:normal}
+.crew-rank .crew-link{min-height:36px;padding:2px 0;text-align:left}
+.crew-rank{min-width:0!important;width:100%!important}

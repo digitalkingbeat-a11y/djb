@@ -767,6 +767,16 @@ async function createMarketplaceCheckout(dataClient, providerAdapter, buyerUserI
   if(seller.error || seller.validationError) return seller;
   if(!seller.account || !sellerAccountCanReceiveSales(seller.account)) return { sellerUnavailable:true };
 
+  // Oct 20b: optional Beat Store discount code, worked out here on the server.
+  let discount = null;
+  if(input.discountCode){
+    const resolved = await require('./discount_codes').resolveDiscount(dataClient, { sellerUserId:listing.seller_user_id, code:input.discountCode, grossCents:grossAmountCents, now });
+    if(resolved.schemaMissing) return { validationError:'Discount codes are not set up on the server yet' };
+    if(resolved.validationError || resolved.error) return resolved;
+    if(resolved.row) discount = resolved;
+  }
+  const chargeCents = discount ? discount.finalCents : grossAmountCents;
+
   const idempotencyKey = cleanString(input.idempotencyKey || input.idempotency_key, '', 160);
   if(idempotencyKey){
     const existing = await querySingle(dataClient, MARKETPLACE_ORDER_TABLE, [['buyer_user_id', buyerUserId], ['idempotency_key', idempotencyKey]]);
@@ -786,13 +796,17 @@ async function createMarketplaceCheckout(dataClient, providerAdapter, buyerUserI
     sellerAccount: seller.account,
     provider,
     currency,
-    grossAmountCents,
+    grossAmountCents: chargeCents,
     idempotencyKey,
     timestamp,
     platformFeeBps: options.platformFeeBps
   });
   const orderInsert = await insertSingle(dataClient, MARKETPLACE_ORDER_TABLE, orderPayload);
   if(orderInsert.error) return { error: orderInsert.error };
+  if(discount){
+    const used = await require('./discount_codes').recordRedemption(dataClient, discount.row, { orderId:orderInsert.row.id, buyerUserId, discountCents:discount.discountCents, now });
+    if(used.raced) return { validationError:'That discount code has been used up' };
+  }
   const itemPayload = buildOrderItemPayload(orderInsert.row, listing, product, rights, allowedFiles);
   const itemInsert = await insertSingle(dataClient, MARKETPLACE_ORDER_ITEM_TABLE, itemPayload);
   if(itemInsert.error) return { error: itemInsert.error };
@@ -825,6 +839,7 @@ async function createMarketplaceCheckout(dataClient, providerAdapter, buyerUserI
     checkoutCreated:true,
     order:sanitizeCommerceOrder(order, { ownerView:true, checkoutUrl:providerCheckout.redirectUrl || null }),
     item:sanitizeCommerceOrderItem(itemInsert.row),
+    discount:discount ? { code:discount.row.code, originalCents:grossAmountCents, discountCents:discount.discountCents, finalCents:discount.finalCents } : null,
     listing:sanitizeMarketplaceListing(listing, { product, rights }),
     sellerAccount:sanitizeSellerAccount(seller.account),
     checkout:{

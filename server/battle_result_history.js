@@ -823,7 +823,7 @@ async function recordVerifiedResultView(dataClient, verifiedId, visitor = {}, no
     .select('*')
     .single();
   if(updated.error) return { error:updated.error };
-  return { ...safeViewResponse(normalized.tracking, false, false), result:sanitizeBattleResult(updated.data, { publicView:true }) };
+  return { ...safeViewResponse(normalized.tracking, false, false), result:sanitizeBattleResult(updated.data, { publicView:true }), ownerUserId:row.user_id };
 }
 
 async function recordPublicProfileView(dataClient, publicProfileId, visitor = {}, now = new Date(), options = {}){
@@ -854,7 +854,7 @@ async function recordPublicProfileView(dataClient, publicProfileId, visitor = {}
     .select('*')
     .single();
   if(updated.error) return { error:updated.error };
-  return { ...safeViewResponse(normalized.tracking, false, false), profileId:requested };
+  return { ...safeViewResponse(normalized.tracking, false, false), profileId:requested, ownerUserId:row.user_id };
 }
 
 async function listPublicBattleResults(dataClient, options = {}){

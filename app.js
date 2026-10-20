@@ -1174,6 +1174,7 @@ function installProfessionalShell(){
       ['community','CM','Community'],
       ['rankings','RK','Rankings'],
       ['tournaments','TN','Tournaments'],
+      ['crews','CR','Crews'],
       ['watch','WL','Watch Live'],
       ['find-djs','FD','Find DJs'],
       ['messages','MS','Messages'],
@@ -1422,7 +1423,7 @@ function libraryPlayerMinimized(){ const p = document.getElementById('library-pl
   if(btn) btn.onclick = () => setLibraryPlayerMinimized(!libraryPlayerMinimized());
 })();
 // ---- Address bar routing: every page lives at #<view> so Back/Forward, refresh and shared links work. ----
-const ROUTABLE_VIEWS = ['dashboard','battles','studio','library','community','verified-results','rankings','notifications','activity','settings','operations','profile','store','practice','tournaments','messages','find-djs','watch'];
+const ROUTABLE_VIEWS = ['dashboard','battles','studio','library','community','verified-results','rankings','notifications','activity','settings','operations','profile','store','practice','tournaments','messages','find-djs','watch','crews'];
 function viewFromHash(hash = window.location && window.location.hash){
   const raw = String(hash || '').replace(/^#\/?/, '');
   if(!raw) return '';
@@ -1508,6 +1509,7 @@ function switchView(view, options = {}){
   if(window.DJBSocial) window.DJBSocial.onView(view);
   if(window.DJBConnect) window.DJBConnect.onView(view);
   if(window.DJBOct20) window.DJBOct20.onView(view);
+  if(window.DJBOct20b) window.DJBOct20b.onView(view);
   window.scrollTo({top:0,behavior:'smooth'});
   return true;
 }
@@ -8589,6 +8591,7 @@ function renderPublicVerifiedResultProfile(result, status){
     if(button) button.onclick = () => openPublicProfileRankingImpactFromResult(result, { returnTo:'verified-result' });
   },0);
   if(window.DJBSocial) window.DJBSocial.onPublicResult(result);
+  if(window.DJBOct20b) window.DJBOct20b.onPublicResult(result);
   return safe;
 }
 
@@ -8597,7 +8600,7 @@ async function trackVerifiedResultView(verifiedResultId){
   return window.DJBattleApi.apiRequest(`/api/publicBattleResults/${encodeURIComponent(verifiedResultId)}/views`, {
     method:'POST',
     public:true,
-    body:{ visitorId:publicVisitorId() }
+    body:{ visitorId:publicVisitorId(), referrer:document.referrer || '' }
   });
 }
 
@@ -12050,6 +12053,7 @@ function renderPublicDjProfile(profile, status){
     </div><div class="modal-actions">${followAction}${challengeAction}<button class="ghost" value="cancel">Close</button></div>`);
   setTimeout(() => {
     attachProfileRankingControls(document);
+    if(window.DJBOct20b) window.DJBOct20b.onPublicProfile(profile);
     const followBtn = document.getElementById('follow-public-dj');
     if(followBtn) followBtn.onclick = () => togglePublicProfileFollow(profile);
     hydratePublicProfileRelationshipSummary(profile).catch(()=>{});
@@ -12073,7 +12077,7 @@ async function trackPublicProfileView(publicProfileIdValue){
   return window.DJBattleApi.apiRequest(`/api/publicProfiles/${encodeURIComponent(publicProfileIdValue)}/views`, {
     method:'POST',
     public:true,
-    body:{ visitorId:publicVisitorId() }
+    body:{ visitorId:publicVisitorId(), referrer:document.referrer || '' }
   });
 }
 
@@ -15153,6 +15157,7 @@ function renderBeatStorePage(){
   const more = document.getElementById('store-load-more');
   if(more){ more.classList.toggle('hidden', !store.pagination.hasMore); more.onclick = () => loadBeatStore({ append:true }); }
   if(window.DJBSocial) window.DJBSocial.decorateBeatStore();
+  if(window.DJBOct20b) window.DJBOct20b.decorateBeatStore();
   renderBeatStoreMine();
 }
 function renderBeatStoreMine(){
@@ -15897,7 +15902,8 @@ async function buyBeat(listingId){
   if(!beatStorePaidSalesReady()){ appAlert('Paid sales aren\'t set up on the server yet.', 'Beat Store'); return { error:'unconfigured' }; }
   if(!djbSignedIn()){ appAlert('Sign in to buy beats, so your download stays tied to your account.', 'Beat Store'); return { error:'signed out' }; }
   if(djbOffline()){ appAlert('You\'re offline. Connect to buy.', 'Beat Store'); return { error:'offline' }; }
-  const response = await djbRequest('/api/marketplace/checkout', { method:'POST', body:{ listingId, provider:'stripe', clientPriceCents:price, currency:listing.currency || 'USD', idempotencyKey:`buy-${listingId}-${Date.now().toString(36)}` } });
+  const discountCode = typeof window.djbDiscountCodeFor === 'function' ? window.djbDiscountCodeFor(listingId) : '';
+  const response = await djbRequest('/api/marketplace/checkout', { method:'POST', body:{ listingId, provider:'stripe', clientPriceCents:price, currency:listing.currency || 'USD', idempotencyKey:`buy-${listingId}-${Date.now().toString(36)}`, ...(discountCode ? { discountCode } : {}) } });
   if(response.error){
     const text = response.status === 503 ? 'Paid sales aren\'t set up on the server yet.'
       : response.status === 409 ? 'This producer hasn\'t finished setting up payouts yet, so it can\'t be bought right now.'

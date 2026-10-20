@@ -242,7 +242,7 @@ test('phone bar has exactly five primary items plus a More button', () => {
   assert.equal(more.getAttribute('aria-controls'), 'nav-more-sheet');
   assert.equal(more.classList.contains('nav-btn'), false, 'More is not a page link');
   // Every desktop nav item is still there (desktop unchanged).
-  assert.equal(doc.querySelectorAll('#nav .nav-btn').length, 15);
+  assert.equal(doc.querySelectorAll('#nav .nav-btn').length, 16);
 });
 
 test('More opens a sheet with the remaining pages; picking one navigates and closes', () => {
@@ -254,7 +254,7 @@ test('More opens a sheet with the remaining pages; picking one navigates and clo
   assert.equal(sheet.getAttribute('aria-modal'), 'true');
   assert.equal(doc.getElementById('nav-more').getAttribute('aria-expanded'), 'true');
   const views = Array.from(sheet.querySelectorAll('[data-more-view]')).map(b => b.dataset.moreView);
-  assert.deepEqual(views, ['dashboard', 'rankings', 'tournaments', 'watch', 'find-djs', 'messages', 'activity', 'store', 'practice', 'settings']);
+  assert.deepEqual(views, ['dashboard', 'rankings', 'tournaments', 'crews', 'watch', 'find-djs', 'messages', 'activity', 'store', 'practice', 'settings']);
   assert.equal(doc.activeElement, sheet.querySelector('[data-more-view]'));
   sheet.querySelector('[data-more-view="rankings"]').click();
   assert.equal(h.navMoreIsOpen(), false);
