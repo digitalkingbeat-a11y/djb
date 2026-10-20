@@ -3,6 +3,8 @@
 // messages and cannot send while a block exists. Text is stored plain and capped.
 const { cleanText, cleanId, newId, isMissingTable, profilesFor, blockedUserIdsFor, rateLimited } = require('./social_helpers');
 
+const { notifyQuietly } = require('./social_notifications');
+
 const CHAT_TABLE = 'battle_chat_messages';
 const CHAT_SCHEMA = '031_create_battle_chat_messages';
 const CHAT_MAX_LENGTH = 280;
@@ -66,7 +68,32 @@ async function postBattleChat(dataClient, userId, battleIdInput, input = {}, now
   const inserted = await dataClient.from(CHAT_TABLE).insert([row]).select('*').single();
   if(inserted.error) return isMissingTable(inserted.error) ? { schemaMissing:true, schema:CHAT_SCHEMA } : { error:inserted.error };
   const profiles = await profilesFor(dataClient, [userId]);
+  // Activity bell: one notification per opponent per 10 minutes of chatting, so it doesn't spam.
+  const bucket = Math.floor(now.getTime() / (10 * 60 * 1000));
+  const sender = (profiles.get(String(userId)) || {}).displayName || 'Your opponent';
+  for(const other of parts.userIds.filter(id => id !== String(userId))){
+    await notifyQuietly(dataClient, {
+      recipientUserId:other, actorUserId:userId, type:'battle_chat_message', subjectId:battleId, eventKey:`chat:${battleId}:${bucket}`,
+      destination:{ type:'battle_room', battleId, label:'Open battle chat' },
+      summary:`${sender} sent you a message in battle chat: "${body.slice(0, 80)}${body.length > 80 ? '…' : ''}"`, now
+    });
+  }
   return { created:true, message:sanitizeMessage(inserted.data || row, userId, profiles) };
+}
+
+// Unsend: a DJ can take back their own message. It disappears for everyone on the next refresh.
+async function unsendBattleChat(dataClient, userId, battleIdInput, messageIdInput, now = new Date()){
+  const battleId = cleanId(battleIdInput);
+  const messageId = cleanId(messageIdInput);
+  if(!battleId || !messageId) return { notFound:true };
+  const found = await dataClient.from(CHAT_TABLE).select('*').eq('id', messageId).limit(1);
+  if(found.error) return isMissingTable(found.error) ? { schemaMissing:true, schema:CHAT_SCHEMA } : { error:found.error };
+  const row = (found.data || [])[0];
+  if(!row || String(row.battle_id) !== battleId || (row.status || 'active') === 'deleted') return { notFound:true };
+  if(String(row.user_id) !== String(userId)) return { forbidden:true };
+  const up = await dataClient.from(CHAT_TABLE).update({ status:'deleted' }).eq('id', messageId).eq('user_id', String(userId));
+  if(up.error) return { error:up.error };
+  return { unsent:true, id:messageId, at:now.toISOString() };
 }
 
 // Used by community reports: a chat message can be reported only by another DJ in that battle.
@@ -84,4 +111,4 @@ async function chatMessageReportTarget(dataClient, userId, messageId){
   return { target:row, ownerUserId:row.user_id };
 }
 
-module.exports = { CHAT_TABLE, CHAT_SCHEMA, CHAT_MAX_LENGTH, listBattleChat, postBattleChat, chatMessageReportTarget, battleParticipants };
+module.exports = { CHAT_TABLE, CHAT_SCHEMA, CHAT_MAX_LENGTH, listBattleChat, postBattleChat, unsendBattleChat, chatMessageReportTarget, battleParticipants };

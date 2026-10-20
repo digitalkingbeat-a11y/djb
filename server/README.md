@@ -96,3 +96,22 @@ Run these in the Supabase SQL editor, in order, then redeploy the server:
 
 Until a file is applied, its feature answers `503` with the SQL file name, and the app shows a "needs the server" note.
 The embed player (`embed.html`) is the only page the server lets other sites frame (`frame-ancestors *`); everything else keeps `X-Frame-Options: DENY`.
+
+## Tournament deadlines, host controls, notifications, chat unsend and tournament wins (Oct 19b)
+
+Run these in the Supabase SQL editor, in order (after 031–033 above), then redeploy the server:
+
+- `server/sql/034_add_tournament_deadlines_host_controls.sql` — round deadlines (12 h, 24 h, 48 h default, 72 h or 1 week), no-show forfeits, an optional start date, and cancelled tournaments
+- `server/sql/035_add_social_notification_types.sql` — the three new Activity-bell notification types and their Settings on/off switches
+
+Important: tournaments need 034 once this version of the server is deployed. Creating or updating a tournament writes the new columns, so run 034 before (or right after) you redeploy.
+
+How it works:
+
+- **Deadlines and forfeits.** When a match becomes ready it gets a deadline (now + the round length). The bracket checks deadlines every time a tournament is opened. If time is up and only one DJ sent in a mix, that DJ wins by forfeit. If neither did, the higher seed goes through so the bracket keeps moving. If both did, it waits for the judges.
+- **Host controls.** `PATCH /api/tournaments/:id` (name any time; start date and round length before it starts), `POST /api/tournaments/:id/remove` with `{ publicProfileId }` (frees the seat before the start, or forfeits that DJ's current match after), `POST /api/tournaments/:id/cancel`. Only the host can call these. When a start date passes and at least 2 DJs signed up, the bracket is drawn automatically.
+- **Notifications.** Tournament match ready, battle chat messages (at most one per opponent every 10 minutes) and timed comments on your mix go to the Activity bell through the existing `dj_notifications` table (category `battle`). `GET`/`PUT /api/notificationPreferences/social` reads and sets the three switches; turning one off stores a mute row for that type.
+- **Chat unsend.** `DELETE /api/battles/:battleId/chat/:messageId` (own messages only). No SQL needed; it uses the `deleted` status that 031 already allows.
+- **Tournament wins.** `GET /api/me/tournaments` (how far you got in each), `GET /api/publicProfiles/:publicProfileId/tournaments` and `GET /api/tournamentChampions` (trophies in Rankings). No extra SQL.
+
+No new environment variables are needed.

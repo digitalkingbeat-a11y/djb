@@ -1,7 +1,8 @@
 // Comments pinned to a moment in a public battle result's mix ("1:42, that transition").
 // Anyone can read comments on a public result; signed-in DJs can add, edit and delete their own.
 const { cleanText, cleanId, newId, isMissingTable, profilesFor, blockedUserIdsFor, rateLimited } = require('./social_helpers');
-const { getPublicBattleResult } = require('./battle_result_history');
+const { getPublicBattleResult, verifiedResultId } = require('./battle_result_history');
+const { notifyQuietly } = require('./social_notifications');
 
 const TIMED_COMMENT_TABLE = 'result_timed_comments';
 const TIMED_COMMENT_SCHEMA = '033_create_result_timed_comments';
@@ -76,7 +77,27 @@ async function addTimedComment(dataClient, userId, resultIdInput, input = {}, no
   const inserted = await dataClient.from(TIMED_COMMENT_TABLE).insert([row]).select('*').single();
   if(inserted.error) return isMissingTable(inserted.error) ? { schemaMissing:true, schema:TIMED_COMMENT_SCHEMA } : { error:inserted.error };
   const profiles = await profilesFor(dataClient, [userId]);
+  const owner = await resultOwnerUserId(dataClient, resultId);
+  if(owner && owner !== String(userId)){
+    const who = (profiles.get(String(userId)) || {}).displayName || 'A DJ';
+    const m = Math.floor(atSeconds / 60), sec = String(Math.floor(atSeconds % 60)).padStart(2, '0');
+    await notifyQuietly(dataClient, {
+      recipientUserId:owner, actorUserId:userId, type:'timed_comment_received', subjectId:row.id, eventKey:`timed:${row.id}`,
+      destination:{ type:'verified_result', verifiedResultId:resultId, label:'Open your mix' },
+      summary:`${who} commented at ${m}:${sec} in your mix: "${parsed.body.slice(0, 80)}${parsed.body.length > 80 ? '…' : ''}"`, now
+    });
+  }
   return { created:true, comment:sanitizeTimedComment(inserted.data || row, userId, profiles) };
+}
+
+// The DJ whose mix this public result belongs to (never sent to the browser).
+async function resultOwnerUserId(dataClient, resultId){
+  try{
+    const subs = await dataClient.from('mix_submissions').select('*').eq('status', 'completed').limit(500);
+    if(subs.error) return null;
+    const row = (subs.data || []).find(s => verifiedResultId(s) === resultId);
+    return row && row.user_id ? String(row.user_id) : null;
+  }catch(e){ return null; }
 }
 
 async function ownedComment(dataClient, userId, commentId){

@@ -139,6 +139,13 @@
           const p = D.createElement('p');
           p.textContent = m.body;
           li.append(who, p);
+          if(m.mine){
+            const unsend = D.createElement('button');
+            unsend.type = 'button'; unsend.className = 'ghost small chat-unsend'; unsend.textContent = 'Unsend';
+            unsend.setAttribute('aria-label', 'Unsend this message');
+            unsend.onclick = () => unsendChat(m.id);
+            li.appendChild(unsend);
+          }
           if(!m.mine){
             const report = D.createElement('button');
             report.type = 'button'; report.className = 'ghost small chat-report'; report.textContent = 'Report';
@@ -152,6 +159,7 @@
     }
     panel.innerHTML = `<div class="battle-chat-head"><div><span class="eyebrow">BATTLE CHAT</span><h3>Talk to your opponent</h3></div>${chat.status === 'ready' || chat.status === 'loading' ? `<button class="ghost small" type="button" id="battle-chat-mute" aria-pressed="${chat.muted}">${muteLabel}</button>` : ''}</div>${body}`;
     if(populate) populate();
+    renderChatButton();
     const mute = D.getElementById('battle-chat-mute');
     if(mute) mute.onclick = () => { chat.muted = !chat.muted; try{ localStorage.setItem(muteKey(chat.battleId), chat.muted ? '1' : ''); }catch(e){} renderChat(); };
     const form = D.getElementById('battle-chat-form');
@@ -159,6 +167,7 @@
       const input = D.getElementById('battle-chat-input');
       input.value = chat.draft || '';
       input.addEventListener('input', () => { chat.draft = input.value; });
+      input.addEventListener('focus', () => markChatSeen());
       if(hadFocus) input.focus();
       form.onsubmit = e => { e.preventDefault(); sendChat(input.value); };
     }
@@ -176,6 +185,57 @@
     chat.canSend = response.data ? response.data.canSend !== false : true;
     chat.status = 'ready';
     chat.error = '';
+    if(!chatSeenAt() && !chat.messages.some(m => !m.mine)) markChatSeen();
+    else if(chatPanelOnScreen() && !isJsdom()) markChatSeen();
+    renderChat();
+    return response;
+  }
+  /* Oct 19b: unread count on the Chat button, and Unsend for your own messages. */
+  const seenKey = id => `djbChatSeen:${id}`;
+  function chatSeenAt(){ try{ return Number(localStorage.getItem(seenKey(chat.battleId)) || 0); }catch(e){ return 0; } }
+  function unreadChatCount(){
+    if(!chat.battleId || chat.muted) return 0;
+    const seen = chatSeenAt();
+    return chat.messages.filter(m => !m.mine && new Date(m.createdAt).getTime() > seen).length;
+  }
+  function chatPanelOnScreen(){
+    const panel = D.getElementById('battle-chat');
+    if(!panel || !chatVisible() || typeof panel.getBoundingClientRect !== 'function') return false;
+    const r = panel.getBoundingClientRect();
+    const h = W.innerHeight || D.documentElement.clientHeight || 0;
+    return r.height > 0 && r.top < h && r.bottom > 0;
+  }
+  function markChatSeen(){
+    if(!chat.battleId) return;
+    const latest = chat.messages.reduce((max, m) => Math.max(max, new Date(m.createdAt).getTime() || 0), Date.now());
+    try{ localStorage.setItem(seenKey(chat.battleId), String(latest)); }catch(e){}
+    renderChatButton();
+  }
+  function renderChatButton(){
+    const room = D.getElementById('battle-room');
+    if(!room) return;
+    let btn = D.getElementById('battle-chat-jump');
+    const show = chat.battleId && (chat.status === 'ready' || chat.status === 'loading');
+    if(!show){ if(btn) btn.remove(); return; }
+    if(!btn){
+      btn = D.createElement('button');
+      btn.type = 'button'; btn.id = 'battle-chat-jump'; btn.className = 'ghost small battle-chat-jump';
+      btn.onclick = () => { const panel = D.getElementById('battle-chat'); if(panel && panel.scrollIntoView) panel.scrollIntoView({ behavior:'smooth', block:'start' }); markChatSeen(); const input = D.getElementById('battle-chat-input'); if(input) input.focus({ preventScroll:true }); };
+      const head = room.querySelector('.section-head');
+      if(head) head.appendChild(btn); else room.insertBefore(btn, room.firstChild);
+    }
+    const n = unreadChatCount();
+    btn.innerHTML = `<span aria-hidden="true">💬</span> Chat${n ? ` <span class="chat-unread-badge" id="battle-chat-unread">${n > 99 ? '99+' : n}</span>` : ''}`;
+    btn.setAttribute('aria-label', n ? `Battle chat, ${n} unread message${n === 1 ? '' : 's'}` : 'Battle chat');
+  }
+  async function unsendChat(messageId){
+    if(!chat.battleId || !messageId) return null;
+    const ok = typeof W.appConfirm === 'function' ? await W.appConfirm({ title:'Unsend this message?', body:'It disappears for both DJs.', confirmLabel:'Unsend', cancelLabel:'Keep it', danger:true }) : true;
+    if(!ok) return null;
+    const response = await api(`/api/battles/${encodeURIComponent(chat.battleId)}/chat/${encodeURIComponent(messageId)}`, { method:'DELETE' });
+    if(response.error && response.status !== 404){ chat.error = serverMessage(response, 'Message not unsent.'); renderChat(); return response; }
+    chat.messages = chat.messages.filter(m => m.id !== messageId);
+    chat.error = '';
     renderChat();
     return response;
   }
@@ -187,6 +247,7 @@
     chat.messages.push(response.data.message);
     chat.draft = '';
     chat.error = '';
+    markChatSeen();
     renderChat();
     return response;
   }
@@ -233,6 +294,7 @@
     if(t.status === 'open') return `Sign-up open · ${t.entrantCount}/${t.capacity}`;
     if(t.status === 'active') return 'In progress';
     if(t.status === 'completed') return 'Finished';
+    if(t.status === 'cancelled') return 'Cancelled';
     return t.status;
   }
   function renderTournamentList(){
@@ -255,6 +317,40 @@
     list.innerHTML = tour.list.map(t => `<article class="tournament-card" data-tournament="${escHtml(t.id)}"><span class="tournament-status">${escHtml(statusLabel(t))}</span><h4>${escHtml(t.title)}</h4><p>${escHtml(t.capacity)} DJs · ${escHtml(t.genre)} · hosted by ${escHtml(t.host ? t.host.displayName : 'DJ')}</p>${t.champion ? `<p>🏆 Champion: <strong>${escHtml(t.champion.displayName)}</strong></p>` : ''}<button class="ghost small" type="button" data-open-tournament="${escHtml(t.id)}">${t.status === 'open' ? 'View & sign up' : 'View bracket'}</button></article>`).join('');
     list.querySelectorAll('[data-open-tournament]').forEach(btn => { btn.onclick = () => openTournament(btn.dataset.openTournament); });
   }
+  /* Oct 19b: round deadlines with a live countdown. */
+  function countdownText(deadlineAt, now = Date.now()){
+    const ms = new Date(deadlineAt).getTime() - now;
+    if(!Number.isFinite(ms)) return '';
+    if(ms <= 0) return 'Time\'s up · settling by forfeit';
+    const mins = Math.floor(ms / 60000);
+    const d = Math.floor(mins / 1440), h = Math.floor(mins % 1440 / 60), m = mins % 60;
+    return `${d ? `${d}d ` : ''}${d || h ? `${h}h ` : ''}${d ? '' : `${m}m `}left`.trim();
+  }
+  function roundLengthLabel(h){ return h === 168 ? '1 week' : `${h} hours`; }
+  let countdownTimer = null;
+  function tickCountdowns(){
+    D.querySelectorAll('[data-deadline]').forEach(el => {
+      const text = countdownText(el.dataset.deadline);
+      el.textContent = `⏱ ${text}`;
+      const ms = new Date(el.dataset.deadline).getTime() - Date.now();
+      el.classList.toggle('urgent', ms > 0 && ms < 6 * 3600000);
+      el.classList.toggle('overdue', ms <= 0);
+    });
+  }
+  function startCountdowns(){
+    tickCountdowns();
+    if(countdownTimer || isJsdom()) return;
+    countdownTimer = setInterval(() => { if(!D.querySelector('[data-deadline]')){ clearInterval(countdownTimer); countdownTimer = null; return; } tickCountdowns(); }, 30000);
+  }
+  function deadlineHtml(m){
+    if(!m.deadlineAt || m.winner || !['ready', 'active'].includes(m.status)) return '';
+    const when = new Date(m.deadlineAt);
+    return `<span class="bracket-deadline" data-deadline="${escHtml(m.deadlineAt)}" title="Play by ${escHtml(when.toLocaleString([], { weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }))}">⏱ ${escHtml(countdownText(m.deadlineAt))}</span>`;
+  }
+  function forfeitHtml(m){
+    if(!m.forfeit || !m.winner) return '';
+    return `<span class="bracket-forfeit">Won by forfeit · ${escHtml(m.forfeit.displayName)} didn't play</span>`;
+  }
   function slotHtml(p, match){
     if(!p) return `<div class="bracket-slot empty">${match.status === 'bye' || match.status === 'void' ? 'Bye' : 'TBD'}</div>`;
     const winner = match.winner && match.winner.publicProfileId === p.publicProfileId;
@@ -264,7 +360,7 @@
     const rounds = [];
     for(let r = 1; r <= t.rounds; r++) rounds.push(t.matches.filter(m => m.round === r));
     const yourMatch = t.you && t.you.matchId;
-    return `<div class="bracket-scroll" role="region" aria-label="Tournament bracket" tabindex="0"><div class="bracket">${rounds.map((ms, i) => `<div class="bracket-round"><h5>${escHtml(roundName(i + 1, t.rounds))}</h5>${ms.map(m => `<div class="bracket-match${m.status === 'ready' || m.status === 'active' ? ' is-ready' : ''}" data-match="${escHtml(m.id)}">${slotHtml(m.first, m)}${slotHtml(m.second, m)}<div class="bracket-match-foot">${m.id === yourMatch ? `<button class="primary small" type="button" data-play-match="${escHtml(m.id)}">${m.hasBattle ? 'Go to your battle' : 'Start your battle'}</button>` : escHtml({ ready:'Ready to battle', active:'Battle in progress', completed:'Finished', bye:'Free pass', void:'No match', pending:'Waiting' }[m.status] || m.status)}</div></div>`).join('')}</div>`).join('')}</div></div>`;
+    return `<div class="bracket-scroll" role="region" aria-label="Tournament bracket" tabindex="0"><div class="bracket">${rounds.map((ms, i) => `<div class="bracket-round"><h5>${escHtml(roundName(i + 1, t.rounds))}</h5>${ms.map(m => `<div class="bracket-match${m.status === 'ready' || m.status === 'active' ? ' is-ready' : ''}" data-match="${escHtml(m.id)}">${slotHtml(m.first, m)}${slotHtml(m.second, m)}${deadlineHtml(m)}${forfeitHtml(m)}<div class="bracket-match-foot">${m.id === yourMatch ? `<button class="primary small" type="button" data-play-match="${escHtml(m.id)}">${m.hasBattle ? 'Go to your battle' : 'Start your battle'}</button>` : escHtml({ ready:'Ready to battle', active:'Battle in progress', completed:'Finished', bye:'Free pass', void:'No match', pending:'Waiting' }[m.status] || m.status)}</div></div>`).join('')}</div>`).join('')}</div></div>`;
   }
   function renderTournamentDetail(){
     const host = D.getElementById('tournament-detail');
@@ -273,12 +369,16 @@
     const you = t.you || {};
     const actions = [];
     actions.push('<button class="ghost small" type="button" id="tournament-back">← All tournaments</button>');
+    const hostCanEdit = you.host && ['open', 'active'].includes(t.status);
     if(t.status === 'open' && signedIn() && !you.joined) actions.push('<button class="primary small" type="button" id="tournament-join">Sign up</button>');
     if(t.status === 'open' && you.joined && !you.host) actions.push('<button class="ghost small" type="button" id="tournament-leave">Leave</button>');
     if(t.status === 'open' && you.host) actions.push(`<button class="primary small" type="button" id="tournament-start" ${t.entrantCount < 2 ? 'disabled' : ''}>Start now${t.entrantCount < t.capacity ? ' (empty seats become byes)' : ''}</button>`);
-    host.innerHTML = `<section class="panel"><span class="tournament-status">${escHtml(statusLabel(t))}</span><h3>${escHtml(t.title)}</h3><p class="social-note">${escHtml(t.capacity)}-DJ single elimination · ${escHtml(t.genre)} · ${t.seeding === 'signup' ? 'seeded in sign-up order' : 'random pairings'} · hosted by ${escHtml(t.host ? t.host.displayName : 'DJ')}</p>
+    const startLine = t.status === 'open' && t.startsAt ? `<p class="tournament-starts" id="tournament-starts">Starts ${escHtml(new Date(t.startsAt).toLocaleString([], { weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }))} (if at least 2 DJs have signed up)</p>` : '';
+    const hostTools = hostCanEdit ? `<div class="tournament-host-tools" id="tournament-host-tools"><span class="eyebrow">HOST CONTROLS</span><div class="tournament-actions"><button class="ghost small" type="button" id="tournament-edit">Edit name${t.status === 'open' ? ' & start date' : ''}</button><button class="ghost small" type="button" id="tournament-remove-dj" ${t.entrants.length > 1 ? '' : 'disabled'}>Remove a DJ</button><button class="danger-btn small" type="button" id="tournament-cancel">Cancel tournament</button></div></div>` : '';
+    host.innerHTML = `<section class="panel"><span class="tournament-status">${escHtml(statusLabel(t))}</span><h3>${escHtml(t.title)}</h3><p class="social-note">${escHtml(t.capacity)}-DJ single elimination · ${escHtml(t.genre)} · ${t.seeding === 'signup' ? 'seeded in sign-up order' : 'random pairings'} · ${escHtml(roundLengthLabel(t.roundHours || 48))} per round · hosted by ${escHtml(t.host ? t.host.displayName : 'DJ')}</p>${startLine}
       ${t.champion ? `<div class="tournament-champion" id="tournament-champion"><span style="font-size:32px" aria-hidden="true">🏆</span><div><span class="eyebrow">CHAMPION</span><br><strong>${escHtml(t.champion.displayName)}</strong></div></div>` : ''}
-      <div class="tournament-actions">${actions.join('')}</div>
+      <div class="tournament-actions">${actions.join('')}</div>${hostTools}
+      ${t.status === 'active' ? `<p class="social-note">Each round has ${escHtml(roundLengthLabel(t.roundHours || 48))}. If a DJ doesn't send in a mix before the timer runs out, they lose by forfeit.</p>` : ''}
       ${t.status === 'open' ? `<h4>Signed up (${escHtml(t.entrantCount)}/${escHtml(t.capacity)})</h4><ul class="tournament-entrants">${t.entrants.map(e => `<li>${escHtml(e.displayName)}${e.you ? ' (you)' : ''}</li>`).join('')}</ul><p class="social-note">The bracket is drawn when all ${escHtml(t.capacity)} seats fill, or when the host starts early.</p>` : bracketHtml(t)}
       <p class="social-note" id="tournament-action-status" aria-live="polite"></p></section>`;
     const wire = (id, fn) => { const el = D.getElementById(id); if(el) el.onclick = fn; };
@@ -286,7 +386,11 @@
     wire('tournament-join', () => tournamentAction('join'));
     wire('tournament-leave', () => tournamentAction('leave'));
     wire('tournament-start', () => tournamentAction('start'));
+    wire('tournament-edit', () => openEditTournament());
+    wire('tournament-remove-dj', () => openRemoveDj());
+    wire('tournament-cancel', () => cancelTournamentFlow());
     host.querySelectorAll('[data-play-match]').forEach(btn => { btn.onclick = () => playMatch(btn.dataset.playMatch); });
+    startCountdowns();
   }
   async function loadTournaments(){
     ensureTournamentView();
@@ -326,6 +430,80 @@
     else if(note) note.textContent = 'Your battle is ready. Open it from Battles.';
     return response;
   }
+  /* Oct 19b: host controls. */
+  function localInputValue(iso){
+    if(!iso) return '';
+    const d = new Date(iso);
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  const ROUND_OPTIONS = [[12, '12 hours'], [24, '24 hours'], [48, '48 hours (recommended)'], [72, '72 hours'], [168, '1 week']];
+  async function hostRequest(path, opts){
+    const response = await api(path, opts);
+    if(response.error) return response;
+    if(response.data && response.data.tournament) tour.current = response.data.tournament;
+    return response;
+  }
+  function openEditTournament(){
+    const t = tour.current;
+    if(!t) return null;
+    const open = t.status === 'open';
+    W.openModal(`<span class="eyebrow accent">HOST CONTROLS</span><h3>Edit tournament</h3><div class="form-grid" id="tournament-edit-form">
+      <label>Name<input id="tournament-edit-title" maxlength="120" value="${escHtml(t.title)}"></label>
+      ${open ? `<label>Start date (optional)<input id="tournament-edit-starts" type="datetime-local" value="${escHtml(localInputValue(t.startsAt))}"></label>
+      <label>Time per round<select id="tournament-edit-hours">${ROUND_OPTIONS.map(([v, l]) => `<option value="${v}" ${Number(t.roundHours || 48) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <p class="social-note">Leave the start date empty to start by hand. When the date arrives, the bracket is drawn with whoever has signed up (at least 2 DJs).</p>` : '<p class="social-note">The tournament has started, so only the name can change.</p>'}
+      <p class="social-note" id="tournament-edit-error" role="alert"></p>
+      <div class="modal-actions"><button class="ghost" type="button" id="tournament-edit-close">Close</button><button class="primary" type="button" id="tournament-edit-save">Save</button></div></div>`);
+    D.getElementById('tournament-edit-close').onclick = () => D.getElementById('modal').close();
+    D.getElementById('tournament-edit-save').onclick = async () => {
+      const body = { title:D.getElementById('tournament-edit-title').value };
+      if(open){
+        const starts = D.getElementById('tournament-edit-starts').value;
+        body.startsAt = starts ? new Date(starts).toISOString() : null;
+        body.roundHours = Number(D.getElementById('tournament-edit-hours').value);
+      }
+      const response = await hostRequest(`/api/tournaments/${encodeURIComponent(t.id)}`, { method:'PATCH', body });
+      if(response.error){ D.getElementById('tournament-edit-error').textContent = serverMessage(response, 'Could not save.'); return; }
+      D.getElementById('modal').close();
+      renderTournamentDetail();
+    };
+    return true;
+  }
+  function openRemoveDj(){
+    const t = tour.current;
+    if(!t) return null;
+    const others = t.entrants.filter(e => e && !e.you);
+    W.openModal(`<span class="eyebrow accent">HOST CONTROLS</span><h3>Remove a DJ</h3><p class="social-note">${t.status === 'open' ? 'Their seat opens up for someone else.' : 'They lose their current match by forfeit and their opponent moves on.'}</p><ul class="tournament-remove-list" id="tournament-remove-list">${others.map(e => `<li><span>${escHtml(e.displayName)}</span><button class="danger-btn small" type="button" data-remove-dj="${escHtml(e.publicProfileId)}" data-remove-name="${escHtml(e.displayName)}">Remove</button></li>`).join('') || '<li>No other DJs yet.</li>'}</ul><p class="social-note" id="tournament-remove-error" role="alert"></p><div class="modal-actions"><button class="ghost" type="button" id="tournament-remove-close">Done</button></div>`);
+    D.getElementById('tournament-remove-close').onclick = () => D.getElementById('modal').close();
+    D.querySelectorAll('[data-remove-dj]').forEach(btn => { btn.onclick = () => removeDj(btn.dataset.removeDj, btn.dataset.removeName); });
+    return true;
+  }
+  async function removeDj(publicProfileId, name){
+    const t = tour.current;
+    const ok = typeof W.appConfirm === 'function' ? await W.appConfirm({ title:`Remove ${name || 'this DJ'}?`, body:t.status === 'open' ? 'They can sign up again later if there is room.' : 'They lose their current match by forfeit. This can\'t be undone.', confirmLabel:'Remove', cancelLabel:'Keep them', danger:true }) : true;
+    if(!ok) return null;
+    const response = await hostRequest(`/api/tournaments/${encodeURIComponent(t.id)}/remove`, { method:'POST', body:{ publicProfileId } });
+    if(response.error){ const el = D.getElementById('tournament-remove-error'); if(el) el.textContent = serverMessage(response, 'Could not remove that DJ.'); return response; }
+    const modal = D.getElementById('modal'); if(modal && modal.open) modal.close();
+    renderTournamentDetail();
+    return response;
+  }
+  async function cancelTournamentFlow(){
+    const t = tour.current;
+    if(!t) return null;
+    const ok = typeof W.appConfirm === 'function' ? await W.appConfirm({ title:`Cancel ${t.title}?`, body:'The bracket stops and the tournament disappears from the list for everyone. This can\'t be undone.', confirmLabel:'Cancel tournament', cancelLabel:'Keep it', danger:true }) : true;
+    if(!ok) return null;
+    const response = await api(`/api/tournaments/${encodeURIComponent(t.id)}/cancel`, { method:'POST', body:{} });
+    const note = D.getElementById('tournament-action-status');
+    if(response.error){ if(note) note.textContent = serverMessage(response, 'Could not cancel.'); return response; }
+    tour.current = null;
+    tour.list = tour.list.filter(x => x.id !== t.id);
+    tour.error = '';
+    renderTournamentList();
+    const status = D.getElementById('tournament-status'); if(status) status.textContent = `${t.title} was cancelled.`;
+    return response;
+  }
   function openCreateTournament(){
     if(!signedIn()){ if(typeof W.appAlert === 'function') W.appAlert('Sign in to create a tournament.', 'Tournaments'); return null; }
     W.openModal(`<span class="eyebrow accent">NEW TOURNAMENT</span><h3>Create a tournament</h3><div class="form-grid" id="tournament-create-form">
@@ -333,12 +511,16 @@
       <label>Size<select id="tournament-capacity"><option value="8">8 DJs (3 rounds)</option><option value="16">16 DJs (4 rounds)</option></select></label>
       <label>Genre<input id="tournament-genre" maxlength="60" placeholder="Open Format"></label>
       <label>Pairings<select id="tournament-seeding"><option value="random">Random draw</option><option value="signup">Sign-up order (first to join is seed 1)</option></select></label>
+      <label>Time per round<select id="tournament-hours">${ROUND_OPTIONS.map(([v, l]) => `<option value="${v}" ${v === 48 ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label>Start date (optional)<input id="tournament-starts" type="datetime-local"></label>
       <p class="social-note">You're signed up as the first DJ. If seats are still empty when you start, top seeds get a free pass to the next round.</p>
       <p class="social-note" id="tournament-create-error" role="alert"></p>
       <div class="modal-actions"><button class="ghost" value="cancel" type="button" id="tournament-create-cancel">Cancel</button><button class="primary" type="button" id="tournament-create-submit">Create</button></div></div>`);
     D.getElementById('tournament-create-cancel').onclick = () => D.getElementById('modal').close();
     D.getElementById('tournament-create-submit').onclick = async () => {
-      const body = { title:D.getElementById('tournament-title').value, capacity:Number(D.getElementById('tournament-capacity').value), genre:D.getElementById('tournament-genre').value, seeding:D.getElementById('tournament-seeding').value };
+      const body = { title:D.getElementById('tournament-title').value, capacity:Number(D.getElementById('tournament-capacity').value), genre:D.getElementById('tournament-genre').value, seeding:D.getElementById('tournament-seeding').value, roundHours:Number(D.getElementById('tournament-hours').value) };
+      const starts = D.getElementById('tournament-starts').value;
+      if(starts) body.startsAt = new Date(starts).toISOString();
       const response = await api('/api/tournaments', { method:'POST', body });
       if(response.error){ D.getElementById('tournament-create-error').textContent = needsServer(response) ? 'Tournaments need the DJ Battle server.' : serverMessage(response, 'Could not create the tournament.'); return; }
       D.getElementById('modal').close();
@@ -553,13 +735,130 @@
     });
   }
 
+  /* ============================== Oct 19b: notification switches ============================== */
+  const NOTIFY_TYPES = [
+    ['tournament_match_ready', 'Tournament match is ready', 'When your next tournament battle can start (with its deadline).'],
+    ['battle_chat_message', 'Battle chat messages', 'When your opponent writes in battle chat (at most one alert every 10 minutes).'],
+    ['timed_comment_received', 'Comments on your mixes', 'When someone pins a comment to a moment in one of your public mixes.']
+  ];
+  const notify = { status:'idle', prefs:null, error:'' };
+  function renderNotifyPanel(){
+    const grid = D.querySelector('#settings .settings-grid');
+    if(!grid) return;
+    let panel = D.getElementById('settings-social-notify');
+    if(!panel){
+      panel = D.createElement('section');
+      panel.className = 'panel';
+      panel.id = 'settings-social-notify';
+      const theme = D.getElementById('settings-theme-panel');
+      grid.insertBefore(panel, theme ? theme.nextSibling : grid.firstChild);
+    }
+    const prefs = notify.prefs || {};
+    const disabled = notify.status !== 'ready';
+    const note = notify.status === 'needs-server' ? '<p class="social-note warn" id="settings-notify-note">These switches need the DJ Battle server and a signed-in account.</p>'
+      : notify.status === 'signed-out' ? '<p class="social-note" id="settings-notify-note">Sign in to choose which alerts you get.</p>'
+      : notify.status === 'loading' ? '<p class="social-note" id="settings-notify-note">Loading…</p>' : '';
+    panel.innerHTML = `<span class="eyebrow">ACTIVITY BELL</span><h3>Battle notifications</h3><p>Pick what shows up in your Activity bell.</p>${note}<div class="notify-switches">${NOTIFY_TYPES.map(([type, label, help]) => `<label class="notify-switch"><input type="checkbox" data-notify-type="${type}" ${prefs[type] !== false ? 'checked' : ''} ${disabled ? 'disabled' : ''}><span><strong>${escHtml(label)}</strong><small>${escHtml(help)}</small></span></label>`).join('')}</div>${notify.error ? `<p class="social-note" role="alert">${escHtml(notify.error)}</p>` : ''}`;
+    panel.querySelectorAll('[data-notify-type]').forEach(box => { box.onchange = () => saveNotifyPref(box.dataset.notifyType, box.checked); });
+  }
+  async function loadNotifyPrefs(){
+    if(!signedIn()){ notify.status = 'signed-out'; renderNotifyPanel(); return null; }
+    notify.status = 'loading'; notify.error = ''; renderNotifyPanel();
+    const response = await api('/api/notificationPreferences/social');
+    if(response.error){ notify.status = needsServer(response) ? 'needs-server' : 'ready'; if(notify.status === 'ready') notify.error = serverMessage(response, 'Could not load your notification settings.'); }
+    else { notify.prefs = response.data.prefs || {}; notify.status = 'ready'; }
+    renderNotifyPanel();
+    return response;
+  }
+  async function saveNotifyPref(type, enabled){
+    const before = { ...(notify.prefs || {}) };
+    notify.prefs = { ...before, [type]:enabled };
+    const response = await api('/api/notificationPreferences/social', { method:'PUT', body:{ type, enabled } });
+    if(response.error){ notify.prefs = before; notify.error = serverMessage(response, 'That setting was not saved.'); }
+    else { notify.prefs = response.data.prefs || notify.prefs; notify.error = ''; }
+    renderNotifyPanel();
+    return response;
+  }
+
+  /* ============================== Oct 19b: tournament wins ============================== */
+  const wins = { status:'idle', mine:null, champions:null };
+  function ensureProfileTournaments(){
+    const profile = D.getElementById('profile');
+    if(!profile) return null;
+    let panel = D.getElementById('profile-tournaments');
+    if(!panel){
+      panel = D.createElement('section');
+      panel.className = 'panel profile-tournaments';
+      panel.id = 'profile-tournaments';
+      const tabs = profile.querySelector('.profile-tabs');
+      profile.insertBefore(panel, tabs || null);
+    }
+    return panel;
+  }
+  function championBadgeHtml(count){
+    return count ? `<span class="champion-badge" id="profile-champion-badge" title="Tournament champion">🏆 ${count > 1 ? `${escHtml(count)}× ` : ''}Champion</span>` : '';
+  }
+  function renderProfileTournaments(){
+    const panel = ensureProfileTournaments();
+    if(!panel) return;
+    const data = wins.mine;
+    let body;
+    if(wins.status === 'needs-server') body = '<p class="social-note">Your tournament results show here once the DJ Battle server is running.</p>';
+    else if(wins.status === 'signed-out') body = '<p class="social-note">Sign in to see your tournament results.</p>';
+    else if(wins.status === 'loading') body = '<p class="social-note">Loading…</p>';
+    else if(!data || !data.tournaments.length) body = '<p class="social-note">No tournaments yet. Join one from the Tournaments page.</p>';
+    else body = `<ul class="profile-tournament-list">${data.tournaments.map(t => `<li class="${t.champion ? 'is-champion' : ''}"><span class="placement">${t.champion ? '🏆 ' : ''}${escHtml(t.placement)}</span><span><strong>${escHtml(t.title)}</strong><small>${escHtml(t.capacity)} DJs · ${escHtml(t.status === 'completed' ? 'Finished' : t.status === 'active' ? 'In progress' : 'Sign-up open')}${t.wonByForfeit ? ' · includes a forfeit win' : ''}</small></span><button class="ghost small" type="button" data-profile-tournament="${escHtml(t.id)}">View</button></li>`).join('')}</ul>`;
+    panel.innerHTML = `<div class="section-head compact"><div><span class="eyebrow">TOURNAMENTS</span><h3>Tournament results ${championBadgeHtml(data && data.wins)}</h3></div></div>${body}`;
+    panel.querySelectorAll('[data-profile-tournament]').forEach(btn => { btn.onclick = () => openTournamentFromAnywhere(btn.dataset.profileTournament); });
+  }
+  async function loadProfileTournaments(){
+    if(!signedIn()){ wins.status = 'signed-out'; renderProfileTournaments(); return null; }
+    wins.status = 'loading'; renderProfileTournaments();
+    const response = await api('/api/me/tournaments');
+    if(response.error) wins.status = needsServer(response) || response.data && response.data.schemaMissing ? 'needs-server' : 'ready';
+    else { wins.mine = { tournaments:response.data.tournaments || [], wins:response.data.wins || 0 }; wins.status = 'ready'; }
+    renderProfileTournaments();
+    return response;
+  }
+  async function loadChampions(){
+    if(wins.champions) return wins.champions;
+    const response = await api('/api/tournamentChampions', { public:true });
+    wins.champions = response.error ? [] : (response.data.champions || []);
+    return wins.champions;
+  }
+  // Adds a trophy next to the name of every tournament champion in the Rankings list.
+  function decorateRankings(){
+    const list = wins.champions;
+    if(!list){ loadChampions().then(() => decorateRankings()); return; }
+    const byId = new Map(list.map(c => [String(c.publicProfileId), c.wins]));
+    D.querySelectorAll('[data-ranking-dj]').forEach(row => {
+      const n = byId.get(String(row.dataset.rankingDj || ''));
+      const title = row.querySelector('.ranking-title strong');
+      if(!title || !n || row.querySelector('.ranking-trophy')) return;
+      const t = D.createElement('span');
+      t.className = 'ranking-trophy';
+      t.title = `Won ${n} tournament${n === 1 ? '' : 's'}`;
+      t.setAttribute('aria-label', t.title);
+      t.textContent = n > 1 ? `🏆×${n}` : '🏆';
+      title.after(t);
+    });
+  }
+  async function openTournamentFromAnywhere(id){
+    tour.opening = true;
+    try{ if(typeof W.switchView === 'function') W.switchView('tournaments'); }finally{ tour.opening = false; }
+    ensureTournamentView();
+    return openTournament(id);
+  }
+
   /* ============================== wiring ============================== */
   ensureTournamentView();
   const navBtn = D.querySelector('.sidebar .nav-btn[data-view="tournaments"]');
   if(navBtn && !navBtn.dataset.socialWired){ navBtn.dataset.socialWired = '1'; }
   function onView(view){
-    if(view === 'tournaments'){ tour.current = null; loadTournaments(); }
-    if(view === 'settings') renderThemePanel();
+    if(view === 'tournaments' && !tour.opening){ tour.current = null; loadTournaments(); }
+    if(view === 'settings'){ renderThemePanel(); loadNotifyPrefs(); }
+    if(view === 'profile') loadProfileTournaments();
+    if(view === 'rankings') decorateRankings();
     if(view === 'battle-room' && chat.battleId && chat.status === 'ready'){ loadChat(); startChatPolling(); }
     if(view !== 'battle-room') stopChatPolling();
   }
@@ -580,7 +879,10 @@
   W.DJBSocial = {
     onBattleRoom, onPublicResult, onView, decorateBeatStore, renderThemePanel,
     themePref, setThemePref, applyTheme, resolvedTheme,
-    loadChat, sendChat, renderChat, chatState:() => chat, stopChatPolling,
+    loadChat, sendChat, renderChat, chatState:() => chat, stopChatPolling, unsendChat, unreadChatCount, markChatSeen, renderChatButton,
+    countdownText, openEditTournament, openRemoveDj, removeDj, cancelTournamentFlow, openTournamentFromAnywhere,
+    loadNotifyPrefs, saveNotifyPref, notifyState:() => notify, renderNotifyPanel,
+    loadProfileTournaments, renderProfileTournaments, decorateRankings, loadChampions, winsState:() => wins,
     loadTournaments, openTournament, openCreateTournament, tournamentAction, playMatch, tournamentState:() => tour,
     loadTimed, addTimed, deleteTimed, seekTo, timedState:() => timed, openTimedForm,
     embedUrl, embedSnippet, openBeatEmbed, fmtTime

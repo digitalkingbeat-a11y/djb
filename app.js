@@ -9836,6 +9836,7 @@ function renderRankingsPage(){
   renderPersonalRankings();
   renderRankingDetail();
   renderAiLeaderboard();
+  if(window.DJBSocial && typeof window.DJBSocial.decorateRankings === 'function') window.DJBSocial.decorateRankings();
   const refresh = document.getElementById('rankings-refresh');
   if(refresh) refresh.onclick = () => loadRankingsPage({ force:true }).catch(err=>console.warn('Rankings refresh failed', err));
   const more = document.getElementById('rankings-load-more');
@@ -11546,7 +11547,7 @@ function notificationRowHtml(notification){
     </div>
     <div>
       <span class="notification-destination">${esc(readableComponentName(notification.type))}</span>
-      <div class="challenge-meta">${esc(notification.summary || 'Challenge update')}<br>${esc(challengeRulesSummary(challenge.rules || {}))}<br>${esc(notificationExpirationText(notification))}</div>
+      <div class="challenge-meta">${esc(notification.summary || 'Challenge update')}${/* Oct 19b: these alerts carry no challenge rules or expiry */ ['tournament_match_ready', 'battle_chat_message', 'timed_comment_received'].includes(notification.type) ? '' : `<br>${esc(challengeRulesSummary(challenge.rules || {}))}<br>${esc(notificationExpirationText(notification))}`}</div>
     </div>
     <div class="challenge-actions">
       ${canRecover ? `<button class="primary small" type="button" data-notification-open="${esc(notification.id)}">Enter Battle Room</button>` : `<button class="ghost small" type="button" data-notification-open="${esc(notification.id)}">Open</button>`}
@@ -11583,6 +11584,14 @@ async function openDjNotificationDestination(notificationId){
   const notification = (state.djNotifications.rows || []).find(row => String(row.id) === String(notificationId));
   if(!notification) return { skipped:true };
   const destination = notification.destination || {};
+  if(destination.type === 'tournament' && destination.tournamentId && window.DJBSocial){
+    return { opened:'tournament', response:await window.DJBSocial.openTournamentFromAnywhere(destination.tournamentId) };
+  }
+  if(destination.type === 'verified_result' && destination.verifiedResultId && typeof loadPublicVerifiedResult === 'function'){
+    switchView('verified-results');
+    await loadPublicVerifiedResult(destination.verifiedResultId);
+    return { opened:'verified_result' };
+  }
   if(destination.type === 'battle_room' && destination.battleId){
     const result = await recoverAcceptedChallengeBattle(destination.battleId);
     const active = result && result.session || activeStudioBattleSession();

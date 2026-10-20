@@ -906,5 +906,6 @@ module.exports = {
   setOwnedBattleResultVisibility,
   sourceLabels,
   stablePublicProfileId,
-  stableVerifiedResultId
+  stableVerifiedResultId,
+  verifiedResultId
 };
