@@ -136,6 +136,14 @@ function optimizePages(outDir){
   });
   fs.writeFileSync(path.join(outDir, 'index.html'), html);
 
+  // Other pages (embed.html, offline.html) that load a renamed script must point at the new name.
+  for(const page of fs.readdirSync(outDir).filter(f => f.endsWith('.html') && f !== 'index.html')){
+    const pagePath = path.join(outDir, page);
+    const before = fs.readFileSync(pagePath, 'utf8');
+    const after = before.replace(/(<script[^>]*\ssrc=")([^"]+\.js)(")/g, (m, a, src, b) => renamed.has(src) ? a + renamed.get(src) + b : m);
+    if(after !== before) fs.writeFileSync(pagePath, after);
+  }
+
   // Service worker: precache exactly the built files, then re-stamp the version.
   const swPath = path.join(outDir, 'sw.js');
   const sw = fs.readFileSync(swPath, 'utf8');
