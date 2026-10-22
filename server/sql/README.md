@@ -26,3 +26,5 @@ If you want, I can also produce the exact `supabase` CLI commands or an automate
 - 031_create_battle_chat_messages.sql — creates `battle_chat_messages` (battle room chat between the two DJs) and lets chat messages and timed comments be reported
 - 032_create_tournaments.sql — creates `dj_tournaments`, `dj_tournament_seats` and `dj_tournament_matches` (8- or 16-DJ knockout brackets; each match links to a normal battle)
 - 033_create_result_timed_comments.sql — creates `result_timed_comments` (comments pinned to a moment of a public battle result)
+- 034_add_tournament_deadlines_host_controls.sql — adds round deadlines, no-show forfeits, scheduled start dates and cancel support to tournaments (apply after 033)
+- 035_add_social_notification_types.sql — adds the tournament match, battle chat and timed comment notification types plus their Settings on/off switches (apply after 034)

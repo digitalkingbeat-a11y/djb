@@ -3302,6 +3302,105 @@ app.post('/api/tournaments/:tournamentId/matches/:matchId/battle', requireAuth, 
   }
 });
 
+app.delete('/api/battles/:battleId/chat/:messageId', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  if(!guardProtectedWrite(req, res, 'battleChatUnsend', { payload:{ userId:req.authUser.id, messageId:req.params.messageId }, fingerprintReplay:false, idempotencyReplay:false })) return;
+  try{
+    const result = await BattleChat.unsendBattleChat(supabaseService, req.authUser.id, req.params.battleId, req.params.messageId);
+    if(result.schemaMissing) return sendSchemaMissing(res, result);
+    if(result.notFound) return res.status(404).json({ error:'That message is already gone' });
+    if(result.forbidden) return res.status(403).json({ error:'You can only unsend your own messages' });
+    if(result.error) throw result.error;
+    return res.json({ success:true, unsent:true, id:result.id });
+  }catch(err){
+    console.error('battle chat unsend error', err);
+    return res.status(500).json({ error:'Unsend failed' });
+  }
+});
+
+/* ---------- Oct 19b: host controls, tournament history, notification switches ---------- */
+async function tournamentHostRoute(req, res, label, run){
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  if(!guardProtectedWrite(req, res, `tournament_${label}`, { payload:{ userId:req.authUser.id, tournamentId:req.params.tournamentId }, fingerprintReplay:false, idempotencyReplay:false })) return;
+  try{
+    const result = await run();
+    if(sendTournamentResult(res, result)) return;
+    const fresh = await Tournaments.getTournament(supabaseService, req.params.tournamentId, req.authUser.id);
+    if(fresh.error) throw fresh.error;
+    return res.json({ success:true, tournament:fresh.tournament || null, cancelled:Boolean(result.cancelled) });
+  }catch(err){
+    console.error(`tournament ${label} error`, err);
+    return res.status(500).json({ error:'Tournament request failed' });
+  }
+}
+app.patch('/api/tournaments/:tournamentId', requireAuth, (req, res) => tournamentHostRoute(req, res, 'update', () => Tournaments.updateTournament(supabaseService, req.authUser.id, req.params.tournamentId, req.body || {})));
+app.post('/api/tournaments/:tournamentId/remove', requireAuth, (req, res) => tournamentHostRoute(req, res, 'remove', () => Tournaments.removeEntrant(supabaseService, req.authUser.id, req.params.tournamentId, (req.body || {}).publicProfileId)));
+app.post('/api/tournaments/:tournamentId/cancel', requireAuth, (req, res) => tournamentHostRoute(req, res, 'cancel', () => Tournaments.cancelTournament(supabaseService, req.authUser.id, req.params.tournamentId)));
+
+app.get('/api/me/tournaments', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await Tournaments.tournamentHistory(supabaseService, req.authUser.id);
+    if(sendTournamentResult(res, result)) return;
+    return res.json({ success:true, tournaments:result.tournaments, wins:result.wins });
+  }catch(err){
+    console.error('tournament history error', err);
+    return res.status(500).json({ error:'Tournament history request failed' });
+  }
+});
+
+app.get('/api/tournamentChampions', async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await Tournaments.tournamentChampions(supabaseService);
+    if(result.error) throw result.error;
+    return res.json({ success:true, champions:result.champions });
+  }catch(err){
+    console.error('tournament champions error', err);
+    return res.status(500).json({ error:'Tournament champions request failed' });
+  }
+});
+
+app.get('/api/publicProfiles/:publicProfileId/tournaments', async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await Tournaments.publicTournamentHistory(supabaseService, req.params.publicProfileId);
+    if(result.error) throw result.error;
+    return res.json({ success:true, tournaments:result.tournaments, wins:result.wins });
+  }catch(err){
+    console.error('public tournament history error', err);
+    return res.status(500).json({ error:'Tournament history request failed' });
+  }
+});
+
+const SocialNotifications = require('./social_notifications');
+app.get('/api/notificationPreferences/social', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await SocialNotifications.getSocialNotificationPrefs(supabaseService, req.authUser.id);
+    if(result.error) throw result.error;
+    return res.json({ success:true, prefs:result.prefs, labels:result.labels });
+  }catch(err){
+    console.error('social notification prefs error', err);
+    return res.status(500).json({ error:'Notification settings request failed' });
+  }
+});
+app.put('/api/notificationPreferences/social', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  if(!guardProtectedWrite(req, res, 'socialNotificationPref', { payload:{ userId:req.authUser.id, type:(req.body || {}).type }, fingerprintReplay:false, idempotencyReplay:false })) return;
+  try{
+    const body = req.body || {};
+    const result = await SocialNotifications.setSocialNotificationPref(supabaseService, req.authUser.id, body.type, body.enabled !== false);
+    if(result.schemaMissing) return sendSchemaMissing(res, result);
+    if(result.validationError) return res.status(422).json({ error:result.validationError });
+    if(result.error) throw result.error;
+    return res.json({ success:true, prefs:result.prefs, labels:result.labels });
+  }catch(err){
+    console.error('social notification pref save error', err);
+    return res.status(500).json({ error:'Notification setting could not be saved' });
+  }
+});
+
 function sendTimedResult(res, result){
   if(result.schemaMissing) return sendSchemaMissing(res, result);
   if(result.private) return res.status(403).json({ error:'Battle result is private' });

@@ -5,6 +5,7 @@
 // code, and when that battle resolves the winner moves to the next round automatically.
 const crypto = require('crypto');
 const { cleanText, cleanId, newId, isMissingTable, profilesFor, rateLimited } = require('./social_helpers');
+const { notifyQuietly } = require('./social_notifications');
 
 const TOURNAMENT_TABLE = 'dj_tournaments';
 const SEAT_TABLE = 'dj_tournament_seats';
@@ -13,6 +14,32 @@ const TOURNAMENT_SCHEMA = '032_create_tournaments';
 const CAPACITIES = Object.freeze([8, 16]);
 const SEATS = 8; // kept for the foundation contract
 const ROUNDS = Object.freeze([4, 2, 1]);
+// Oct 19b: each round has a deadline. A DJ who hasn't played by then loses by forfeit.
+const ROUND_HOURS = Object.freeze([12, 24, 48, 72, 168]);
+const DEFAULT_ROUND_HOURS = 48;
+const DEADLINE_SCHEMA = '034_add_tournament_deadlines_host_controls';
+const HOUR_MS = 60 * 60 * 1000;
+function roundHoursOf(t){ const h = Number(t && t.round_hours); return ROUND_HOURS.includes(h) ? h : DEFAULT_ROUND_HOURS; }
+
+// Gives every newly playable match a deadline (now + round length).
+function stampDeadlines(matches, roundHours, now = new Date()){
+  return matches.map(m => (m.status === 'ready' || m.status === 'active') && !m.deadlineAt && !m.winnerUserId
+    ? { ...m, deadlineAt:new Date(now.getTime() + roundHours * HOUR_MS).toISOString() } : m);
+}
+
+// played: Set of user ids who entered their battle and sent in a mix.
+// Returns { winnerUserId, forfeitUserId } or null when the match should keep waiting.
+function forfeitDecision(match, played, now = new Date()){
+  if(!match.deadlineAt || match.winnerUserId || !['ready', 'active'].includes(match.status)) return null;
+  if(new Date(match.deadlineAt).getTime() > now.getTime()) return null;
+  const a = played.has(String(match.firstUserId));
+  const b = played.has(String(match.secondUserId));
+  if(a && b) return null; // both played: wait for the judges
+  if(a) return { winnerUserId:match.firstUserId, forfeitUserId:match.secondUserId };
+  if(b) return { winnerUserId:match.secondUserId, forfeitUserId:match.firstUserId };
+  // Nobody played: the higher seed (top slot) goes through so the bracket keeps moving.
+  return { winnerUserId:match.firstUserId, forfeitUserId:match.secondUserId, bothMissed:true };
+}
 
 function roundsFor(capacity){ return Math.round(Math.log2(capacity)); }
 
@@ -139,10 +166,10 @@ function battleWinner(battleRow, match){
 
 /* ---------- persistence ---------- */
 function rowToMatch(row){
-  return { id:row.id, round:Number(row.round_number), position:Number(row.position), firstUserId:row.first_user_id || null, secondUserId:row.second_user_id || null, winnerUserId:row.winner_user_id || null, status:row.status || 'pending', battleId:row.battle_id || null };
+  return { id:row.id, round:Number(row.round_number), position:Number(row.position), firstUserId:row.first_user_id || null, secondUserId:row.second_user_id || null, winnerUserId:row.winner_user_id || null, status:row.status || 'pending', battleId:row.battle_id || null, deadlineAt:row.deadline_at || null, forfeitUserId:row.forfeit_user_id || null };
 }
 function matchToRow(match, tournamentId){
-  return { id:match.id, tournament_id:tournamentId, round_number:match.round, position:match.position, first_user_id:match.firstUserId, second_user_id:match.secondUserId, winner_user_id:match.winnerUserId, status:match.status, battle_id:match.battleId };
+  return { id:match.id, tournament_id:tournamentId, round_number:match.round, position:match.position, first_user_id:match.firstUserId, second_user_id:match.secondUserId, winner_user_id:match.winnerUserId, status:match.status, battle_id:match.battleId, deadline_at:match.deadlineAt || null, forfeit_user_id:match.forfeitUserId || null };
 }
 
 function sanitizeInput(input = {}){
@@ -151,7 +178,20 @@ function sanitizeInput(input = {}){
   const capacity = Number(input.capacity);
   if(!CAPACITIES.includes(capacity)) return { validationError:'Pick 8 or 16 DJs' };
   const seeding = input.seeding === 'signup' ? 'signup' : 'random';
-  return { value:{ title, capacity, seeding, genre:cleanText(input.genre, 60) || 'Open Format', mode_id:cleanId(input.modeId) || 'transition_battle', description:cleanText(input.description, 400) } };
+  const roundHours = input.roundHours == null || input.roundHours === '' ? DEFAULT_ROUND_HOURS : Number(input.roundHours);
+  if(!ROUND_HOURS.includes(roundHours)) return { validationError:'Pick a round length of 12, 24, 48, 72 hours or 1 week' };
+  const startsAt = parseStartsAt(input.startsAt);
+  if(startsAt && startsAt.validationError) return startsAt;
+  return { value:{ title, capacity, seeding, genre:cleanText(input.genre, 60) || 'Open Format', mode_id:cleanId(input.modeId) || 'transition_battle', description:cleanText(input.description, 400), round_hours:roundHours, starts_at:startsAt || null } };
+}
+
+function parseStartsAt(value, now = new Date()){
+  if(value == null || value === '') return null;
+  const t = new Date(value);
+  if(Number.isNaN(t.getTime())) return { validationError:'That start date isn\'t valid' };
+  if(t.getTime() < now.getTime() - 5 * 60 * 1000) return { validationError:'Pick a start date in the future' };
+  if(t.getTime() > now.getTime() + 180 * 24 * HOUR_MS) return { validationError:'Pick a start date within 6 months' };
+  return t.toISOString();
 }
 
 async function loadTournament(dataClient, tournamentId){
@@ -214,7 +254,10 @@ async function sanitizeTournament(dataClient, loaded, viewerId = null){
     entrants:seats.map(s => pub(s.user_id)),
     champion:pub(tournament.champion_user_id),
     rounds:roundsFor(Number(tournament.capacity)),
-    matches:matches.map(m => ({ id:m.id, round:m.round, position:m.position, status:m.status, first:pub(m.firstUserId), second:pub(m.secondUserId), winner:pub(m.winnerUserId), hasBattle:Boolean(m.battleId), battleId:viewerId && [m.firstUserId, m.secondUserId].includes(String(viewerId)) ? m.battleId : null })),
+    roundHours:roundHoursOf(tournament),
+    startsAt:tournament.starts_at || null,
+    cancelledAt:tournament.cancelled_at || null,
+    matches:matches.map(m => ({ id:m.id, round:m.round, position:m.position, status:m.status, first:pub(m.firstUserId), second:pub(m.secondUserId), winner:pub(m.winnerUserId), hasBattle:Boolean(m.battleId), deadlineAt:m.winnerUserId ? null : m.deadlineAt || null, forfeit:m.forfeitUserId ? pub(m.forfeitUserId) : null, battleId:viewerId && [m.firstUserId, m.secondUserId].includes(String(viewerId)) ? m.battleId : null })),
     you:viewerId ? { joined:Boolean(viewerSeat), host:String(tournament.created_by) === String(viewerId), matchId:yourMatch ? yourMatch.id : null } : null
   };
 }
@@ -275,13 +318,14 @@ async function startTournament(dataClient, userId, tournamentId, now = new Date(
     const r = await dataClient.from(SEAT_TABLE).update({ seed:i + 1 }).eq('tournament_id', t.id).eq('user_id', seeds[i]);
     if(r.error) return { error:r.error };
   }
-  const matches = bracketFromSeeds(seeds, Number(t.capacity)).map(m => ({ ...m, id:newId('trm') }));
+  const matches = stampDeadlines(bracketFromSeeds(seeds, Number(t.capacity)).map(m => ({ ...m, id:newId('trm') })), roundHoursOf(t), now);
   const ins = await dataClient.from(MATCH_TABLE).insert(matches.map(m => matchToRow(m, t.id)));
   if(ins.error) return { error:ins.error };
   const champion = championOf(matches);
   const patch = { status:champion ? 'completed' : 'active', started_at:now.toISOString(), champion_user_id:champion, completed_at:champion ? now.toISOString() : null };
   const up = await dataClient.from(TOURNAMENT_TABLE).update(patch).eq('id', t.id).eq('status', 'open');
   if(up.error) return { error:up.error };
+  await notifyNewlyReady(dataClient, t, [], matches, now);
   return { started:true };
 }
 
@@ -302,8 +346,22 @@ async function reconcileTournament(dataClient, loaded, now = new Date()){
     const winner = battleWinner(battleRow, match);
     if(winner) matches = advanceWinner(matches.map(m => m.id === match.id ? { ...m, status:'ready' } : m), match.round, match.position, winner);
   }
+  // Deadlines: anything still unplayed after its deadline is settled by forfeit.
+  for(const match of matches.slice()){
+    const current = matches.find(m => m.id === match.id);
+    if(!current.deadlineAt || current.winnerUserId || !['ready', 'active'].includes(current.status)) continue;
+    if(new Date(current.deadlineAt).getTime() > now.getTime()) continue;
+    const played = await playedUserIds(dataClient, current.battleId);
+    if(played.error) return played;
+    const decision = forfeitDecision(current, played, now);
+    if(!decision) continue;
+    matches = advanceWinner(matches.map(m => m.id === current.id ? { ...m, status:'ready' } : m), current.round, current.position, decision.winnerUserId)
+      .map(m => m.id === current.id ? { ...m, forfeitUserId:decision.forfeitUserId } : m);
+  }
+  matches = stampDeadlines(matches, roundHoursOf(loaded.tournament), now);
   const saved = await saveMatchChanges(dataClient, loaded.tournament.id, before, matches);
   if(saved.error) return saved;
+  await notifyNewlyReady(dataClient, loaded.tournament, before, matches, now);
   const champion = championOf(matches);
   let tournament = loaded.tournament;
   if(champion){
@@ -318,6 +376,14 @@ async function reconcileTournament(dataClient, loaded, now = new Date()){
 async function getTournament(dataClient, tournamentId, viewerId = null, now = new Date()){
   let loaded = await loadTournament(dataClient, tournamentId);
   if(loaded.error || loaded.notFound || loaded.schemaMissing) return loaded;
+  // A scheduled start date: once it passes, the bracket is drawn automatically (needs 2+ DJs).
+  const t0 = loaded.tournament;
+  if(t0.status === 'open' && t0.starts_at && new Date(t0.starts_at).getTime() <= now.getTime() && loaded.seats.length >= 2){
+    const started = await startTournament(dataClient, t0.created_by, t0.id, now);
+    if(started.error) return started;
+    loaded = await loadTournament(dataClient, tournamentId);
+    if(loaded.error || loaded.notFound) return loaded;
+  }
   loaded = await reconcileTournament(dataClient, loaded, now);
   if(loaded.error) return loaded;
   return { tournament:await sanitizeTournament(dataClient, loaded, viewerId) };
@@ -370,6 +436,179 @@ async function playTournamentMatch(dataClient, userId, tournamentId, matchId, in
   return { battleId:match.battleId, battle:outcome.battle || null, entry:outcome.entry || null, room:room && room.state || null };
 }
 
+async function playedUserIds(dataClient, battleId){
+  const set = new Set();
+  if(!battleId) return set;
+  const entries = await dataClient.from('battle_entries').select('*').eq('battle_id', String(battleId));
+  if(entries.error) return { error:entries.error };
+  for(const entry of (entries.data || []).filter(e => (e.status || 'active') === 'active')){
+    const subs = await dataClient.from('mix_submissions').select('*').eq('battle_entry_id', String(entry.id)).limit(1);
+    if(subs.error) return { error:subs.error };
+    if((subs.data || []).length) set.add(String(entry.user_id));
+  }
+  return set;
+}
+
+async function notifyNewlyReady(dataClient, tournament, before, after, now = new Date()){
+  const wasReady = new Set(before.filter(m => m.status === 'ready' || m.status === 'active').map(m => m.id));
+  const rounds = roundsFor(Number(tournament.capacity));
+  for(const m of after){
+    if(m.status !== 'ready' || wasReady.has(m.id) || !m.firstUserId || !m.secondUserId) continue;
+    const label = roundLabel(m.round, rounds);
+    const due = m.deadlineAt ? ` Play by ${new Date(m.deadlineAt).toUTCString().replace(/:\d\d GMT$/, ' UTC')}.` : '';
+    for(const [me, them] of [[m.firstUserId, m.secondUserId], [m.secondUserId, m.firstUserId]]){
+      await notifyQuietly(dataClient, {
+        recipientUserId:me, actorUserId:them, type:'tournament_match_ready', subjectId:m.id, eventKey:`tournament-ready:${m.id}`,
+        destination:{ type:'tournament', tournamentId:tournament.id, label:'Open tournament' },
+        summary:`Your ${label} in ${tournament.title} is ready.${due}`, now
+      });
+    }
+  }
+}
+
+/* ---------- Oct 19b: host controls ---------- */
+async function hostLoad(dataClient, userId, tournamentId){
+  const loaded = await loadTournament(dataClient, tournamentId);
+  if(loaded.error || loaded.notFound || loaded.schemaMissing) return loaded;
+  if(String(loaded.tournament.created_by) !== String(userId)) return { forbidden:true };
+  if(['completed', 'cancelled'].includes(loaded.tournament.status)) return { conflict:true, reason:'This tournament is already over' };
+  return loaded;
+}
+
+// Host can rename at any time, and change the start date or round length before it starts.
+async function updateTournament(dataClient, userId, tournamentId, input = {}, now = new Date()){
+  const loaded = await hostLoad(dataClient, userId, tournamentId);
+  if(loaded.error || loaded.notFound || loaded.schemaMissing || loaded.forbidden || loaded.conflict) return loaded;
+  const t = loaded.tournament;
+  const patch = {};
+  if(input.title !== undefined){
+    const title = cleanText(input.title, 120);
+    if(!title) return { validationError:'Give the tournament a name' };
+    patch.title = title;
+  }
+  if(input.startsAt !== undefined){
+    if(t.status !== 'open') return { conflict:true, reason:'The start date can\'t change after the tournament starts' };
+    const startsAt = parseStartsAt(input.startsAt, now);
+    if(startsAt && startsAt.validationError) return startsAt;
+    patch.starts_at = startsAt || null;
+  }
+  if(input.roundHours !== undefined){
+    if(t.status !== 'open') return { conflict:true, reason:'The round length can\'t change after the tournament starts' };
+    const h = Number(input.roundHours);
+    if(!ROUND_HOURS.includes(h)) return { validationError:'Pick a round length of 12, 24, 48, 72 hours or 1 week' };
+    patch.round_hours = h;
+  }
+  if(!Object.keys(patch).length) return { validationError:'Nothing to change' };
+  const up = await dataClient.from(TOURNAMENT_TABLE).update(patch).eq('id', t.id);
+  if(up.error) return isMissingTable(up.error) || /column/i.test(String(up.error.message)) ? { schemaMissing:true, schema:DEADLINE_SCHEMA } : { error:up.error };
+  return { updated:true };
+}
+
+// Before the start the DJ's seat is freed. After the start the DJ forfeits their current match.
+async function removeEntrant(dataClient, userId, tournamentId, publicProfileId, now = new Date()){
+  const loaded = await hostLoad(dataClient, userId, tournamentId);
+  if(loaded.error || loaded.notFound || loaded.schemaMissing || loaded.forbidden || loaded.conflict) return loaded;
+  const t = loaded.tournament;
+  const profiles = await profilesFor(dataClient, loaded.seats.map(s => s.user_id));
+  const seat = loaded.seats.find(s => (profiles.get(String(s.user_id)) || {}).publicProfileId === String(publicProfileId || ''));
+  if(!seat) return { notFound:true };
+  const target = String(seat.user_id);
+  if(target === String(t.created_by)) return { validationError:'You can\'t remove yourself. Cancel the tournament instead.' };
+  if(t.status === 'open'){
+    const removed = await dataClient.from(SEAT_TABLE).delete().eq('tournament_id', t.id).eq('user_id', target);
+    if(removed && removed.error) return { error:removed.error };
+    return { removed:true };
+  }
+  const before = loaded.matches.map(m => ({ ...m }));
+  let matches = loaded.matches;
+  const live = matches.find(m => !m.winnerUserId && [m.firstUserId, m.secondUserId].includes(target) && ['ready', 'active'].includes(m.status));
+  if(live){
+    const opponent = live.firstUserId === target ? live.secondUserId : live.firstUserId;
+    matches = advanceWinner(matches.map(m => m.id === live.id ? { ...m, status:'ready' } : m), live.round, live.position, opponent)
+      .map(m => m.id === live.id ? { ...m, forfeitUserId:target } : m);
+  }else{
+    const waiting = matches.find(m => !m.winnerUserId && m.status === 'pending' && [m.firstUserId, m.secondUserId].includes(target));
+    if(!waiting) return { conflict:true, reason:'That DJ is already out of the tournament' };
+    matches = settleByes(matches.map(m => m.id === waiting.id ? { ...m, firstUserId:m.firstUserId === target ? null : m.firstUserId, secondUserId:m.secondUserId === target ? null : m.secondUserId } : m));
+  }
+  matches = stampDeadlines(matches, roundHoursOf(t), now);
+  const saved = await saveMatchChanges(dataClient, t.id, before, matches);
+  if(saved.error) return saved;
+  await notifyNewlyReady(dataClient, t, before, matches, now);
+  const champion = championOf(matches);
+  if(champion){
+    const up = await dataClient.from(TOURNAMENT_TABLE).update({ status:'completed', champion_user_id:champion, completed_at:now.toISOString() }).eq('id', t.id);
+    if(up.error) return { error:up.error };
+  }
+  return { removed:true, forfeited:true };
+}
+
+async function cancelTournament(dataClient, userId, tournamentId, now = new Date()){
+  const loaded = await hostLoad(dataClient, userId, tournamentId);
+  if(loaded.error || loaded.notFound || loaded.schemaMissing || loaded.forbidden || loaded.conflict) return loaded;
+  const up = await dataClient.from(TOURNAMENT_TABLE).update({ status:'cancelled', cancelled_at:now.toISOString() }).eq('id', loaded.tournament.id);
+  if(up.error) return /column/i.test(String(up.error.message)) ? { schemaMissing:true, schema:DEADLINE_SCHEMA } : { error:up.error };
+  return { cancelled:true };
+}
+
+/* ---------- Oct 19b: tournament wins on profiles and rankings ---------- */
+function placementLabel(round, rounds, champion){
+  if(champion) return 'Champion';
+  const left = rounds - round;
+  if(left === 0) return 'Runner-up';
+  if(left === 1) return 'Semifinalist';
+  if(left === 2) return 'Quarterfinalist';
+  return `Out in round ${round}`;
+}
+
+// How far one DJ got in each tournament they entered (finished or in progress).
+async function tournamentHistory(dataClient, userId){
+  const me = String(userId);
+  const seats = await dataClient.from(SEAT_TABLE).select('*').eq('user_id', me);
+  if(seats.error) return isMissingTable(seats.error) ? { schemaMissing:true, schema:TOURNAMENT_SCHEMA } : { error:seats.error };
+  const out = [];
+  for(const seat of (seats.data || []).slice(0, 50)){
+    const loaded = await loadTournament(dataClient, seat.tournament_id);
+    if(!loaded.tournament || loaded.tournament.status === 'cancelled') continue;
+    const t = loaded.tournament;
+    const rounds = roundsFor(Number(t.capacity));
+    const mine = loaded.matches.filter(m => [m.firstUserId, m.secondUserId].includes(me));
+    const furthest = mine.reduce((max, m) => Math.max(max, m.round), 0);
+    const champion = String(t.champion_user_id || '') === me;
+    const lost = mine.find(m => m.winnerUserId && m.winnerUserId !== me);
+    let placement;
+    if(t.status === 'open') placement = 'Signed up';
+    else if(champion) placement = 'Champion';
+    else if(lost) placement = placementLabel(lost.round, rounds, false);
+    else placement = `Still in · ${roundLabel(furthest || 1, rounds)}`;
+    out.push({ id:t.id, title:t.title, capacity:Number(t.capacity), status:t.status, placement, champion, roundReached:furthest, rounds, wonByForfeit:mine.some(m => m.winnerUserId === me && m.forfeitUserId), completedAt:t.completed_at || null });
+  }
+  out.sort((a, b) => (b.champion - a.champion) || String(b.completedAt || '').localeCompare(String(a.completedAt || '')));
+  return { tournaments:out, wins:out.filter(t => t.champion).length };
+}
+
+// Public list of tournament champions with their win counts (for trophies in Rankings).
+async function tournamentChampions(dataClient){
+  const result = await dataClient.from(TOURNAMENT_TABLE).select('*').eq('status', 'completed');
+  if(result.error) return isMissingTable(result.error) ? { champions:[] } : { error:result.error };
+  const counts = new Map();
+  (result.data || []).forEach(row => { if(row.champion_user_id) counts.set(String(row.champion_user_id), (counts.get(String(row.champion_user_id)) || 0) + 1); });
+  const profiles = await profilesFor(dataClient, [...counts.keys()]);
+  return { champions:[...counts.entries()].map(([id, wins]) => ({ publicProfileId:(profiles.get(id) || {}).publicProfileId, displayName:(profiles.get(id) || {}).displayName || 'DJ', wins })).sort((a, b) => b.wins - a.wins) };
+}
+
+async function publicTournamentHistory(dataClient, publicProfileId){
+  const result = await dataClient.from(SEAT_TABLE).select('*');
+  if(result.error) return isMissingTable(result.error) ? { tournaments:[], wins:0 } : { error:result.error };
+  const ids = [...new Set((result.data || []).map(r => String(r.user_id)))];
+  const profiles = await profilesFor(dataClient, ids);
+  const userId = ids.find(id => (profiles.get(id) || {}).publicProfileId === String(publicProfileId || ''));
+  if(!userId) return { tournaments:[], wins:0 };
+  const history = await tournamentHistory(dataClient, userId);
+  if(history.error) return history;
+  return { tournaments:history.tournaments.filter(t => t.status !== 'open'), wins:history.wins };
+}
+
 // Only the two DJs of a tournament match may enter its battle.
 async function tournamentBattleJoinAllowed(dataClient, battleId, userId){
   const result = await dataClient.from(MATCH_TABLE).select('*').eq('battle_id', String(battleId)).limit(1);
@@ -391,5 +630,7 @@ module.exports = {
   SEATS, ROUNDS, CAPACITIES, TOURNAMENT_SCHEMA,
   bracketFromSeats, bracketFromSeeds, advanceWinner, settleByes, seedOrder, championOf, battleWinner, roundLabel,
   createTournament, joinTournament, leaveTournament, startTournament, getTournament, listTournaments, reconcileTournament,
-  playTournamentMatch, tournamentBattleJoinAllowed
+  playTournamentMatch, tournamentBattleJoinAllowed,
+  ROUND_HOURS, DEFAULT_ROUND_HOURS, DEADLINE_SCHEMA, stampDeadlines, forfeitDecision, playedUserIds,
+  updateTournament, removeEntrant, cancelTournament, tournamentHistory, tournamentChampions, publicTournamentHistory, placementLabel
 };

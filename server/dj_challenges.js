@@ -39,7 +39,11 @@ const NOTIFICATION_TYPES = new Set([
   'comment_received',
   'reply_received',
   'reaction_received',
-  'moderation_update'
+  'moderation_update',
+  'mention_received',
+  'tournament_match_ready',
+  'battle_chat_message',
+  'timed_comment_received'
 ]);
 const NOTIFICATION_CATEGORIES = new Set(['challenge', 'battle', 'relationship', 'community']);
 const CHALLENGE_AUDIENCES = new Set(['everyone', 'followed', 'prior_opponents', 'nobody']);
@@ -501,6 +505,9 @@ function notificationSummary(type, challenge, actorProfile){
   if(type === 'comment_received') return `${actor} commented on your community post.`;
   if(type === 'reply_received') return `${actor} replied in a community discussion.`;
   if(type === 'reaction_received') return `${actor} reacted to your community post.`;
+  if(type === 'tournament_match_ready') return 'Your tournament match is ready to play.';
+  if(type === 'battle_chat_message') return `${actor} sent you a battle chat message.`;
+  if(type === 'timed_comment_received') return `${actor} commented on your mix.`;
   if(type === 'moderation_update') return 'A community moderation update is available.';
   if(type === 'challenge_received') return `${actor} challenged you to ${rules.modeLabel || 'a battle'}.`;
   if(type === 'challenge_accepted') return `${actor} accepted your challenge.`;

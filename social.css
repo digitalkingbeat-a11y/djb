@@ -74,3 +74,38 @@
   .bracket{grid-auto-columns:minmax(170px,1fr)}
   .battle-chat-msg{max-width:95%}
 }
+
+/* Oct 19b: deadlines, host controls, chat unsend + unread, notification switches, tournament wins */
+.bracket-deadline{display:inline-block;margin:6px 8px 0;font-size:12px;font-weight:700;color:var(--muted,#9aa3b2)}
+.bracket-deadline.urgent{color:#f5a524}
+.bracket-deadline.overdue{color:#ef4444}
+.bracket-forfeit{display:block;margin:6px 8px 0;font-size:12px;color:var(--muted,#9aa3b2);font-style:italic}
+.tournament-starts{margin:4px 0 8px;font-weight:700}
+.tournament-host-tools{margin:12px 0;padding:12px;border:1px dashed var(--line,rgba(255,255,255,.18));border-radius:12px}
+.tournament-host-tools .tournament-actions{margin-top:8px}
+.tournament-remove-list{list-style:none;padding:0;margin:12px 0;display:grid;gap:8px}
+.tournament-remove-list li{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 10px;border:1px solid var(--line,rgba(255,255,255,.12));border-radius:10px}
+.danger-btn.small{padding:6px 12px;font-size:13px;min-height:44px}
+.chat-unsend{margin-top:4px}
+.battle-chat-jump{position:relative;display:inline-flex;align-items:center;gap:6px;min-height:44px}
+.chat-unread-badge{display:inline-flex;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:#ef4444;color:#fff;font-size:12px;font-weight:800;align-items:center;justify-content:center}
+.notify-switches{display:grid;gap:10px;margin-top:10px}
+.notify-switch{display:flex;gap:12px;align-items:flex-start;cursor:pointer;padding:10px;border:1px solid var(--line,rgba(255,255,255,.12));border-radius:12px}
+.notify-switch input{width:22px;height:22px;margin-top:2px;accent-color:var(--accent,#8b5cf6);flex:0 0 auto}
+.notify-switch span{display:grid;gap:2px}
+.notify-switch small{color:var(--muted,#9aa3b2)}
+.profile-tournaments{margin-top:16px}
+.champion-badge{display:inline-flex;align-items:center;gap:4px;margin-left:8px;padding:3px 10px;border-radius:999px;background:linear-gradient(135deg,#f5c542,#e59b12);color:#1a1200;font-size:13px;font-weight:800;vertical-align:middle}
+.profile-tournament-list{list-style:none;padding:0;margin:12px 0 0;display:grid;gap:8px}
+.profile-tournament-list li{display:grid;grid-template-columns:minmax(110px,auto) 1fr auto;gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--line,rgba(255,255,255,.12));border-radius:12px}
+.profile-tournament-list li.is-champion{border-color:#e5b52a}
+.profile-tournament-list .placement{font-weight:800}
+.profile-tournament-list small{display:block;color:var(--muted,#9aa3b2)}
+.ranking-trophy{margin-left:4px;font-size:15px}
+@media (max-width:640px){
+  .profile-tournament-list li{grid-template-columns:1fr auto}
+  .profile-tournament-list .placement{grid-column:1/-1}
+  .tournament-host-tools .tournament-actions{flex-wrap:wrap}
+}
+.tournament-host-tools .danger-btn,.tournament-remove-list .danger-btn{background:transparent;border:1px solid #f87171;color:#fca5a5}
+.tournament-host-tools .danger-btn:hover,.tournament-remove-list .danger-btn:hover{background:rgba(248,113,113,.12)}
