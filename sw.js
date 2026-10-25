@@ -2,7 +2,7 @@
 // offline page instead of a blank screen. API, auth and any cross-origin (Supabase) traffic is
 // never cached. CACHE_VERSION is stamped by `npm run build` (scripts/stamp-sw-version.js) from a
 // hash of every shell file, so each change ships a new worker and the app shows "Update ready".
-const CACHE_VERSION = 'djb-shell-d4f1c2ab57e7';
+const CACHE_VERSION = 'djb-shell-97b5167837b8';
 const CACHE_PREFIX = 'djb-shell-';
 const OFFLINE_URL = 'offline.html';
 const SHELL_FILES = [
@@ -10,11 +10,11 @@ const SHELL_FILES = [
   './',
   'index.html',
   'manifest.webmanifest',
-  'styles.bundle.fd3aaadf0d.css',
+  'styles.bundle.9a6f273c75.css',
   'api_client.20bb2c98c3.js',
   'submission_upload.85e64f5894.js',
   'battle_modes.6bd2a08bd2.js',
-  'app.e5ea222a7e.js',
+  'app.840f7ed562.js',
   'social.ff4c8bafc4.js',
   'connect.c14e239b8e.js',
   'oct20.cbedc4eb0e.js',
@@ -26,13 +26,15 @@ const SHELL_FILES = [
   'window.js',
   'studio/studio_pro.c4196939dd.js',
   'studio/studio_recording.27debd0b4a.js',
-  'studio/controller_mapping.83d34c3c68.js',
+  'studio/controller_mapping.6a00a6af91.js',
   'studio/audio_setup.25b83d1b96.js',
   'studio/streaming.38e7817992.js',
   'studio/playlist_transfer.0fb282f69c.js',
   'studio/beatmatch_lessons.ec11b45d32.js',
-  'studio/studio_browser.d52839162b.js',
-  'studio/deck_runtime.9841153da3.js',
+  'studio/track_prefs.de98e65fc5.js',
+  'studio/deck_perf.eb57473d92.js',
+  'studio/studio_browser.5254d06105.js',
+  'studio/deck_runtime.fabe9512c5.js',
   'assets/favicon.svg',
   'assets/favicon-64.png',
   'assets/icon-192.png',
