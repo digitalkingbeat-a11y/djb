@@ -3848,6 +3848,39 @@ app.get('/api/invites/:code', oct20bRoute('Invite link', async (req, res) => {
   if(sendInviteResult(res, r)) return; res.json({ success:true, invite:r.invite });
 }));
 
+/* ================= Remix contests ================= */
+const RemixContests = require('./remix_contests');
+const remixStorage = () => supabaseService.storage.from(MIX_BUCKET);
+function sendRemixResult(res, r){
+  if(r.rateLimited) { res.status(429).json({ error:'Too many tries. Wait a bit and try again.' }); return true; }
+  return Boolean(sendOct20bResult(res, r));
+}
+const remixRoute = (label, fn) => oct20bRoute(label, async (req, res) => { const r = await fn(req); if(sendRemixResult(res, r)) return; res.status(r.__status || 200).json({ success:true, ...r }); });
+const viewer = req => req.authUser ? req.authUser.id : null;
+app.get('/api/remix-contests', optionalAuthB, remixRoute('Remix contests', req => RemixContests.listContests(supabaseService, viewer(req))));
+app.get('/api/remix-contests/champions', remixRoute('Remix champions', () => RemixContests.listChampions(supabaseService)));
+app.get('/api/me/remix-contests', requireAuth, remixRoute('My remix wins', req => RemixContests.myRemixSummary(supabaseService, req.authUser.id)));
+app.post('/api/remix-contests', requireAuth, remixRoute('Create remix contest', async req => ({ ...(await RemixContests.createContest(supabaseService, remixStorage(), req.authUser.id, req.body || {})), __status:201 })));
+app.get('/api/remix-contests/:id', optionalAuthB, remixRoute('Remix contest', req => RemixContests.getContest(supabaseService, req.params.id, viewer(req))));
+app.post('/api/remix-contests/:id/publish', requireAuth, remixRoute('Publish remix contest', req => RemixContests.publishContest(supabaseService, remixStorage(), req.authUser.id, req.params.id)));
+app.patch('/api/remix-contests/:id', requireAuth, remixRoute('Edit remix contest', req => RemixContests.editContest(supabaseService, req.authUser.id, req.params.id, req.body || {})));
+app.post('/api/remix-contests/:id/cancel', requireAuth, remixRoute('Cancel remix contest', req => RemixContests.cancelContest(supabaseService, req.authUser.id, req.params.id)));
+app.post('/api/remix-contests/:id/parts/:partId/download', requireAuth, remixRoute('Download part', req => RemixContests.partDownload(supabaseService, remixStorage(), req.authUser.id, req.params.id, req.params.partId)));
+app.post('/api/remix-contests/:id/entry', requireAuth, remixRoute('Send remix', req => RemixContests.startEntry(supabaseService, remixStorage(), req.authUser.id, req.params.id, req.body || {})));
+app.post('/api/remix-contests/:id/entry/complete', requireAuth, remixRoute('Finish remix upload', req => RemixContests.completeEntry(supabaseService, remixStorage(), req.authUser.id, req.params.id)));
+app.delete('/api/remix-contests/:id/entry', requireAuth, remixRoute('Withdraw remix', req => RemixContests.withdrawEntry(supabaseService, remixStorage(), req.authUser.id, req.params.id)));
+app.post('/api/remix-contests/:id/entries/:entryId/play', optionalAuthB, remixRoute('Play remix', req => RemixContests.entryPlayback(supabaseService, remixStorage(), req.params.id, req.params.entryId, viewer(req))));
+app.post('/api/remix-contests/:id/vote', requireAuth, remixRoute('Remix vote', req => RemixContests.castVote(supabaseService, req.authUser.id, req.params.id, req.body || {})));
+app.post('/api/remix-contests/:id/store-offer', requireAuth, remixRoute('Beat Store request', req => RemixContests.offerStoreListing(supabaseService, req.authUser.id, req.params.id, req.body || {})));
+app.post('/api/remix-contests/:id/store-consent', requireAuth, remixRoute('Beat Store answer', req => RemixContests.answerStoreOffer(supabaseService, req.authUser.id, req.params.id, req.body || {})));
+app.post('/api/remix-contests/:id/store-listing', requireAuth, remixRoute('List winning remix', async req => ({ ...(await RemixContests.listWinnerInStore(supabaseService, req.authUser.id, req.params.id)), __status:201 })));
+app.post('/api/remix-contests/entries/:entryId/moderate', requireAuth, requireOperatorUser, remixRoute('Moderate remix', req => RemixContests.moderateEntry(supabaseService, req.params.entryId, req.body || {})));
+// Close contests whose voting ended (also done whenever someone opens them). Checked every 15 minutes.
+if(process.env.NODE_ENV !== 'test' && supabaseService && typeof supabaseService.from === 'function'){
+  const remixTimer = setInterval(() => RemixContests.sweepDueContests(supabaseService).catch(err => console.warn('remix contest sweep failed', err && err.message)), 15 * 60 * 1000);
+  if(remixTimer.unref) remixTimer.unref();
+}
+
 // Serve the static front end (index.html, app.js, CSS) from the same origin unless SERVE_FRONTEND=false.
 if(shouldServeFrontend()) app.use(createFrontendRouter());
 

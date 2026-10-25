@@ -1175,6 +1175,7 @@ function installProfessionalShell(){
       ['rankings','RK','Rankings'],
       ['tournaments','TN','Tournaments'],
       ['crews','CR','Crews'],
+      ['remix-contests','RX','Remix Contests'],
       ['watch','WL','Watch Live'],
       ['find-djs','FD','Find DJs'],
       ['messages','MS','Messages'],
@@ -1423,7 +1424,7 @@ function libraryPlayerMinimized(){ const p = document.getElementById('library-pl
   if(btn) btn.onclick = () => setLibraryPlayerMinimized(!libraryPlayerMinimized());
 })();
 // ---- Address bar routing: every page lives at #<view> so Back/Forward, refresh and shared links work. ----
-const ROUTABLE_VIEWS = ['dashboard','battles','studio','library','community','verified-results','rankings','notifications','activity','settings','operations','profile','store','practice','tournaments','messages','find-djs','watch','crews'];
+const ROUTABLE_VIEWS = ['dashboard','battles','studio','library','community','verified-results','rankings','notifications','activity','settings','operations','profile','store','practice','tournaments','messages','find-djs','watch','crews','remix-contests'];
 function viewFromHash(hash = window.location && window.location.hash){
   const raw = String(hash || '').replace(/^#\/?/, '');
   if(!raw) return '';
@@ -1512,6 +1513,7 @@ function switchView(view, options = {}){
   if(window.DJBOct20b) window.DJBOct20b.onView(view);
   if(window.DJBPasskeys) window.DJBPasskeys.onView(view);
   if(window.DJBInvites) window.DJBInvites.onView(view);
+  if(window.DJBRemix) window.DJBRemix.onView(view);
   window.scrollTo({top:0,behavior:'smooth'});
   return true;
 }
@@ -11600,6 +11602,9 @@ async function openDjNotificationDestination(notificationId){
   const destination = notification.destination || {};
   if(destination.type === 'messages' && destination.publicProfileId && window.DJBConnect){
     return { opened:'messages', response:await window.DJBConnect.openConversation(destination.publicProfileId) };
+  }
+  if(destination.type === 'remix_contest' && destination.contestId && window.DJBRemix){
+    return { opened:'remix_contest', response:await window.DJBRemix.openFromAnywhere(destination.contestId) };
   }
   if(destination.type === 'invites' && window.DJBInvites){
     return { opened:'invites', response:await window.DJBInvites.focus() };

@@ -619,5 +619,9 @@ module.exports = {
   sanitizeMarketplaceListing,
   sanitizeMarketplacePlayerSession,
   sanitizeMarketplaceProduct,
-  sanitizeMarketplaceRightsPolicy
+  sanitizeMarketplaceRightsPolicy,
+  // Used by remix contests to list a winning remix with the same product/rights/listing shape.
+  marketplaceProductPayloadFromTrack,
+  marketplaceRightsPayload,
+  marketplaceListingPayload
 };
