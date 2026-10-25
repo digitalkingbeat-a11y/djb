@@ -206,14 +206,14 @@ describe('Oct 20b: Beat Store discount codes', () => {
     expect((await Codes.setCodeActive(db, U[1], made.code.id, false)).code.state).to.equal('off');
     expect((await Codes.listCodes(db, U[1], now)).codes).to.have.length(1);
   });
-  it('applies the code inside marketplace checkout: Stripe gets the lower price and the use is counted', async () => {
+  it('applies the code inside marketplace checkout: Stripe gets the lower price and a use is held until payment (Oct 20c)', async () => {
     const db = dataClient({
       marketplace_listings:[{ id:'lst_1', status:'published', product_id:'p1', seller_user_id:U[1], display_price_cents:2500, currency:'USD' }],
       marketplace_products:[{ id:'p1', status:'active', title:'Beat' }],
       marketplace_rights_policies:[{ product_id:'p1', status:'active', marketplace_streaming_allowed:true }],
       marketplace_seller_accounts:[{ seller_user_id:U[1], provider:'stripe', provider_account_id:'acct_1', account_status:'connected', charges_enabled:true, payouts_enabled:true }],
       marketplace_orders:[], marketplace_order_items:[], beat_discount_redemptions:[],
-      beat_discount_codes:[{ id:'c1', seller_user_id:U[1], code:'BATTLE20', kind:'percent', percent_off:20, usage_limit:5, times_used:0, active:true }]
+      beat_discount_codes:[{ id:'c1', seller_user_id:U[1], code:'BATTLE20', kind:'percent', percent_off:20, usage_limit:5, times_used:0, reserved_uses:0, active:true }]
     });
     let charged = null;
     const adapter = { provider:'stripe', configured:true, async createCheckout(order){ charged = order.gross_amount_cents; return { providerCheckoutId:'cs_9', redirectUrl:'https://checkout.stripe.com/x' }; } };
@@ -221,7 +221,8 @@ describe('Oct 20b: Beat Store discount codes', () => {
     if(r.validationError || r.error || r.unavailable) throw new Error(JSON.stringify(r));
     expect(charged).to.equal(2000);
     expect(r.discount).to.deep.equal({ code:'BATTLE20', originalCents:2500, discountCents:500, finalCents:2000 });
-    expect(db.db.beat_discount_codes[0].times_used).to.equal(1);
+    expect(db.db.beat_discount_codes[0].times_used).to.equal(0);
+    expect(db.db.beat_discount_codes[0].reserved_uses).to.equal(1);
     expect(db.db.beat_discount_redemptions).to.have.length(1);
     const bad = await createMarketplaceCheckout(db, adapter, U[0], { listingId:'lst_1', provider:'stripe', clientPriceCents:2500, currency:'USD', discountCode:'NOPE' }, now);
     expect(bad.validationError).to.match(/isn.t valid/);

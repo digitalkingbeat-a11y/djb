@@ -3826,6 +3826,28 @@ app.get('/api/insights/views', requireAuth, oct20bRoute('Who\u2019s watching', a
   if(sendOct20bResult(res, r)) return; res.json({ success:true, insights:r.insights });
 }));
 
+/* ================= Oct 20c: personal invite-a-friend links ================= */
+const Invites = require('./invites');
+function sendInviteResult(res, r){
+  if(r.rateLimited) { res.status(429).json({ error:'Too many tries. Wait a minute and try again.' }); return true; }
+  return Boolean(sendOct20bResult(res, r));
+}
+app.get('/api/invites/mine', requireAuth, oct20bRoute('My invite link', async (req, res) => {
+  const r = await Invites.getMyInvite(supabaseService, req.authUser.id);
+  if(sendInviteResult(res, r)) return; res.json({ success:true, invite:r.invite });
+}));
+app.post('/api/invites/claim', requireAuth, oct20bRoute('Invite claim', async (req, res) => {
+  const r = await Invites.claimInvite(supabaseService, req.authUser, req.body || {});
+  if(r.notNewAccount || r.alreadyCounted) return res.json({ success:true, claimed:false, reason:r.notNewAccount ? 'not_new_account' : 'already_counted' });
+  if(sendInviteResult(res, r)) return; res.status(201).json({ success:true, claimed:true, inviter:r.inviter });
+}));
+app.get('/api/invites/:code', oct20bRoute('Invite link', async (req, res) => {
+  const ip = String(req.ip || req.socket && req.socket.remoteAddress || 'anon');
+  if(require('./social_helpers').rateLimited(`invite-lookup:${ip}`, Date.now(), 30, 60 * 1000)) return res.status(429).json({ error:'Too many tries' });
+  const r = await Invites.lookupInvite(supabaseService, req.params.code);
+  if(sendInviteResult(res, r)) return; res.json({ success:true, invite:r.invite });
+}));
+
 // Serve the static front end (index.html, app.js, CSS) from the same origin unless SERVE_FRONTEND=false.
 if(shouldServeFrontend()) app.use(createFrontendRouter());
 
