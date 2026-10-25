@@ -319,3 +319,5 @@ button.danger[disabled]{opacity:.45}
   .rmx-entry-side{justify-content:flex-start}
   .rmx-dates-edit{grid-template-columns:1fr}
 }
+
+.rmx-zip{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:8px 0}.rmx-zip progress{flex:1 1 140px;min-width:120px;height:10px}

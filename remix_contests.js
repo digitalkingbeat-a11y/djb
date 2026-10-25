@@ -162,12 +162,39 @@
       ${c.countdown ? `<p class="rmx-countdown" id="rmx-detail-countdown">⏱ ${esc(countdownText(c.countdown))}</p>` : ''}
       ${c.winner ? `<p class="rmx-winner">🎛️ Winner: ${djLink(c.winner)} · Remix Champion</p>` : ''}
       ${consent}${hostPanel(c)}
-      <h4>The parts</h4>${c.parts.length ? `<ul class="rmx-parts">${c.parts.map(p => `<li><span>${esc(p.label)} <small>${esc(p.filename)}</small>${p.uploaded ? '' : ' <small>(uploading…)</small>'}</span>${v.signedIn && c.phase !== 'cancelled' ? `<button class="ghost small" type="button" data-rmx-part="${esc(p.id)}">Download</button>` : ''}</li>`).join('')}</ul>${v.signedIn ? '' : '<p class="social-note">Sign in to download the parts.</p>'}` : '<p class="social-note">No parts yet.</p>'}
+      <h4>The parts</h4>${c.parts.length && v.signedIn && c.phase !== 'cancelled' && c.parts.some(p => p.uploaded) ? `<div class="rmx-zip"><button class="primary small" type="button" id="rmx-zip">⬇ Download all ${c.parts.length > 1 ? 'stems' : 'parts'} (.zip)</button><progress id="rmx-zip-progress" max="1" value="0" hidden></progress><small class="social-note" id="rmx-zip-status" aria-live="polite"></small></div>` : ''}${c.parts.length ? `<ul class="rmx-parts">${c.parts.map(p => `<li><span>${esc(p.label)} <small>${esc(p.filename)}</small>${p.uploaded ? '' : ' <small>(uploading…)</small>'}</span>${v.signedIn && c.phase !== 'cancelled' ? `<button class="ghost small" type="button" data-rmx-part="${esc(p.id)}">Download</button>` : ''}</li>`).join('')}</ul>${v.signedIn ? '' : '<p class="social-note">Sign in to download the parts.</p>'}` : '<p class="social-note">No parts yet.</p>'}
       ${entryBox}
       <h4>Remixes (${esc(c.entries.length)})</h4>${voteNote}
       ${c.entries.length ? `<ul class="rmx-entries">${c.entries.map(e => entryRow(e, c)).join('')}</ul>` : `<p class="social-note">${c.phase === 'open' ? 'No remixes yet. Be the first!' : 'No remixes were sent.'}</p>`}
       ${c.totalVotes != null ? `<p class="social-note">${esc(c.totalVotes)} vote${c.totalVotes === 1 ? '' : 's'} in total.</p>` : ''}`;
     wireContest(page, c);
+  }
+  async function downloadAll(c){
+    const btn = D.getElementById('rmx-zip'), bar = D.getElementById('rmx-zip-progress'), status = D.getElementById('rmx-zip-status');
+    const Z = W.DJBStemsZip;
+    if(!btn) return;
+    if(!Z) return toast('Couldn\u2019t make the zip', 'Reload the page and try again.');
+    btn.disabled = true; bar.hidden = false; bar.value = 0; status.textContent = 'Starting…';
+    try{
+      const zip = await Z.collect(c.parts, {
+        getUrl: async p => {
+          const r = await api(`/api/remix-contests/${encodeURIComponent(c.id)}/parts/${encodeURIComponent(p.id)}/download`, { method:'POST', body:{} });
+          if(r.error || !r.data || !r.data.url) throw new Error(errText(r, 'not allowed'));
+          return r.data;
+        },
+        fetchImpl: url => W.fetch(url),
+        onProgress: ({ done, total, label }) => { bar.max = total; bar.value = done; status.textContent = done < total ? `Downloading ${done + 1} of ${total}: ${label}` : 'Packing zip…'; }
+      });
+      const name = Z.zipFileName(c.title);
+      const blob = new W.Blob([zip], { type:'application/zip' });
+      const url = W.URL && W.URL.createObjectURL ? W.URL.createObjectURL(blob) : '';
+      const a = D.createElement('a'); a.href = url; a.download = name; a.rel = 'noopener'; D.body.appendChild(a); a.click(); a.remove();
+      if(url) setTimeout(() => W.URL.revokeObjectURL(url), 60000);
+      status.textContent = `Saved ${name}`;
+    }catch(err){
+      bar.hidden = true; status.textContent = (err && err.message) || 'The zip couldn\u2019t be made.';
+      toast('Couldn\u2019t download all parts', status.textContent);
+    }finally{ btn.disabled = false; }
   }
   function wireContest(page, c){
     const $ = id => D.getElementById(id);
@@ -177,6 +204,7 @@
       if(r.error) return toast('Couldn\u2019t download', errText(r, 'Try again.'));
       const a = D.createElement('a'); a.href = r.data.url; a.download = r.data.filename || ''; a.rel = 'noopener'; D.body.appendChild(a); a.click(); a.remove();
     }; });
+    if($('rmx-zip')) $('rmx-zip').onclick = () => downloadAll(c);
     page.querySelectorAll('[data-rmx-play]').forEach(b => { b.onclick = async () => {
       const audio = Array.from(page.querySelectorAll('audio[data-rmx-audio]')).find(a => a.dataset.rmxAudio === b.dataset.rmxPlay);
       if(!audio) return;
