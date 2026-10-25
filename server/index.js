@@ -327,6 +327,18 @@ app.use((err, req, res, next) => {
 });
 app.use(AVATAR_ENRICHED_ROUTES, avatarResponseMiddleware(avatarDirectory));
 
+// Oct 20b: hoisted so the existing view routes can feed "Who's watching".
+const Crews = require('./crews');
+const Tips = require('./tips');
+const DiscountCodes = require('./discount_codes');
+const ViewInsights = require('./view_insights');
+function viewOwnHost(){ try{ return new URL(process.env.APP_PUBLIC_URL || '').hostname; }catch(e){ return ''; } }
+function logViewQuietly(req, kind, targetId, ownerUserId){
+  if(!supabaseService) return;
+  const body = req.body || {};
+  ViewInsights.logViewEvent(supabaseService, { kind, targetId, ownerUserId, referrer:typeof body.referrer === 'string' ? body.referrer.slice(0, 500) : '', ownHost:viewOwnHost(), embed:body.embed === true })
+    .then(r => { if(r && r.error) console.warn('view insight log failed', r.error && r.error.message); }).catch(() => {});
+}
 function publicViewVisitor(req){
   return {
     visitorId: req.body && req.body.visitorId || req.get('x-dj-battle-visitor') || null,
@@ -1621,7 +1633,7 @@ app.post('/api/marketplace/checkout', requireAuth, async (req, res) => {
     if(result.validationError) return res.status(422).json({ error:result.validationError });
     if(result.duplicate) return res.status(409).json({ error:'Checkout already exists for this idempotency key', order:result.order, checkout:result.checkout });
     if(result.error) throw result.error;
-    return res.status(201).json({ success:true, order:result.order, item:result.item, checkout:result.checkout, sellerAccount:result.sellerAccount });
+    return res.status(201).json({ success:true, order:result.order, item:result.item, checkout:result.checkout, sellerAccount:result.sellerAccount, discount:result.discount || null });
   }catch(err){
     console.error('marketplace checkout error', err);
     return res.status(500).json({ error:'Marketplace checkout failed' });
@@ -1660,6 +1672,15 @@ app.post('/api/marketplace/webhooks/:provider', async (req, res) => {
   if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
   try{
     const provider = marketplaceProviderAdapter(req.params.provider);
+    // Oct 20b: tips ride the same Stripe webhook; they carry metadata.kind = "tip".
+    if(req.params.provider === 'stripe' && Tips.isTipEvent(req.body)){
+      const check = Tips.verifyTipWebhook(req.rawBody || '', req.get('stripe-signature') || '');
+      if(check.unconfigured) return res.status(503).json({ error:'Marketplace payment provider webhook verification is not configured' });
+      if(!check.trusted) return res.status(400).json({ error:'Marketplace payment event verification failed' });
+      const tip = await Tips.handleTipEvent(supabaseService, req.body);
+      if(tip.error) throw tip.error;
+      return res.json({ success:true, tip:{ updated:Boolean(tip.updated), status:tip.status || null, duplicate:Boolean(tip.duplicate), unknown:Boolean(tip.unknownTip) } });
+    }
     // Stripe Connect "account.updated": keep the seller's charges/payouts status current.
     if(req.params.provider === 'stripe' && req.body && req.body.type === 'account.updated'){
       const signature = req.get('stripe-signature') || '';
@@ -2106,6 +2127,7 @@ app.post('/api/publicProfiles/:publicProfileId/views', async (req, res) => {
     if(result.notFound || result.unavailable) return res.status(404).json({ error:'Public DJ profile is unavailable' });
     if(result.rateLimited) return res.status(429).json({ success:false, rateLimited:true, retryAfterMs:result.retryAfterMs, views:result.views });
     if(result.error) throw result.error;
+    if(!result.duplicate && result.ownerUserId) logViewQuietly(req, 'profile', validation.value.publicProfileId, result.ownerUserId);
     return res.json({ success:true, duplicate:Boolean(result.duplicate), views:result.views });
   }catch(err){
     console.error('publicProfile view error', err);
@@ -2949,6 +2971,7 @@ app.post('/api/publicBattleResults/:verifiedResultId/views', async (req, res) =>
     if(result.notFound || result.unavailable) return res.status(404).json({ error:'Battle result is unavailable' });
     if(result.rateLimited) return res.status(429).json({ success:false, rateLimited:true, retryAfterMs:result.retryAfterMs, views:result.views });
     if(result.error) throw result.error;
+    if(!result.duplicate && result.ownerUserId) logViewQuietly(req, 'result', validation.value.verifiedResultId, result.ownerUserId);
     return res.json({ success:true, duplicate:Boolean(result.duplicate), views:result.views, result:result.result });
   }catch(err){
     console.error('publicBattleResult view error', err);
@@ -3678,6 +3701,130 @@ if(process.env.NODE_ENV !== 'test' && supabaseService && typeof supabaseService.
   if(sweepTimer.unref) sweepTimer.unref();
   setTimeout(sweepDeletions, 30000).unref?.();
 }
+
+/* ================= Oct 20b: crews, tips, discount codes, who's watching ================= */
+function sendOct20bResult(res, result){
+  if(result.schemaMissing) return sendSchemaMissing(res, result);
+  if(result.forbidden) return res.status(403).json({ error:'You can\u2019t do that' });
+  if(result.notFound) return res.status(404).json({ error:'Not found' });
+  if(result.validationError) return res.status(422).json({ error:result.validationError });
+  if(result.providerUnavailable) return res.status(503).json({ error:'Stripe isn\u2019t set up on the server yet', paymentsNotConfigured:true });
+  if(result.recipientUnavailable) return res.status(409).json({ error:'This DJ hasn\u2019t set up Stripe payouts yet, so they can\u2019t get tips' });
+  if(result.error) throw result.error;
+  return null;
+}
+const oct20bRoute = (label, fn) => async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{ await fn(req, res); }catch(err){ console.error(`${label} error`, err); if(!res.headersSent) res.status(500).json({ error:`${label} failed` }); }
+};
+const optionalAuthB = (req, res, next) => (req.get('Authorization') ? requireAuth(req, res, next) : next());
+// Crews
+app.get('/api/crews', optionalAuthB, oct20bRoute('Crew rankings', async (req, res) => {
+  const r = await Crews.crewRankings(supabaseService, req.authUser && req.authUser.id, Number(req.query.limit) || 50);
+  if(sendOct20bResult(res, r)) return; res.json({ success:true, crews:r.crews });
+}));
+app.get('/api/crews/mine', requireAuth, oct20bRoute('My crew', async (req, res) => {
+  const r = await Crews.getMyCrew(supabaseService, req.authUser.id);
+  if(sendOct20bResult(res, r)) return; res.json({ success:true, crew:r.crew, battles:r.battles || [] });
+}));
+app.get('/api/crews/:crewId', optionalAuthB, oct20bRoute('Crew page', async (req, res) => {
+  const r = await Crews.loadCrew(supabaseService, req.params.crewId, req.authUser && req.authUser.id);
+  if(sendOct20bResult(res, r)) return;
+  const b = await Crews.listCrewBattles(supabaseService, r.row.id, req.authUser && req.authUser.id);
+  res.json({ success:true, crew:r.crew, battles:b.battles || [] });
+}));
+app.post('/api/crews', requireAuth, oct20bRoute('Create crew', async (req, res) => {
+  const r = await Crews.createCrew(supabaseService, req.authUser.id, req.body || {});
+  if(sendOct20bResult(res, r)) return; res.status(201).json({ success:true, crew:r.crew });
+}));
+app.post('/api/crews/join', requireAuth, oct20bRoute('Join crew', async (req, res) => {
+  const r = await Crews.joinCrew(supabaseService, req.authUser.id, req.body || {});
+  if(sendOct20bResult(res, r)) return; res.json({ success:true, crew:r.crew });
+}));
+app.patch('/api/crews/:crewId', requireAuth, oct20bRoute('Edit crew', async (req, res) => {
+  const r = await Crews.updateCrew(supabaseService, req.authUser.id, req.params.crewId, req.body || {});
+  if(sendOct20bResult(res, r)) return; res.json({ success:true, crew:r.crew });
+}));
+app.post('/api/crews/:crewId/leave', requireAuth, oct20bRoute('Leave crew', async (req, res) => {
+  const r = await Crews.leaveCrew(supabaseService, req.authUser.id, req.params.crewId);
+  if(sendOct20bResult(res, r)) return; res.json({ success:true, left:true, disbanded:Boolean(r.disbanded) });
+}));
+app.delete('/api/crews/:crewId/members/:publicProfileId', requireAuth, oct20bRoute('Remove crew member', async (req, res) => {
+  const r = await Crews.removeMember(supabaseService, req.authUser.id, req.params.crewId, String(req.params.publicProfileId));
+  if(sendOct20bResult(res, r)) return; res.json({ success:true, crew:r.crew });
+}));
+app.post('/api/crewBattles', requireAuth, oct20bRoute('Crew challenge', async (req, res) => {
+  const r = await Crews.challengeCrew(supabaseService, req.authUser.id, req.body || {});
+  if(sendOct20bResult(res, r)) return; res.status(201).json({ success:true, battle:r.battle });
+}));
+app.post('/api/crewBattles/:battleId/respond', requireAuth, oct20bRoute('Crew battle answer', async (req, res) => {
+  const r = await Crews.respondToCrewBattle(supabaseService, req.authUser.id, req.params.battleId, req.body || {});
+  if(sendOct20bResult(res, r)) return; res.json({ success:true, battle:r.battle });
+}));
+app.post('/api/crewBattles/:battleId/submit', requireAuth, oct20bRoute('Crew battle mix', async (req, res) => {
+  const r = await Crews.submitCrewBattleMix(supabaseService, req.authUser.id, req.params.battleId, req.body || {});
+  if(sendOct20bResult(res, r)) return; res.json({ success:true, battle:r.battle });
+}));
+// Tips
+app.get('/api/tips/config', (req, res) => res.json({ success:true, ...Tips.tipsStatus(process.env) }));
+app.get('/api/tips/eligibility/:publicProfileId', oct20bRoute('Tip check', async (req, res) => {
+  const r = await Tips.tipEligibility(supabaseService, req.params.publicProfileId);
+  if(sendOct20bResult(res, r)) return; res.json({ success:true, canTip:r.canTip, ...Tips.tipsStatus(process.env) });
+}));
+app.post('/api/tips/checkout', requireAuth, oct20bRoute('Tip checkout', async (req, res) => {
+  const r = await Tips.createTipCheckout(supabaseService, req.authUser.id, req.body || {});
+  if(sendOct20bResult(res, r)) return; res.status(201).json({ success:true, tip:r.tip, checkout:{ provider:'stripe', redirectUrl:r.redirectUrl } });
+}));
+app.get('/api/tips/mine', requireAuth, oct20bRoute('My tips', async (req, res) => {
+  const r = await Tips.listTips(supabaseService, req.authUser.id, { direction:req.query.direction === 'sent' ? 'sent' : 'received' });
+  if(sendOct20bResult(res, r)) return; res.json({ success:true, totalCents:r.totalCents, tips:r.tips });
+}));
+// Discount codes
+app.get('/api/marketplace/discountCodes', requireAuth, oct20bRoute('Discount codes', async (req, res) => {
+  const r = await DiscountCodes.listCodes(supabaseService, req.authUser.id);
+  if(sendOct20bResult(res, r)) return; res.json({ success:true, codes:r.codes });
+}));
+app.post('/api/marketplace/discountCodes', requireAuth, oct20bRoute('Create discount code', async (req, res) => {
+  const r = await DiscountCodes.createCode(supabaseService, req.authUser.id, req.body || {});
+  if(sendOct20bResult(res, r)) return; res.status(201).json({ success:true, code:r.code });
+}));
+app.patch('/api/marketplace/discountCodes/:codeId', requireAuth, oct20bRoute('Edit discount code', async (req, res) => {
+  const r = await DiscountCodes.setCodeActive(supabaseService, req.authUser.id, req.params.codeId, req.body && req.body.active !== false);
+  if(sendOct20bResult(res, r)) return; res.json({ success:true, code:r.code });
+}));
+app.post('/api/marketplace/listings/:listingId/discountPreview', oct20bRoute('Discount preview', async (req, res) => {
+  const id = String(req.params.listingId || '').slice(0, 128);
+  const l = await supabaseService.from('marketplace_listings').select('*').eq('id', id).limit(1);
+  if(l.error) throw l.error;
+  const listing = (l.data || [])[0];
+  const r = await DiscountCodes.previewDiscount(supabaseService, { listing:listing && listing.status === 'published' ? listing : null, code:req.body && req.body.code });
+  if(sendOct20bResult(res, r)) return; res.json({ success:true, preview:r.preview });
+}));
+// Who's watching
+app.post('/api/marketplace/listings/:listingId/views', oct20bRoute('Listing view', async (req, res) => {
+  const id = String(req.params.listingId || '').slice(0, 128);
+  if(!/^[A-Za-z0-9._:-]{1,128}$/.test(id)) return res.status(404).json({ error:'Not found' });
+  const l = await supabaseService.from('marketplace_listings').select('*').eq('id', id).limit(1);
+  if(l.error) throw l.error;
+  const listing = (l.data || [])[0];
+  if(!listing || listing.status !== 'published') return res.status(404).json({ error:'Not found' });
+  const visitor = String((req.body && req.body.visitorId) || req.ip || '').slice(0, 120);
+  if(rateLimitedView(`${id}:${visitor}`)) return res.json({ success:true, duplicate:true });
+  logViewQuietly(req, 'listing', id, listing.seller_user_id);
+  res.json({ success:true, duplicate:false });
+}));
+const listingViewSeen = new Map();
+function rateLimitedView(key, now = Date.now()){
+  const last = listingViewSeen.get(key);
+  if(last && now - last < 30 * 60 * 1000) return true;
+  listingViewSeen.set(key, now);
+  if(listingViewSeen.size > 20000) listingViewSeen.clear();
+  return false;
+}
+app.get('/api/insights/views', requireAuth, oct20bRoute('Who\u2019s watching', async (req, res) => {
+  const r = await ViewInsights.getInsights(supabaseService, req.authUser.id);
+  if(sendOct20bResult(res, r)) return; res.json({ success:true, insights:r.insights });
+}));
 
 // Serve the static front end (index.html, app.js, CSS) from the same origin unless SERVE_FRONTEND=false.
 if(shouldServeFrontend()) app.use(createFrontendRouter());
