@@ -32,3 +32,6 @@ If you want, I can also produce the exact `supabase` CLI commands or an automate
 - 037_add_dj_search_fields.sql — adds city, main genre and a "show me in search" switch to DJ profiles for Find DJs (apply after 036)
 - 038_create_shared_crate_tracklists.sql — creates `shared_crate_tracklists` (public crate tracklists: title, artist, BPM and key only, never audio) (apply after 037)
 - 039_create_practice_goals.sql — creates `practice_goals` (weekly practice goal per DJ, synced across devices) (apply after 038)
+- 040_create_push_subscriptions.sql — creates `push_subscriptions` (phone lock-screen alerts: one row per device, with its chosen alert types; server only) (apply after 039)
+- 041_create_result_review_requests.sql — creates `result_review_requests` ("Request a review" of a judged result) and adds the "judge finished reviewing" notification type (apply after 040)
+- 042_create_account_deletion_requests.sql — creates `account_deletion_requests` (Delete my account with a 7-day grace period) (apply after 041)

@@ -3,15 +3,17 @@
 // table: turning a type off in Settings is just a mute row for that notification type.
 const crypto = require('crypto');
 const { cleanText, profilesFor, isMissingTable } = require('./social_helpers');
+const { firePush } = require('./push_hook');
 
 const NOTIFICATIONS_TABLE = 'dj_notifications';
 const MUTES_TABLE = 'dj_notification_mutes';
-const SOCIAL_NOTIFICATION_TYPES = Object.freeze(['tournament_match_ready', 'battle_chat_message', 'timed_comment_received', 'direct_message']);
+const SOCIAL_NOTIFICATION_TYPES = Object.freeze(['tournament_match_ready', 'battle_chat_message', 'timed_comment_received', 'direct_message', 'result_review_decided']);
 const SOCIAL_NOTIFICATION_LABELS = Object.freeze({
   tournament_match_ready:'Tournament match is ready',
   battle_chat_message:'New battle chat message',
   timed_comment_received:'Someone commented on your mix',
-  direct_message:'New direct message'
+  direct_message:'New direct message',
+  result_review_decided:'A judge finished reviewing your result'
 });
 
 const hash = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -70,6 +72,7 @@ async function emitSocialNotification(dataClient, input = {}){
     };
     const inserted = await dataClient.from(NOTIFICATIONS_TABLE).insert([row]);
     if(inserted && inserted.error) return isMissingTable(inserted.error) ? { skipped:true } : { error:inserted.error };
+    await firePush(dataClient, row);
     return { created:true, notification:row };
   }catch(error){
     return { error };
