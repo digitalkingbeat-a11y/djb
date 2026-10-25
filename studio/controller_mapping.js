@@ -21,6 +21,14 @@
         { id:`eq-mid-${d}`, label:`Ch ${D} EQ Mid`, selector:`#eq-mid-${d}`, kind:'range', group:'Mixer' },
         { id:`eq-low-${d}`, label:`Ch ${D} EQ Low`, selector:`#eq-low-${d}`, kind:'range', group:'Mixer' }
       );
+      LEARN_TARGETS.push(
+        { id:`jump-back-${d}`, label:`Deck ${D} Beat Jump Back`, selector:`#deck-perf-${d} [data-beatjump="-1"]`, kind:'button', group:`Deck ${D}` },
+        { id:`jump-fwd-${d}`, label:`Deck ${D} Beat Jump Forward`, selector:`#deck-perf-${d} [data-beatjump="1"]`, kind:'button', group:`Deck ${D}` },
+        { id:`slip-${d}`, label:`Deck ${D} Slip`, selector:`#deck-perf-${d} [data-slip]`, kind:'button', group:`Deck ${D}` },
+        { id:`key-down-${d}`, label:`Deck ${D} Key Down`, selector:`#deck-perf-${d} [data-keyshift="-1"]`, kind:'button', group:`Deck ${D}` },
+        { id:`key-up-${d}`, label:`Deck ${D} Key Up`, selector:`#deck-perf-${d} [data-keyshift="1"]`, kind:'button', group:`Deck ${D}` }
+      );
+      ['0.125','0.25','0.5','1'].forEach(f => LEARN_TARGETS.push({ id:`roll-${d}-${f}`, label:`Deck ${D} Loop Roll ${f === '1' ? '1' : '1/' + Math.round(1 / Number(f))} (hold)`, selector:`#deck-perf-${d} [data-roll="${f}"]`, kind:'hold', group:`Deck ${D}` }));
       [0,1,2,3].forEach(slot => LEARN_TARGETS.push({ id:`hotcue-${d}-${slot + 1}`, label:`Deck ${D} Hot Cue ${slot + 1}`, selector:`#hotcue-pads-${d} [data-hotcue-pad="${slot}"]`, kind:'button', group:`Deck ${D}` }));
     });
     LEARN_TARGETS.push({ id:'xfader', label:'Crossfader', selector:'#xfader', kind:'range', group:'Mixer' });
@@ -108,6 +116,15 @@
         return { ok:true, value:Number(el.value) };
       }
       const pressed = msg.type === 'note' ? msg.on : msg.value >= 64;
+      if(target.kind === 'hold'){
+        // Hold controls (loop roll pads): press starts, release lets go.
+        const Ev = win.Event || global.Event;
+        const type = pressed ? 'pointerdown' : 'pointerup';
+        const handler = el['on' + type];
+        if(typeof handler === 'function') handler.call(el, { type, preventDefault(){} });
+        else el.dispatchEvent(new Ev(type, { bubbles:true }));
+        return { ok:true, held:pressed };
+      }
       if(!pressed) return { ok:true, ignored:true };
       el.click();
       return { ok:true, clicked:true };

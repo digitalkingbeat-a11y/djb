@@ -40,9 +40,25 @@
       }
     }
 
+    // Oct 25: All / Favourites / Recently played filter for the Studio browser (My Library source).
+    function renderPrefsFilter(out){
+      if(!deps.filterByTrackPrefs) return;
+      const table = out.closest ? out.closest('.table-wrap') : null;
+      if(!table || !table.parentNode) return;
+      let bar = doc.getElementById('studio-prefs-filter');
+      if(!bar){ bar = doc.createElement('div'); bar.id = 'studio-prefs-filter'; bar.className = 'studio-prefs-filter'; bar.setAttribute('role', 'group'); bar.setAttribute('aria-label', 'Show tracks'); table.parentNode.insertBefore(bar, table); }
+      const mode = state.studioPrefsFilter || 'all';
+      const chip = (id, label) => `<button type="button" class="ghost small ${mode === id ? 'active' : ''}" data-prefs-filter="${id}" aria-pressed="${mode === id ? 'true' : 'false'}">${label}</button>`;
+      bar.innerHTML = chip('all', 'All') + chip('favourites', '★ Favourites') + chip('recent', 'Recently played') + '<button type="button" class="text-btn small" data-new-set title="Clear the ✓ Played marks and start a new set">New set</button>';
+      bar.querySelectorAll('[data-prefs-filter]').forEach(b => b.onclick = () => { state.studioPrefsFilter = b.dataset.prefsFilter; try{ win.localStorage && win.localStorage.setItem('djBattleStudioPrefsFilter', state.studioPrefsFilter); }catch(e){} renderLibrary(doc.getElementById('studio-search') ? doc.getElementById('studio-search').value : ''); });
+      const ns = bar.querySelector('[data-new-set]'); if(ns) ns.onclick = () => { if(deps.newTrackSet) deps.newTrackSet(); renderLibrary(doc.getElementById('studio-search') ? doc.getElementById('studio-search').value : ''); };
+    }
+
     function renderLibrary(filterQ){
       const out = doc.getElementById('studio-library-table');
       if(!out) return;
+      if(state.studioPrefsFilter == null){ try{ state.studioPrefsFilter = win.localStorage && win.localStorage.getItem('djBattleStudioPrefsFilter') || 'all'; }catch(e){ state.studioPrefsFilter = 'all'; } }
+      renderPrefsFilter(out);
       const q = String(filterQ || '').toLowerCase();
       const source = state.studioLibrarySource || 'MY_LIBRARY';
       renderSourcePanels(source);
@@ -58,11 +74,14 @@
             ? { ...deps.normalizedDeckRecord(row.track), libraryId:row.track.libraryId, _sourceTrack:row.track, source:row.playlist, compatibility:'Playlist order' }
             : { ...row, source:row.playlist || row.source, compatibility:row.access || 'Metadata only', metadataOnly:true });
       }else{
-        rows = deps.allLibraryTracks()
+        const pool = deps.filterByTrackPrefs ? deps.filterByTrackPrefs(deps.allLibraryTracks(), state.studioPrefsFilter || 'all') : deps.allLibraryTracks();
+        rows = pool
           .filter(track => !q || deps.matchesLibrarySearch(track, q))
           .map(track => ({ ...deps.normalizedDeckRecord(track), libraryId:track.libraryId, _sourceTrack:track, compatibility:deps.compatibleTracksFor(track).length ? 'Compatible matches' : 'Ready' }));
       }
       if(!rows.length){
+        const pm = state.studioPrefsFilter || 'all';
+        if(source !== 'STREAMING' && source !== 'PLAYLISTS' && pm !== 'all'){ out.innerHTML = `<tr><td colspan="10"><small>${pm === 'favourites' ? 'No favourites yet. Tap ☆ next to a track to star it.' : 'Nothing played yet. Tracks you play on a deck show up here.'}</small></td></tr>`; win._studioRows = rows; return; }
         out.innerHTML = `<tr><td colspan="10"><small>No ${source === 'STREAMING' ? 'streaming metadata' : source === 'PLAYLISTS' ? 'playlist tracks' : 'authorized library tracks'} found.</small></td></tr>`;
         win._studioRows = rows;
         return;
@@ -76,7 +95,7 @@
         return `<tr data-studio-idx="${idx}">
       <td class="studio-load-cell">${loadCell}</td>
       <td>${r._sourceTrack ? deps.artworkMarkup(r._sourceTrack) : '<div class="library-art">MD</div>'}</td>
-      <td><strong>${esc(r.title)}</strong><small>${r._sourceTrack ? (eligibilityA.allowed || eligibilityB.allowed ? 'Audio available from library' : esc(eligibilityA.reason)) : 'Metadata / playlist access only'}</small></td>
+      <td>${r.libraryId && r._sourceTrack && deps.trackStarHtml ? deps.trackStarHtml(r.libraryId) : ''}<strong>${esc(r.title)}</strong>${r.libraryId && r._sourceTrack && deps.trackPrefsTitleExtras ? deps.trackPrefsTitleExtras(r.libraryId) : ''}<small>${r._sourceTrack ? (eligibilityA.allowed || eligibilityB.allowed ? 'Audio available from library' : esc(eligibilityA.reason)) : 'Metadata / playlist access only'}</small></td>
       <td>${esc(r.artist)}</td>
       <td>${esc(r.bpm)}</td>
       <td>${r._sourceTrack ? deps.keyBadgeHtml(r.key) : esc(r.key)}</td>
@@ -96,6 +115,7 @@
       });
       out.querySelectorAll('[data-import-stream]').forEach(button => button.onclick = () => deps.importStreamingMetadataRow(rows[Number(button.dataset.importStream)]));
       win._studioRows = rows;
+      if(deps.wireTrackStars) deps.wireTrackStars(out, () => renderLibrary(filterQ));
       out.querySelectorAll('tr[data-studio-idx]').forEach(row => row.ondblclick = () => {
         const rec = rows[Number(row.dataset.studioIdx)];
         if(rec && rec.libraryId) deps.loadLibraryTrackToDeck(rec.libraryId, deps.getFocusedDeck());

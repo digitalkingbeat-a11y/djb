@@ -149,6 +149,7 @@ const {
   removeLibraryArtwork,
   issueLibraryPlaybackAccess,
   recordLibraryTrackUsage,
+  updateLibraryTrackPrefs,
   setLibraryCrateMemberships
 } = require('./music_library');
 const {
@@ -1251,6 +1252,23 @@ app.post('/api/musicLibrary/tracks/:trackId/playbackAccess', requireAuth, async 
   }catch(err){
     console.error('musicLibrary playback error', err);
     return res.status(500).json({ error:'Music library playback access failed' });
+  }
+});
+
+// Oct 25 Studio: private favourite / note / play count for one of your own library tracks.
+app.post('/api/musicLibrary/tracks/:trackId/prefs', requireAuth, async (req, res) => {
+  const validation = validateRouteIdentifier(req.params.trackId, 'trackId');
+  if(validation.error) return rejectProtectedWriteError(res, validation);
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const result = await updateLibraryTrackPrefs(supabaseService, req.authUser.id, validation.value.trackId, req.body || {});
+    if(result.forbidden) return res.status(403).json({ error:'Cannot change another user\'s library track' });
+    if(result.unavailable) return res.status(404).json({ error:'Library track is unavailable' });
+    if(result.error) throw result.error;
+    return res.json({ success:true, prefs:result.prefs });
+  }catch(err){
+    console.error('musicLibrary prefs error', err);
+    return res.status(500).json({ error:'Music library prefs update failed' });
   }
 });
 

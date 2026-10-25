@@ -68,3 +68,34 @@
 .studio-grid.mobile-show-deckb .deck-left,.studio-grid.mobile-show-deckb .deck-left ~ *{display:none}
 .studio-controls-mobile{display:none}
 @media(max-width:900px){.studio-controls-mobile{display:flex;gap:8px;margin-bottom:8px}.studio-grid{grid-template-columns:1fr!important}}
+
+/* Oct 25 Studio: beat jump, loop roll pads, slip, key shift */
+.deck-perf{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin-top:8px}
+.deck-perf-group{display:flex;align-items:center;gap:4px}
+.deck-perf-label{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.deck-perf select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-size:12px;min-height:32px}
+.deck-perf output{min-width:2.2em;text-align:center;font-variant-numeric:tabular-nums;font-weight:700;color:var(--text)}
+.deck-perf [data-slip].active{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+.deck-perf [data-slip].slipping{box-shadow:0 0 0 2px var(--accent2)}
+.roll-pad{min-width:44px;min-height:40px;padding:4px 8px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-weight:700;font-size:12px;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;cursor:pointer}
+.roll-pad.active{background:var(--accent2);color:var(--accent-text);border-color:var(--accent2)}
+.roll-pad:disabled{opacity:.45;cursor:not-allowed}
+.keyshift-tag{font-size:11px;font-weight:700;color:var(--accent2);margin-left:4px}
+/* Favourites, notes, play counts */
+.tp-star{background:none;border:0;padding:0 6px 0 0;font-size:16px;line-height:1;color:var(--muted);cursor:pointer;min-width:24px;min-height:24px;vertical-align:middle}
+.tp-star.on{color:#e8a400}
+.tp-plays,.tp-played,.tp-note-flag{display:inline-block;margin-left:6px;font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;border:1px solid var(--line);color:var(--muted);vertical-align:middle}
+.tp-played{color:var(--accent);border-color:var(--accent)}
+.tp-note-flag{border:0;padding:0}
+.studio-prefs-filter{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.studio-prefs-filter .active{border-color:var(--accent);color:var(--accent)}
+.track-note-editor{margin-top:12px;display:grid;gap:6px}
+.track-note-row{display:flex;align-items:center;gap:6px;color:var(--muted)}
+.track-note-editor textarea{width:100%;box-sizing:border-box;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px;font:inherit;font-size:13px;resize:vertical}
+.track-note-status{color:var(--muted);min-height:1em}
+@media (max-width:760px){
+  .deck-perf{gap:8px}
+  .deck-perf .ghost.small,.deck-perf select{min-height:40px;min-width:40px}
+  .roll-pad{min-width:48px;min-height:48px;font-size:14px}
+  .tp-star{min-width:36px;min-height:36px;font-size:20px}
+}
