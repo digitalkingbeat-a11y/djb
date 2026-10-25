@@ -1510,6 +1510,7 @@ function switchView(view, options = {}){
   if(window.DJBConnect) window.DJBConnect.onView(view);
   if(window.DJBOct20) window.DJBOct20.onView(view);
   if(window.DJBOct20b) window.DJBOct20b.onView(view);
+  if(window.DJBPasskeys) window.DJBPasskeys.onView(view);
   window.scrollTo({top:0,behavior:'smooth'});
   return true;
 }

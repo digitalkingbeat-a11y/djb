@@ -534,8 +534,9 @@
     const supabaseState = { ready:true, configured:Boolean(window.SUPABASE_URL && window.SUPABASE_ANON_KEY), client:false, error:'' };
     if(supabaseState.configured){
       try{
-        const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
-        window.supabase = createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+        const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/+esm');
+        // Passkeys (fingerprint / Face ID sign-in) are Supabase's experimental WebAuthn API: it needs supabase-js 2.105+ and this opt-in.
+        window.supabase = createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY, { auth:{ experimental:{ passkey:true } } });
         supabaseState.client = true;
       }catch(e){ console.warn('Supabase init failed', e); supabaseState.error = String(e && e.message || e); }
     }
@@ -573,6 +574,7 @@
   <script src="connect.js"></script>
   <script src="oct20.js"></script>
   <script src="oct20b.js"></script>
+  <script src="passkeys.js"></script>
   <script>
     // Wire timing analysis to create practice events from loaded audio.
     const timingInspectorButton = document.getElementById('hc-run-timing');

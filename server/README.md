@@ -194,3 +194,22 @@ Until a file is run, the matching feature shows a friendly "needs setup" message
 - **Discount codes.** Beat Store → Your beats → Discount codes: a code like `BATTLE20` for a percent off (1–90%) or a dollar amount off, with an optional end date and usage limit; codes can be turned off and on. Buyers tap "Have a code?" on a beat, see the new price, and Stripe charges the discounted price. The server works out the discount itself (never trusting the browser) and the price can't go below $0.50. `GET`/`POST /api/marketplace/discountCodes`, `PATCH /api/marketplace/discountCodes/:id`, `POST /api/marketplace/listings/:id/discountPreview`, and `discountCode` on `POST /api/marketplace/checkout`.
 - **Who's watching.** Profile → "Who's watching": views this week of your public profile, public battle results and Beat Store beats, the trend vs last week, an 8-week chart and where visitors came from (Instagram, TikTok, search, direct…). It uses the existing view counters (`/api/publicProfiles/:id/views`, `/api/publicBattleResults/:id/views`) plus a new `POST /api/marketplace/listings/:id/views` (a beat counts as viewed when it's shown in the Store, once per visitor per 30 minutes). Only a rough source bucket is stored, never the visitor's IP, device or id. Views from before 046 is run aren't in the chart. `GET /api/insights/views`.
 - **Beatmatching lessons.** Battle Studio → Learn. Runs entirely in the browser with synthesized sound (no audio files, nothing to license); see the main README. No setup.
+
+## Passkeys
+
+DJs can sign in with a fingerprint, Face ID or their phone's screen lock instead of waiting for an email link. The email magic link keeps working for everyone and is always the fallback.
+
+**How it works:** this uses Supabase Auth's own passkey (WebAuthn) support. Supabase stores the passkeys, checks them and creates the sign-in session, so the DJ Battle server needs **no new code, no new environment variables and no new SQL** for this. The browser talks to Supabase directly (`supabase-js` 2.112.3, with `auth.experimental.passkey` switched on in `index.html`). Supabase marks passkeys as *experimental*, so the API could change in a later release.
+
+**One-time setup in the Supabase dashboard:**
+
+1. Open your project → **Authentication → Passkeys** and turn on **Enable Passkey authentication**.
+2. Fill in the WebAuthn details:
+   - **Relying Party Display Name:** `DJ Battle`
+   - **Relying Party ID:** the bare domain the app runs on, with no `https://` and no path. For the GitHub Pages site that is `digitalkingbeat-a11y.github.io`. If you move the app to your own domain later, use that domain instead.
+   - **Relying Party Origins:** every address the app is opened from, comma-separated (up to 5), for example `https://digitalkingbeat-a11y.github.io,http://localhost:8080`. Origins have no path (not `/djb`). Each one must be on the Relying Party ID domain, except `localhost` for testing.
+3. Save. Nothing needs redeploying.
+
+**Important:** passkeys are locked to the Relying Party ID. If you change it later (for example when moving to a custom domain), every existing passkey stops working and DJs need to add a new one under Settings → Security (their email link still works in the meantime). It's best to pick the final domain before many DJs add passkeys.
+
+**Where DJs find it:** Settings → Security → *Add a passkey on this device* (must be signed in with the email link first). The list shows each passkey's device name, the date it was added and when it was last used, with Rename and Remove. The sign-in window shows **Sign in with passkey** only in browsers that support it. It works in the installed phone app (home-screen app) on iPhone and Android, because the passkey belongs to the site's domain.
