@@ -41,3 +41,4 @@ If you want, I can also produce the exact `supabase` CLI commands or an automate
 - 046_create_view_events.sql — creates `view_events` ("Who's watching" weekly views and sources; stores no visitor details) (apply after 045)
 - 047_add_discount_code_reservations.sql — a discount code use now only counts after Stripe confirms payment (held while the buyer is on the checkout page, given back if it expires or fails) (apply after 046)
 - 048_create_dj_invites.sql — creates `dj_invite_codes` and `dj_invite_joins` (personal invite-a-friend links with join counts) and adds the "A friend joined from your invite" notification type (apply after 047)
+- 049_create_remix_contests.sql — creates `remix_contests`, `remix_contest_entries` and `remix_contest_votes` (remix contests with crowd voting), lets contests and remixes be reported, and adds the "Your remix won" / "Sell your winning remix?" notification types (apply after 048)

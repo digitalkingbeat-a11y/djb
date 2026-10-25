@@ -1051,7 +1051,9 @@ async function toggleCommunityReaction(dataClient, userId, input = {}, now = new
 const EXTRA_REPORT_TARGETS = {
   battle_chat_message:(dataClient, userId, id) => require('./battle_chat').chatMessageReportTarget(dataClient, userId, id),
   timed_comment:(dataClient, userId, id) => require('./timed_comments').timedCommentReportTarget(dataClient, userId, id),
-  direct_message:(dataClient, userId, id) => require('./connect').directMessageReportTarget(dataClient, userId, id)
+  direct_message:(dataClient, userId, id) => require('./connect').directMessageReportTarget(dataClient, userId, id),
+  remix_contest:(dataClient, userId, id) => require('./remix_contests').contestReportTarget(dataClient, userId, id),
+  remix_entry:(dataClient, userId, id) => require('./remix_contests').entryReportTarget(dataClient, userId, id)
 };
 
 async function reportCommunityTarget(dataClient, userId, input = {}, now = new Date()){
