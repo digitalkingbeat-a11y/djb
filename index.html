@@ -29,7 +29,7 @@
   <meta name="twitter:description" content="Battle other DJs, get AI-judged scores and climb the rankings." />
   <meta name="twitter:image" content="assets/og-image.png" />
   <title>DJ Battle — Battle Studio</title>
-  <link rel="stylesheet" href="styles.bundle.25aeef0944.css" />
+  <link rel="stylesheet" href="styles.bundle.96c267c8bd.css" />
   <style>
     /* Ensure battle meta has 4 columns for additional metadata */
     .battle-meta{grid-template-columns:repeat(4,1fr) !important}
@@ -285,7 +285,7 @@
       </section>
 
       <section id="library" class="view">
-        <div class="toolbar"><div><span class="eyebrow">CENTRAL DJ LIBRARY</span><h2>My Music</h2><p>Upload once, then reuse the track in your profile, forum posts, own-selection battles and Battle Studio. <span class="dd-hint">Tip: drag audio files here to upload.</span></p></div><label class="primary file-button">＋ Upload Tracks<input type="file" id="library-upload" accept="audio/*" multiple hidden></label></div>
+        <div class="toolbar"><div><span class="eyebrow">CENTRAL DJ LIBRARY</span><h2>My Music</h2><p>Upload once, then reuse the track in your profile, forum posts, own-selection battles and Battle Studio. <span class="dd-hint">Tip: drag audio files here to upload.</span></p></div><div class="library-head-actions"><button class="ghost" type="button" id="library-import-dj-software" title="Bring in playlists, BPMs, keys and cue points from Rekordbox (XML) or Serato (.crate)">Import from Rekordbox / Serato</button><label class="primary file-button">＋ Upload Tracks<input type="file" id="library-upload" accept="audio/*" multiple hidden></label></div></div>
         <div class="storage"><span>Local storage tier</span><div class="progress"><i id="storage-progress" style="width:0%"></i></div><strong id="storage-label">0 / 5 tracks</strong></div>
         <div id="library-sync-status" class="library-sync-status offline"><span></span><strong>OFFLINE CACHE</strong><small>Local mode</small></div>
         <div class="music-library-workstation" id="music-library-workstation">
@@ -551,12 +551,13 @@
   <script src="studio/controller_mapping.83d34c3c68.js"></script>
   <script src="studio/audio_setup.25b83d1b96.js"></script>
   <script src="studio/streaming.38e7817992.js"></script>
-  <script src="studio/playlist_transfer.b366f21f26.js"></script>
+  <script src="studio/playlist_transfer.0fb282f69c.js"></script>
   <script src="studio/studio_browser.d52839162b.js"></script>
   <script src="studio/deck_runtime.9841153da3.js"></script>
-  <script src="app.773d6e5e90.js"></script>
-  <script src="social.42d3a80c97.js"></script>
+  <script src="app.74941bb283.js"></script>
+  <script src="social.ff4c8bafc4.js"></script>
   <script src="connect.c14e239b8e.js"></script>
+  <script src="oct20.cbedc4eb0e.js"></script>
   <script>
     // Wire timing analysis to create practice events from loaded audio.
     const timingInspectorButton = document.getElementById('hc-run-timing');

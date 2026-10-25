@@ -2,7 +2,7 @@
 // offline page instead of a blank screen. API, auth and any cross-origin (Supabase) traffic is
 // never cached. CACHE_VERSION is stamped by `npm run build` (scripts/stamp-sw-version.js) from a
 // hash of every shell file, so each change ships a new worker and the app shows "Update ready".
-const CACHE_VERSION = 'djb-shell-324453d0c5d1';
+const CACHE_VERSION = 'djb-shell-696c8a4cb13f';
 const CACHE_PREFIX = 'djb-shell-';
 const OFFLINE_URL = 'offline.html';
 const SHELL_FILES = [
@@ -10,20 +10,21 @@ const SHELL_FILES = [
   './',
   'index.html',
   'manifest.webmanifest',
-  'styles.bundle.25aeef0944.css',
+  'styles.bundle.96c267c8bd.css',
   'api_client.20bb2c98c3.js',
   'submission_upload.85e64f5894.js',
   'battle_modes.6bd2a08bd2.js',
-  'app.773d6e5e90.js',
-  'social.42d3a80c97.js',
+  'app.74941bb283.js',
+  'social.ff4c8bafc4.js',
   'connect.c14e239b8e.js',
+  'oct20.cbedc4eb0e.js',
   'window.js',
   'studio/studio_pro.c4196939dd.js',
   'studio/studio_recording.27debd0b4a.js',
   'studio/controller_mapping.83d34c3c68.js',
   'studio/audio_setup.25b83d1b96.js',
   'studio/streaming.38e7817992.js',
-  'studio/playlist_transfer.b366f21f26.js',
+  'studio/playlist_transfer.0fb282f69c.js',
   'studio/studio_browser.d52839162b.js',
   'studio/deck_runtime.9841153da3.js',
   'assets/favicon.svg',
@@ -60,6 +61,15 @@ function cacheableResponse(response){
   return Boolean(response && response.ok && response.status === 200 && response.type === 'basic' && !/no-store/i.test(response.headers.get('cache-control') || ''));
 }
 
+// Only in-app links (./#view) may be opened from an alert.
+function safePushUrl(url){ return /^\.\/#[a-z-]{1,40}$/.test(String(url || '')) ? url : './'; }
+function parsePushData(data){
+  let raw = {};
+  try{ raw = data && typeof data.json === 'function' ? data.json() : JSON.parse(String(data || '{}')); }catch(e){ raw = {}; }
+  const text = (v, max, d) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : d);
+  return { title:text(raw.title, 80, 'DJ Battle'), body:text(raw.body, 120, 'Tap to open DJ Battle'), tag:text(raw.tag, 60, 'djb'), url:safePushUrl(raw.url) };
+}
+
 if(typeof self !== 'undefined' && typeof self.addEventListener === 'function'){
   self.addEventListener('install', event => {
     event.waitUntil(caches.open(CACHE_VERSION)
@@ -77,6 +87,23 @@ if(typeof self !== 'undefined' && typeof self.addEventListener === 'function'){
     event.waitUntil(caches.keys()
       .then(names => Promise.all(names.filter(isOldShellCache).map(name => caches.delete(name))))
       .then(() => self.clients.claim()));
+  });
+
+  // Oct 20: lock-screen alerts. The server only sends a short title (never message text).
+  self.addEventListener('push', event => {
+    const data = parsePushData(event && event.data);
+    event.waitUntil(self.registration.showNotification(data.title, {
+      body:data.body, tag:data.tag, renotify:true, icon:'assets/icon-192.png', badge:'assets/favicon-64.png', data:{ url:data.url }
+    }));
+  });
+  self.addEventListener('notificationclick', event => {
+    event.notification.close();
+    const target = new URL(safePushUrl(event.notification.data && event.notification.data.url), self.registration.scope).href;
+    event.waitUntil(self.clients.matchAll({ type:'window', includeUncontrolled:true }).then(list => {
+      const open = list.find(c => c.url.split('#')[0] === target.split('#')[0]);
+      if(open){ if('navigate' in open) open.navigate(target).catch(() => {}); return open.focus(); }
+      return self.clients.openWindow(target);
+    }));
   });
 
   self.addEventListener('fetch', event => {
@@ -102,5 +129,5 @@ if(typeof self !== 'undefined' && typeof self.addEventListener === 'function'){
 }
 
 if(typeof module !== 'undefined' && module.exports){
-  module.exports = { CACHE_VERSION, CACHE_PREFIX, OFFLINE_URL, SHELL_FILES, isNeverCached, isShellPath, isSameOrigin, isOldShellCache, cacheableResponse };
+  module.exports = { CACHE_VERSION, CACHE_PREFIX, OFFLINE_URL, SHELL_FILES, isNeverCached, isShellPath, isSameOrigin, isOldShellCache, cacheableResponse, safePushUrl, parsePushData };
 }
