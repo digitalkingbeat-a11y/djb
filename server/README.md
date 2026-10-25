@@ -115,3 +115,24 @@ How it works:
 - **Tournament wins.** `GET /api/me/tournaments` (how far you got in each), `GET /api/publicProfiles/:publicProfileId/tournaments` and `GET /api/tournamentChampions` (trophies in Rankings). No extra SQL.
 
 No new environment variables are needed.
+
+## Direct messages, Find DJs, live watching, shared tracklists and weekly goals (Oct 19c)
+
+Run these in the Supabase SQL editor, in order (after 034–035 above), then redeploy the server:
+
+- `server/sql/036_create_direct_messages.sql` — the `direct_messages` table, reporting for messages, and the "New direct message" notification type
+- `server/sql/037_add_dj_search_fields.sql` — city, main genre and a "show me in search" switch on DJ profiles
+- `server/sql/038_create_shared_crate_tracklists.sql` — public crate tracklists (title, artist, BPM and key only)
+- `server/sql/039_create_practice_goals.sql` — one weekly practice goal per DJ
+
+Until a file is run, the matching feature shows a friendly "needs setup" message instead of failing.
+
+How it works:
+
+- **Direct messages.** `GET /api/messages` (your conversations with unread counts), `GET /api/messages/:publicProfileId` (one conversation; marks it read), `POST /api/messages/:publicProfileId` with `{ body }` (up to 1000 characters, 10 per 30 s), `DELETE /api/messages/item/:messageId` (unsend your own). A block either way hides the conversation and stops sending. Muting a DJ keeps their messages but silences the Activity bell. Messages can be reported with `targetType: "direct_message"` by the person who received them.
+- **Find DJs.** `GET /api/djs/search?q=&city=&genre=&belt=` (public, up to 50 results; private profiles, DJs who turned search off and blocked DJs are left out). `PUT /api/me/searchProfile` with `{ hometown, genre, searchable }`. Follow and Challenge use the existing endpoints.
+- **Watch live.** `GET /api/liveBattles` and `GET /api/battles/:battleId/live` (public): each DJ's status, the watching count and a read-only copy of battle chat. Fans' browsers send `POST /api/battles/:battleId/watch` with a random viewer key every 20 s; the count is kept in server memory for 45 s, so it resets if the server restarts. Crowd voting (028) opens as soon as the battle finishes; fans vote with `POST /api/battles/:battleId/live/vote` and `{ publicProfileId }`, so the live page never sees auth user ids. Battle chat now tells DJs that fans can read it.
+- **Shared tracklists.** `POST /api/sharedCrates` with `{ name, crateId, tracks:[{ title, artist, bpm, key }] }`; any other field (audio, artwork, file names, links) is dropped. `GET /api/sharedCrates/:id` (public), `GET /api/sharedCrates` (yours), `DELETE /api/sharedCrates/:id` (stop sharing). "Copy to my library" saves the tracks as a to-find list in that browser; it never copies audio.
+- **Weekly goals.** `GET`/`PUT /api/practiceGoal` with `{ sessionsPerWeek }` (0–21; 0 turns it off). Progress comes from the practice log and resets every Monday; each week you hit the goal adds to your goal streak.
+
+No new environment variables are needed.
