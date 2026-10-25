@@ -72,6 +72,11 @@ html[data-theme="light"] .wave .beat-division{background:#e5f0f3}
 html[data-theme="light"] .wave .hotcue{border:1px solid #e2c3c6}
 html[data-theme="light"] .level-meter{background:#f1f5f8;border:1px solid #c7d5e4}
 html[data-theme="light"] .level-meter .seg{background:#f1f7f8}
+html[data-theme="light"] .deck-perf [data-slip].active{color:var(--accent-text)}
+html[data-theme="light"] .roll-pad.active{color:var(--accent-text)}
+html[data-theme="light"] .keyshift-tag{color:var(--accent-text)}
+html[data-theme="light"] .tp-played{color:var(--accent-text)}
+html[data-theme="light"] .studio-prefs-filter .active{color:var(--accent-text)}
 /* music-library.css */
 html[data-theme="light"] .library-panel{background:linear-gradient(180deg,#f0f3f6,#f3f5f8);border:1px solid #c5cdd7}
 html[data-theme="light"] .library-crates>button{border:1px solid #c6ced9;background:#edf1f6;color:#242c36}

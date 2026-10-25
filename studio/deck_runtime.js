@@ -36,6 +36,18 @@
     let cueBus = null;
     let headphone = { deviceId:'', status:'' };
     const detectedBpm = { a:null, b:null };
+    // Oct 25 Studio: beat jump, loop roll, slip mode, key shift and play counts.
+    const perf = () => deps.deckPerf || win.DJBattleDeckPerf || global.DJBattleDeckPerf || null;
+    const jumpSize = { a:4, b:4 };
+    const slipOn = { a:false, b:false };
+    const slipState = { a:null, b:null };
+    const rolls = { a:null, b:null };
+    const keyShift = { a:0, b:0 };
+    const shifters = { a:null, b:null };
+    const baseKey = { a:'', b:'' };
+    const playCounted = { a:false, b:false };
+    const pointerCue = { a:false, b:false };
+    const perfNow = () => (win.performance && win.performance.now ? win.performance.now() : now());
     const isJsdom = () => /jsdom/i.test(win && win.navigator && win.navigator.userAgent || '');
 
     function isValidDeck(deck){
@@ -321,7 +333,7 @@
       tickHandle = null;
       try{
         updateMeters();
-        ['a','b'].forEach(deck => { enforceLoop(deck); updatePlayhead(deck); });
+        ['a','b'].forEach(deck => { enforceLoop(deck); tickSlip(deck); updatePlayhead(deck); });
       }catch(e){}
       if(audioCtx) startTick();
     }
@@ -554,7 +566,9 @@
       if(loops[deck]) return exitLoop(deck);
       const audio = deckAudio(deck);
       const start = audio ? Number(audio.currentTime) || 0 : 0;
-      return setLoop(deck, Math.round(start * 1000) / 1000);
+      const r = setLoop(deck, Math.round(start * 1000) / 1000);
+      if(r.ok && slipOn[deck]) slipBegin(deck, 'loop');
+      return r;
     }
 
     function exitLoop(deckInput){
@@ -562,6 +576,7 @@
       loops[deck] = null;
       renderLoopRegion(deck);
       updateDeckButtons(deck);
+      if(slipState[deck] && slipState[deck].reason === 'loop') slipEnd(deck);
       return { ok:true, deck, loop:null };
     }
 
@@ -578,9 +593,209 @@
       return false;
     }
 
+
+    // ---- Oct 25: beat jump, loop roll, slip mode, key shift ----
+    function deckDuration(deck){ const a = deckAudio(deck); return a && a.duration > 0 && isFinite(a.duration) ? a.duration : 0; }
+    // The app has no beat-grid analysis yet, so the first beat is 0:00 unless the track carries firstBeat (seconds).
+    function firstBeat(deck){
+      const loaded = state.studioDecks && state.studioDecks[deck] || {};
+      const track = loaded.trackId && deps.getLibraryTrackById ? deps.getLibraryTrackById(loaded.trackId) : null;
+      const v = Number(loaded.firstBeat != null ? loaded.firstBeat : track && track.firstBeat);
+      return v > 0 ? v : 0;
+    }
+    function deckRate(deck){ const a = deckAudio(deck); const r = a && Number(a.playbackRate); return r > 0 ? r : 1; }
+    function seek(deck, t){ const a = deckAudio(deck); if(a){ try{ a.currentTime = Math.max(0, t); }catch(e){} } }
+
+    function slipBegin(deckInput, reason){
+      const deck = validDeck(deckInput);
+      const P = perf(); const audio = deckAudio(deck);
+      if(!P || !audio) return null;
+      if(slipState[deck]) return slipState[deck];
+      slipState[deck] = { ...P.createSlip(Number(audio.currentTime) || 0, perfNow()), reason:reason || 'slip', playing:!audio.paused };
+      updatePerfButtons(deck);
+      return slipState[deck];
+    }
+    function tickSlip(deck){
+      const st = slipState[deck]; const P = perf(); const audio = deckAudio(deck);
+      if(!st || !P || !audio) return null;
+      return P.advanceSlip(st, perfNow(), deckRate(deck), !audio.paused, deckDuration(deck));
+    }
+    function slipPosition(deckInput){ const deck = validDeck(deckInput); return slipState[deck] ? tickSlip(deck) : null; }
+    function slipEnd(deckInput){
+      const deck = validDeck(deckInput);
+      if(!slipState[deck]) return { ok:false, deck };
+      const pos = tickSlip(deck);
+      slipState[deck] = null;
+      if(pos != null) seek(deck, pos);
+      updatePerfButtons(deck);
+      return { ok:true, deck, resumedAt:pos };
+    }
+    function toggleSlip(deckInput, force){
+      const deck = validDeck(deckInput);
+      slipOn[deck] = force == null ? !slipOn[deck] : Boolean(force);
+      if(!slipOn[deck] && slipState[deck] && slipState[deck].reason !== 'roll') slipState[deck] = null;
+      updatePerfButtons(deck);
+      return { ok:true, deck, slip:slipOn[deck] };
+    }
+    function setJumpSize(deckInput, beats){
+      const deck = validDeck(deckInput); const b = Number(beats);
+      const P = perf();
+      if(!P || !P.JUMP_SIZES.includes(b)) return { ok:false, error:'Beat jump size must be 1, 4, 8 or 16 beats.' };
+      jumpSize[deck] = b; updatePerfButtons(deck);
+      return { ok:true, deck, beats:b };
+    }
+    function beatJump(deckInput, beats){
+      const deck = validDeck(deckInput);
+      const P = perf(); const audio = deckAudio(deck); const bpm = trackBpm(deck);
+      if(!P || !audio) return { ok:false, deck, error:'Load a track first.' };
+      if(!bpm) return { ok:false, deck, error:'Add BPM to this track to use beat jump.' };
+      const from = Number(audio.currentTime) || 0;
+      const target = P.beatJumpTarget(from, Number(beats), bpm, deckDuration(deck), firstBeat(deck));
+      if(target == null) return { ok:false, deck, error:'Could not jump.' };
+      if(loops[deck] && !rolls[deck]){ const shift = target - from; loops[deck] = { ...loops[deck], start:loops[deck].start + shift, end:loops[deck].end + shift }; renderLoopRegion(deck); }
+      seek(deck, target);
+      return { ok:true, deck, from, to:target, beats:Number(beats) };
+    }
+    function rollStart(deckInput, fraction){
+      const deck = validDeck(deckInput);
+      const P = perf(); const audio = deckAudio(deck); const bpm = trackBpm(deck);
+      if(!P || !audio) return { ok:false, deck, error:'Load a track first.' };
+      if(!bpm) return { ok:false, deck, error:'Add BPM to this track to use loop rolls.' };
+      const w = P.rollWindow(Number(audio.currentTime) || 0, Number(fraction), bpm, firstBeat(deck));
+      if(!w) return { ok:false, deck, error:'Could not roll.' };
+      if(!rolls[deck]){ rolls[deck] = { prevLoop:loops[deck], fraction:Number(fraction) }; slipBegin(deck, 'roll'); }
+      else rolls[deck].fraction = Number(fraction);
+      loops[deck] = { start:w.start, end:w.end, beats:w.beats, length:w.length, roll:true };
+      renderLoopRegion(deck); updatePerfButtons(deck);
+      return { ok:true, deck, roll:loops[deck] };
+    }
+    function rollEnd(deckInput){
+      const deck = validDeck(deckInput);
+      if(!rolls[deck]) return { ok:false, deck };
+      loops[deck] = rolls[deck].prevLoop || null;
+      rolls[deck] = null;
+      const r = slipEnd(deck);
+      renderLoopRegion(deck); updateDeckButtons(deck); updatePerfButtons(deck);
+      return { ok:true, deck, resumedAt:r.resumedAt };
+    }
+    // Key shift: semitone steps, routed through a pitch-shift AudioWorklet so the tempo never changes.
+    function shiftedKey(deckInput){
+      const deck = validDeck(deckInput);
+      const P = perf(); const raw = baseKey[deck];
+      if(!keyShift[deck] || !P) return raw;
+      const cam = deps.parseCamelotKey ? deps.parseCamelotKey(raw) : raw;
+      return P.shiftCamelot(cam, keyShift[deck]) || raw;
+    }
+    function renderDeckKey(deck){
+      const keyEl = doc.getElementById(`key-${deck}`);
+      if(!keyEl) return;
+      const k = shiftedKey(deck) || '--';
+      const P = perf();
+      keyEl.innerHTML = (deps.keyBadgeHtml ? deps.keyBadgeHtml(k) : esc(k)) + (keyShift[deck] && P ? ` <small class="keyshift-tag" title="Key shifted from ${esc(baseKey[deck] || '--')}">${esc(P.shiftLabel(keyShift[deck]))}</small>` : '');
+    }
+    async function attachShifter(deck){
+      if(shifters[deck]) return { ok:true };
+      const P = perf(); const source = sources[deck]; const chain = fx[deck];
+      if(!P || !audioCtx || !source || !chain) return { ok:false, error:'Press Play once so the deck audio can start, then shift the key.' };
+      const made = await P.createPitchShifter(audioCtx, win);
+      if(!made.ok) return made;
+      if(shifters[deck]) { try{ made.node.disconnect(); }catch(e){} return { ok:true }; }
+      try{ source.disconnect(chain.input); }catch(e){ try{ source.disconnect(); }catch(err){} }
+      source.connect(made.node); made.node.connect(chain.input);
+      shifters[deck] = made.node;
+      return { ok:true };
+    }
+    async function setKeyShift(deckInput, n){
+      const deck = validDeck(deckInput);
+      const P = perf();
+      if(!P) return { ok:false, deck, error:'Key shift is unavailable.' };
+      const value = P.clampShift(n);
+      keyShift[deck] = value;
+      renderDeckKey(deck); renderMixesWellNext(deck); updatePerfButtons(deck);
+      let audio = { ok:true };
+      if(value !== 0 || shifters[deck]){
+        if(!audioCtx && !isJsdom()){ try{ ensureAudioGraph(); }catch(e){} }
+        if(audioCtx) audio = await attachShifter(deck);
+        else audio = { ok:false, error:'Press Play once so the deck audio can start, then shift the key.' };
+      }
+      if(shifters[deck]){ const param = shifters[deck].parameters && shifters[deck].parameters.get && shifters[deck].parameters.get('ratio'); if(param) param.value = P.semitoneRatio(value); }
+      if(!audio.ok && deps.setStudioRuleStatus) deps.setStudioRuleStatus(audio.error, 'denied');
+      return { ok:true, deck, semitones:value, key:shiftedKey(deck), audio:audio.ok };
+    }
+    function nudgeKeyShift(deckInput, step){ const deck = validDeck(deckInput); return setKeyShift(deck, keyShift[deck] + Number(step || 0)); }
+
+    function updatePerfButtons(deckInput){
+      const deck = validDeck(deckInput);
+      const wrap = doc.getElementById(`deck-perf-${deck}`);
+      if(!wrap) return;
+      const noBpm = !trackBpm(deck);
+      wrap.querySelectorAll('[data-beatjump]').forEach(b => { b.disabled = noBpm; b.title = noBpm ? 'Add BPM to this track to use beat jump.' : `Jump ${b.dataset.beatjump === '-1' ? 'back' : 'forward'} ${jumpSize[deck]} beat${jumpSize[deck] === 1 ? '' : 's'}`; });
+      wrap.querySelectorAll('[data-roll]').forEach(b => { b.disabled = noBpm; b.classList.toggle('active', Boolean(rolls[deck] && rolls[deck].fraction === Number(b.dataset.roll))); });
+      const size = wrap.querySelector('[data-jump-size]'); if(size) size.value = String(jumpSize[deck]);
+      const slip = wrap.querySelector('[data-slip]');
+      if(slip){ slip.classList.toggle('active', slipOn[deck]); slip.setAttribute('aria-pressed', slipOn[deck] ? 'true' : 'false'); slip.classList.toggle('slipping', Boolean(slipState[deck])); slip.title = slipOn[deck] ? 'Slip on: loops, jumps and Cue snap back to where the track would be' : 'Slip off'; }
+      const out = wrap.querySelector('[data-keyshift-out]'); const P = perf();
+      if(out && P) out.textContent = P.shiftLabel(keyShift[deck]);
+      const down = wrap.querySelector('[data-keyshift="-1"]'); if(down && P) down.disabled = keyShift[deck] <= P.KEY_SHIFT_MIN;
+      const up = wrap.querySelector('[data-keyshift="1"]'); if(up && P) up.disabled = keyShift[deck] >= P.KEY_SHIFT_MAX;
+    }
+    function renderPerfControls(deckInput){
+      const deck = validDeck(deckInput);
+      const P = perf();
+      if(!P) return null;
+      let wrap = doc.getElementById(`deck-perf-${deck}`);
+      if(!wrap){
+        const anchor = doc.getElementById(`cues-${deck}`);
+        if(!anchor || !anchor.parentNode) return null;
+        wrap = doc.createElement('div'); wrap.id = `deck-perf-${deck}`; wrap.className = 'deck-perf';
+        anchor.parentNode.insertBefore(wrap, anchor);
+      }
+      const D = deck.toUpperCase();
+      const rollLabel = f => f === 1 ? '1' : `1/${Math.round(1 / f)}`;
+      wrap.innerHTML = `<div class="deck-perf-group" role="group" aria-label="Deck ${D} beat jump"><span class="deck-perf-label">Jump</span><button type="button" class="ghost small" data-beatjump="-1" aria-label="Deck ${D} jump back">◀</button><select data-jump-size aria-label="Deck ${D} jump size">${P.JUMP_SIZES.map(b => `<option value="${b}">${b}</option>`).join('')}</select><button type="button" class="ghost small" data-beatjump="1" aria-label="Deck ${D} jump forward">▶</button></div>`
+        + `<div class="deck-perf-group deck-roll-pads" role="group" aria-label="Deck ${D} loop roll (hold)"><span class="deck-perf-label">Roll</span>${P.ROLL_SIZES.map(f => `<button type="button" class="roll-pad" data-roll="${f}" aria-label="Deck ${D} loop roll ${rollLabel(f)} beat (hold)">${rollLabel(f)}</button>`).join('')}</div>`
+        + `<div class="deck-perf-group"><button type="button" class="ghost small" data-slip aria-pressed="false">Slip</button></div>`
+        + `<div class="deck-perf-group" role="group" aria-label="Deck ${D} key shift"><span class="deck-perf-label">Key</span><button type="button" class="ghost small" data-keyshift="-1" aria-label="Deck ${D} key down a semitone">−</button><output data-keyshift-out>0</output><button type="button" class="ghost small" data-keyshift="1" aria-label="Deck ${D} key up a semitone">+</button></div>`;
+      const say = r => { if(r && r.ok === false && r.error && deps.setStudioRuleStatus) deps.setStudioRuleStatus(r.error, 'denied'); };
+      wrap.querySelectorAll('[data-beatjump]').forEach(b => {
+        const dir = Number(b.dataset.beatjump);
+        let viaPointer = false;
+        b.onpointerdown = ev => { viaPointer = true; if(ev && ev.preventDefault) ev.preventDefault(); if(slipOn[deck]) slipBegin(deck, 'jump'); say(beatJump(deck, dir * jumpSize[deck])); };
+        b.onpointerup = b.onpointercancel = b.onpointerleave = () => { if(slipState[deck] && slipState[deck].reason === 'jump') slipEnd(deck); };
+        b.onclick = () => { if(viaPointer){ viaPointer = false; return; } say(beatJump(deck, dir * jumpSize[deck])); };
+      });
+      const size = wrap.querySelector('[data-jump-size]'); if(size) size.onchange = () => setJumpSize(deck, size.value);
+      wrap.querySelectorAll('[data-roll]').forEach(b => {
+        b.onpointerdown = ev => { if(ev && ev.preventDefault) ev.preventDefault(); say(rollStart(deck, Number(b.dataset.roll))); };
+        b.onpointerup = b.onpointercancel = b.onpointerleave = () => { if(rolls[deck]) rollEnd(deck); };
+        b.oncontextmenu = ev => { if(ev && ev.preventDefault) ev.preventDefault(); };
+      });
+      const slip = wrap.querySelector('[data-slip]'); if(slip) slip.onclick = () => toggleSlip(deck);
+      wrap.querySelectorAll('[data-keyshift]').forEach(b => b.onclick = () => nudgeKeyShift(deck, Number(b.dataset.keyshift)));
+      updatePerfButtons(deck);
+      return wrap;
+    }
+    // Slip + Cue: hold Cue to play from the cue point, let go to drop back in where the track would be.
+    function cueSlipStart(deck){
+      const audio = deckAudio(deck); if(!audio) return;
+      const cues = state.decks && state.decks[deck] && Array.isArray(state.decks[deck].cues) ? state.decks[deck].cues : [];
+      const cueTime = cues.length ? Number(cues[cues.length - 1].time) || 0 : 0;
+      slipBegin(deck, 'cue');
+      seek(deck, cueTime);
+      try{ const p = audio.play && audio.play(); if(p && p.catch) p.catch(() => {}); }catch(e){}
+    }
+    function trackPlayed(deck){
+      if(playCounted[deck]) return;
+      const loaded = state.studioDecks && state.studioDecks[deck];
+      if(!loaded || !loaded.trackId || !deps.onTrackPlayed) return;
+      playCounted[deck] = true;
+      try{ deps.onTrackPlayed(loaded.trackId, deck); }catch(e){}
+    }
+
     function updateDeckButtons(deckInput){
       const deck = validDeck(deckInput);
       const other = deck === 'a' ? 'b' : 'a';
+      updatePerfButtons(deck);
       const sync = doc.querySelector(`[data-sync="${deck}"]`);
       if(sync){
         const missing = !trackBpm(deck) ? 'This track has no BPM. Add it in the Library to use Sync.' : !trackBpm(other) ? `Deck ${other.toUpperCase()} has no BPM to sync to.` : '';
@@ -708,12 +923,14 @@
       const artistEl = doc.getElementById(`artist-${deck}`);
       const entry = { type, deck, at:now(), title:(extra && extra.title) || loaded.title || (nameEl && nameEl.textContent) || 'Untitled', artist:(extra && extra.artist) || loaded.artist || (artistEl && artistEl.textContent !== '--' ? artistEl.textContent : '') || '' };
       playLog.push(entry);
+      if(type === 'play') trackPlayed(deck);
       if(playLog.length > 500) playLog.splice(0, playLog.length - 500);
       return entry;
     }
 
     async function teardownAudioGraph(){
       ['a','b'].forEach(stopMeterAnimation);
+      ['a','b'].forEach(d => { if(shifters[d]){ try{ shifters[d].disconnect(); }catch(e){} shifters[d] = null; } });
       Object.values(sources).forEach(source => { try{ source.disconnect(); }catch(e){} });
       Object.values(gains).forEach(gain => { try{ gain.disconnect(); }catch(e){} });
       Object.values(fx).forEach(chain => ['trim','low','mid','high','analyser'].forEach(k => { try{ chain[k] && chain[k].disconnect(); }catch(e){} }));
@@ -967,12 +1184,14 @@
         wrap.innerHTML = `<span class="eyebrow">MIXES WELL NEXT</span><small class="mixes-next-empty">Add BPM and key to this track in the Library to see matches.</small>`;
         return { matches:[], empty:'no-data' };
       }
-      const matches = deps.compatibleTracksFor(base).filter(t => t.libraryId !== base.libraryId).slice(0, 5);
+      const shifted = keyShift[deck] ? shiftedKey(deck) : '';
+      const matchBase = shifted ? { ...base, key:shifted, camelotKey:shifted } : base;
+      const matches = deps.compatibleTracksFor(matchBase).filter(t => t.libraryId !== base.libraryId).slice(0, 5);
       if(!matches.length){
         wrap.innerHTML = `<span class="eyebrow">MIXES WELL NEXT</span><small class="mixes-next-empty">No tracks in your library match this BPM and key yet.</small>`;
         return { matches:[], empty:'no-matches' };
       }
-      wrap.innerHTML = `<span class="eyebrow">MIXES WELL NEXT</span><div class="mixes-next-list">${matches.map(t => `<button type="button" class="mixes-next-item" data-mix-next="${esc(t.libraryId)}" title="Load onto Deck ${otherDeck.toUpperCase()}"><span><strong>${esc(deps.trackTitle(t))}</strong><small>${esc(deps.parseBpm(t) || '--')} BPM / ${esc(t.key || '--')}</small></span><em>&rarr; ${otherDeck.toUpperCase()}</em></button>`).join('')}</div>`;
+      wrap.innerHTML = `<span class="eyebrow">MIXES WELL NEXT${shifted ? ` (KEY ${esc(shifted)})` : ''}</span><div class="mixes-next-list">${matches.map(t => `<button type="button" class="mixes-next-item" data-mix-next="${esc(t.libraryId)}" title="Load onto Deck ${otherDeck.toUpperCase()}"><span><strong>${esc(deps.trackTitle(t))}</strong><small>${esc(deps.parseBpm(t) || '--')} BPM / ${esc(t.key || '--')}</small></span><em>&rarr; ${otherDeck.toUpperCase()}</em></button>`).join('')}</div>`;
       wrap.querySelectorAll('[data-mix-next]').forEach(button => button.onclick = () => loadLibraryTrackToDeck(button.dataset.mixNext, otherDeck));
       return { matches };
     }
@@ -1020,6 +1239,9 @@
         detectedBpm[deck] = null;
         syncRate[deck] = null;
         loops[deck] = null;
+        rolls[deck] = null; slipState[deck] = null; playCounted[deck] = false;
+        baseKey[deck] = rec.key || rec.camelotKey || '';
+        if(keyShift[deck]){ keyShift[deck] = 0; const ratio = shifters[deck] && shifters[deck].parameters && shifters[deck].parameters.get && shifters[deck].parameters.get('ratio'); if(ratio) ratio.value = 1; }
         if(keyEl) keyEl.innerHTML = deps.keyBadgeHtml ? deps.keyBadgeHtml(rec.key || rec.camelotKey || '--') : esc(rec.key || rec.camelotKey || '--');
         if(timeEl) timeEl.textContent = rec.dur || '0:00';
         if(artEl) artEl.innerHTML = rec.artwork ? `<img src="${esc(rec.artwork)}" alt="${esc(rec.title)} artwork" style="width:100%;height:100%;object-fit:cover">` : esc(rec.source || '');
@@ -1241,7 +1463,12 @@
         const playBtn = doc.querySelector(`[data-play="${deck}"]`);
         if(playBtn) playBtn.onclick = () => playDeck(deck);
         const cueBtn = doc.querySelector(`[data-cue="${deck}"]`);
-        if(cueBtn) cueBtn.onclick = () => resetDeckCue(deck);
+        if(cueBtn) cueBtn.onclick = () => { if(pointerCue[deck]){ pointerCue[deck] = false; return; } resetDeckCue(deck); };
+        if(cueBtn){
+          cueBtn.onpointerdown = () => { if(!slipOn[deck]) return; pointerCue[deck] = true; cueSlipStart(deck); };
+          cueBtn.onpointerup = cueBtn.onpointercancel = cueBtn.onpointerleave = () => { if(slipState[deck] && slipState[deck].reason === 'cue') slipEnd(deck); };
+        }
+        renderPerfControls(deck);
         const setCueBtn = doc.querySelector(`[data-set-cue="${deck}"]`);
         if(setCueBtn) setCueBtn.onclick = () => setCue(deck);
         const hotcueBtn = doc.querySelector(`[data-hotcue="${deck}"]`);
@@ -1392,7 +1619,11 @@
       applyDetectedBpm,
       getDetectedBpm:deck => detectedBpm[validDeck(deck)],
       getChain:deck => fx[validDeck(deck)] || null,
-      getCueBus:() => cueBus
+      getCueBus:() => cueBus,
+      beatJump, setJumpSize, getJumpSize:deck => jumpSize[validDeck(deck)],
+      rollStart, rollEnd, getRoll:deck => rolls[validDeck(deck)],
+      toggleSlip, getSlip:deck => slipOn[validDeck(deck)], slipBegin, slipEnd, slipPosition, isSlipping:deck => Boolean(slipState[validDeck(deck)]),
+      setKeyShift, nudgeKeyShift, getKeyShift:deck => keyShift[validDeck(deck)], shiftedKey, renderPerfControls, updatePerfButtons
     };
   }
 

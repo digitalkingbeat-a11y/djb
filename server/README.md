@@ -242,3 +242,10 @@ Both are safe to run more than once. No new keys or environment variables.
 - **Privacy:** pages show DJ names and public profile ids only, never account ids or storage paths. Audio files live in the private `battle-mixes` bucket under `private/battle-entries/remix-contests/`, and the browser only ever gets signed links that expire after 10–15 minutes.
 
 Routes: `GET /api/remix-contests`, `POST /api/remix-contests`, `GET|PATCH /api/remix-contests/:id`, `POST /api/remix-contests/:id/publish`, `/cancel`, `/parts/:partId/download`, `/entry` (+ `/entry/complete`, `DELETE /entry`), `/entries/:entryId/play`, `/vote`, `/store-offer`, `/store-consent`, `/store-listing`; `GET /api/remix-contests/champions`, `GET /api/me/remix-contests`.
+
+## Oct 25 Studio
+
+- **No new SQL.** Favourite stars, private track notes and play counts for server-backed My Uploads tracks are stored in the existing `music_library_tracks.usage_relationships` jsonb column under `prefs` (only returned to the track owner). Do not apply `028_create_tournaments.sql`.
+- New route: `POST /api/musicLibrary/tracks/:trackId/prefs` (auth required). Body: `{ favourite, note, playCount, lastPlayedAt, editedAt }`. Merge rule: newest `editedAt` wins for favourite/note; play count only goes up.
+- Battle Library tracks, recently played, "played this set", beat jump size, slip and key shift are saved on the device only (localStorage `djBattleTrackPrefs`, `djBattleCurrentSet`).
+- After merge: redeploy the server so the new route exists. No keys or env vars change.

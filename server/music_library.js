@@ -98,8 +98,48 @@ function sanitizeUsageRelationships(value){
     battles: Array.isArray(usage.battles) ? usage.battles.slice(0, 100) : [],
     posts: Array.isArray(usage.posts) ? usage.posts.slice(0, 100) : [],
     practiceHistory: Array.isArray(usage.practiceHistory) ? usage.practiceHistory.slice(0, 100) : [],
-    submissions: Array.isArray(usage.submissions) ? usage.submissions.slice(0, 100) : []
+    submissions: Array.isArray(usage.submissions) ? usage.submissions.slice(0, 100) : [],
+    ...(usage.prefs && typeof usage.prefs === 'object' ? { prefs: sanitizeTrackPrefs(usage.prefs) } : {})
   };
+}
+
+// Oct 25 Studio: the owner's private star, note and play count, kept inside usage_relationships.
+const TRACK_NOTE_MAX = 500;
+function sanitizeTrackPrefs(value){
+  const v = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const out = {};
+  if(v.favourite === true) out.favourite = true;
+  if(typeof v.note === 'string' && v.note.trim()) out.note = v.note.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').slice(0, TRACK_NOTE_MAX);
+  const plays = Math.floor(Number(v.playCount));
+  if(Number.isFinite(plays) && plays > 0) out.playCount = Math.min(plays, 1000000);
+  ['lastPlayedAt', 'editedAt'].forEach(k => { const t = Date.parse(v[k]); if(Number.isFinite(t)) out[k] = new Date(t).toISOString(); });
+  return out;
+}
+
+// Merge: favourite/note from the newer edit, play count only ever goes up.
+function mergeTrackPrefs(current, incoming){
+  const a = sanitizeTrackPrefs(current), b = sanitizeTrackPrefs(incoming);
+  const ea = Date.parse(a.editedAt || 0) || 0, eb = Date.parse(b.editedAt || 0) || 0;
+  const newer = eb >= ea ? b : a;
+  const out = {};
+  if(newer.favourite) out.favourite = true;
+  if(newer.note) out.note = newer.note;
+  const plays = Math.max(a.playCount || 0, b.playCount || 0);
+  if(plays) out.playCount = plays;
+  const last = [a.lastPlayedAt, b.lastPlayedAt].filter(Boolean).sort().pop();
+  if(last) out.lastPlayedAt = last;
+  if(ea || eb) out.editedAt = new Date(Math.max(ea, eb)).toISOString();
+  return out;
+}
+
+async function updateLibraryTrackPrefs(dataClient, userId, trackId, input = {}, now = new Date()){
+  const owned = await getOwnedLibraryTrack(dataClient, userId, trackId);
+  if(owned.error || owned.forbidden || owned.unavailable) return owned;
+  const usage = sanitizeUsageRelationships(owned.track.usage_relationships);
+  usage.prefs = mergeTrackPrefs(usage.prefs, input);
+  const updated = await dataClient.from(LIBRARY_TRACK_TABLE).update({ usage_relationships: usage, updated_at: now.toISOString() }).eq('id', trackId).eq('user_id', userId).select('*').single();
+  if(updated.error) return { error: updated.error };
+  return { track: sanitizeLibraryTrack(updated.data), prefs: usage.prefs };
 }
 
 function normalizeStringList(value, max = 100){
@@ -783,6 +823,9 @@ module.exports = {
   removeLibraryArtwork,
   issueLibraryPlaybackAccess,
   recordLibraryTrackUsage,
+  updateLibraryTrackPrefs,
+  sanitizeTrackPrefs,
+  mergeTrackPrefs,
   createLibraryCrate,
   updateLibraryCrate,
   archiveLibraryCrate,
