@@ -213,3 +213,16 @@ DJs can sign in with a fingerprint, Face ID or their phone's screen lock instead
 **Important:** passkeys are locked to the Relying Party ID. If you change it later (for example when moving to a custom domain), every existing passkey stops working and DJs need to add a new one under Settings → Security (their email link still works in the meantime). It's best to pick the final domain before many DJs add passkeys.
 
 **Where DJs find it:** Settings → Security → *Add a passkey on this device* (must be signed in with the email link first). The list shows each passkey's device name, the date it was added and when it was last used, with Rename and Remove. The sign-in window shows **Sign in with passkey** only in browsers that support it. It works in the installed phone app (home-screen app) on iPhone and Android, because the passkey belongs to the site's domain.
+
+## Discount codes count after payment, and invite-a-friend links (Oct 20c)
+
+**Run these in Supabase (SQL editor), in order, after the Oct 20b files (043–046):**
+
+1. `sql/047_add_discount_code_reservations.sql`
+2. `sql/048_create_dj_invites.sql`
+
+Both are safe to run more than once. No new keys or environment variables.
+
+**Discount codes:** a code use is now only counted once Stripe confirms the payment (`checkout.session.completed`). While the buyer is on the Stripe page the use is *held*, so a code with a limit can't be oversold. The hold is given back when Stripe sends `checkout.session.expired` or a payment failure, if creating the Stripe page fails, or automatically after 24 hours. A repeated webhook never counts a use twice. Uses recorded before 047 stay counted. Until 047 is run, checkouts that use a code show "Discount codes need a quick server update (SQL 047)".
+
+**Invite links:** Profile → *Invite friends* shows each DJ's personal link (`…/?invite=CODE`) with Copy / Share, how many friends joined and a badge (🤝 Connector at 1, 📣 Crew Recruiter at 3, 🌟 Scene Builder at 10, 👑 DJ Battle Ambassador at 25). Someone opening the link sees "DJ X invited you"; the code is remembered for 30 days in that browser and claimed right after they sign in. Only accounts created in the last 14 days count, each new DJ counts once, and your own link never counts. The inviter gets an Activity-bell alert ("… joined DJ Battle from your invite link"). Routes: `GET /api/invites/mine`, `POST /api/invites/claim`, `GET /api/invites/:code` (public, shows the inviter's DJ name only).

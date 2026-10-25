@@ -172,7 +172,7 @@ function matchToRow(match, tournamentId){
   return { id:match.id, tournament_id:tournamentId, round_number:match.round, position:match.position, first_user_id:match.firstUserId, second_user_id:match.secondUserId, winner_user_id:match.winnerUserId, status:match.status, battle_id:match.battleId, deadline_at:match.deadlineAt || null, forfeit_user_id:match.forfeitUserId || null };
 }
 
-function sanitizeInput(input = {}){
+function sanitizeInput(input = {}, now = new Date()){
   const title = cleanText(input.title, 120);
   if(!title) return { validationError:'Give the tournament a name' };
   const capacity = Number(input.capacity);
@@ -180,7 +180,7 @@ function sanitizeInput(input = {}){
   const seeding = input.seeding === 'signup' ? 'signup' : 'random';
   const roundHours = input.roundHours == null || input.roundHours === '' ? DEFAULT_ROUND_HOURS : Number(input.roundHours);
   if(!ROUND_HOURS.includes(roundHours)) return { validationError:'Pick a round length of 12, 24, 48, 72 hours or 1 week' };
-  const startsAt = parseStartsAt(input.startsAt);
+  const startsAt = parseStartsAt(input.startsAt, now);
   if(startsAt && startsAt.validationError) return startsAt;
   return { value:{ title, capacity, seeding, genre:cleanText(input.genre, 60) || 'Open Format', mode_id:cleanId(input.modeId) || 'transition_battle', description:cleanText(input.description, 400), round_hours:roundHours, starts_at:startsAt || null } };
 }
@@ -263,7 +263,7 @@ async function sanitizeTournament(dataClient, loaded, viewerId = null){
 }
 
 async function createTournament(dataClient, userId, input = {}, now = new Date()){
-  const parsed = sanitizeInput(input);
+  const parsed = sanitizeInput(input, now);
   if(parsed.validationError) return parsed;
   if(rateLimited(`tournament-create:${userId}`, now.getTime(), 3, 60 * 60 * 1000)) return { rateLimited:true };
   const row = { id:newId('trn'), created_by:String(userId), ...parsed.value, status:'open', champion_user_id:null, created_at:now.toISOString(), started_at:null, completed_at:null };

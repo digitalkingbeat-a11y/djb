@@ -804,22 +804,29 @@ async function createMarketplaceCheckout(dataClient, providerAdapter, buyerUserI
   const orderInsert = await insertSingle(dataClient, MARKETPLACE_ORDER_TABLE, orderPayload);
   if(orderInsert.error) return { error: orderInsert.error };
   if(discount){
-    const used = await require('./discount_codes').recordRedemption(dataClient, discount.row, { orderId:orderInsert.row.id, buyerUserId, discountCents:discount.discountCents, now });
+    const used = await require('./discount_codes').reserveRedemption(dataClient, discount.row, { orderId:orderInsert.row.id, buyerUserId, discountCents:discount.discountCents, now });
     if(used.raced) return { validationError:'That discount code has been used up' };
+    if(used.schemaMissing) return { validationError:'Discount codes need a quick server update (SQL 047) before they can be used' };
+    if(used.error) return { error: used.error };
   }
+  // Oct 20c: if checkout never reaches Stripe, give the held discount use straight back.
+  const releaseHold = async () => { if(discount){ try{ await require('./discount_codes').settleForOrder(dataClient, orderInsert.row.id, 'canceled', now); }catch(_e){ /* best effort */ } } };
   const itemPayload = buildOrderItemPayload(orderInsert.row, listing, product, rights, allowedFiles);
   const itemInsert = await insertSingle(dataClient, MARKETPLACE_ORDER_ITEM_TABLE, itemPayload);
-  if(itemInsert.error) return { error: itemInsert.error };
+  if(itemInsert.error){ await releaseHold(); return { error: itemInsert.error }; }
 
-  const providerCheckout = await providerAdapter.createCheckout(orderInsert.row, {
-    listing,
-    product,
-    rights,
-    sellerAccount: seller.account,
-    allowedFiles: publicAllowedFiles(allowedFiles)
-  });
-  if(providerCheckout.unconfigured) return { providerUnavailable:true, order:sanitizeCommerceOrder(orderInsert.row, { ownerView:true }) };
-  if(providerCheckout.error) return { error: providerCheckout.error };
+  let providerCheckout;
+  try{
+    providerCheckout = await providerAdapter.createCheckout(orderInsert.row, {
+      listing,
+      product,
+      rights,
+      sellerAccount: seller.account,
+      allowedFiles: publicAllowedFiles(allowedFiles)
+    });
+  }catch(err){ await releaseHold(); throw err; }
+  if(providerCheckout.unconfigured){ await releaseHold(); return { providerUnavailable:true, order:sanitizeCommerceOrder(orderInsert.row, { ownerView:true }) }; }
+  if(providerCheckout.error){ await releaseHold(); return { error: providerCheckout.error }; }
   const providerTransactionId = providerCheckout.providerCheckoutId || null;
   const updated = await updateRows(dataClient, MARKETPLACE_ORDER_TABLE, [['id', orderInsert.row.id]], {
     provider_transaction_id: providerTransactionId,
@@ -1035,6 +1042,9 @@ async function handleMarketplacePaymentEvent(dataClient, providerAdapter, rawEve
   if(orderUpdate.error) return { error: orderUpdate.error };
   const updatedOrder = orderUpdate.rows[0] || { ...bundle.order, ...update };
   const updatedBundle = { ...bundle, order:updatedOrder };
+  // Oct 20c: a discount code use counts only once Stripe confirms payment; expired/failed
+  // checkouts give the held use back. Never blocks the payment itself.
+  try{ await require('./discount_codes').settleForOrder(dataClient, updatedOrder.id, updatedOrder.payment_status, now); }catch(_e){ /* discount bookkeeping must not break order settlement */ }
 
   let entitlement = null;
   let entitlementRestricted = null;

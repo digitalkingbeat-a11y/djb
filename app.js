@@ -1511,6 +1511,7 @@ function switchView(view, options = {}){
   if(window.DJBOct20) window.DJBOct20.onView(view);
   if(window.DJBOct20b) window.DJBOct20b.onView(view);
   if(window.DJBPasskeys) window.DJBPasskeys.onView(view);
+  if(window.DJBInvites) window.DJBInvites.onView(view);
   window.scrollTo({top:0,behavior:'smooth'});
   return true;
 }
@@ -11560,7 +11561,7 @@ function notificationRowHtml(notification){
     </div>
     <div>
       <span class="notification-destination">${esc(readableComponentName(notification.type))}</span>
-      <div class="challenge-meta">${esc(notification.summary || 'Challenge update')}${/* Oct 19b: these alerts carry no challenge rules or expiry */ ['tournament_match_ready', 'battle_chat_message', 'timed_comment_received'].includes(notification.type) ? '' : `<br>${esc(challengeRulesSummary(challenge.rules || {}))}<br>${esc(notificationExpirationText(notification))}`}</div>
+      <div class="challenge-meta">${esc(notification.summary || 'Challenge update')}${/* Oct 19b: these alerts carry no challenge rules or expiry */ ['tournament_match_ready', 'battle_chat_message', 'timed_comment_received', 'invite_joined'].includes(notification.type) ? '' : `<br>${esc(challengeRulesSummary(challenge.rules || {}))}<br>${esc(notificationExpirationText(notification))}`}</div>
     </div>
     <div class="challenge-actions">
       ${canRecover ? `<button class="primary small" type="button" data-notification-open="${esc(notification.id)}">Enter Battle Room</button>` : `<button class="ghost small" type="button" data-notification-open="${esc(notification.id)}">Open</button>`}
@@ -11599,6 +11600,9 @@ async function openDjNotificationDestination(notificationId){
   const destination = notification.destination || {};
   if(destination.type === 'messages' && destination.publicProfileId && window.DJBConnect){
     return { opened:'messages', response:await window.DJBConnect.openConversation(destination.publicProfileId) };
+  }
+  if(destination.type === 'invites' && window.DJBInvites){
+    return { opened:'invites', response:await window.DJBInvites.focus() };
   }
   if(destination.type === 'tournament' && destination.tournamentId && window.DJBSocial){
     return { opened:'tournament', response:await window.DJBSocial.openTournamentFromAnywhere(destination.tournamentId) };

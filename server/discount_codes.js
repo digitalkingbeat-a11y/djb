@@ -11,12 +11,12 @@ const normCode = v => String(v == null ? '' : v).trim().toUpperCase();
 
 function publicCode(row, now = new Date()){
   return { id:row.id, code:row.code, kind:row.kind, percentOff:row.kind === 'percent' ? Number(row.percent_off) : null, amountOffCents:row.kind === 'fixed' ? Number(row.amount_off_cents) : null,
-    endsAt:row.ends_at || null, usageLimit:row.usage_limit == null ? null : Number(row.usage_limit), timesUsed:Number(row.times_used || 0), active:row.active !== false, state:codeState(row, now), createdAt:row.created_at };
+    endsAt:row.ends_at || null, usageLimit:row.usage_limit == null ? null : Number(row.usage_limit), timesUsed:Number(row.times_used || 0), reservedUses:Number(row.reserved_uses || 0), active:row.active !== false, state:codeState(row, now), createdAt:row.created_at };
 }
 function codeState(row, now = new Date()){
   if(row.active === false) return 'off';
   if(row.ends_at && new Date(row.ends_at) <= now) return 'ended';
-  if(row.usage_limit != null && Number(row.times_used || 0) >= Number(row.usage_limit)) return 'used_up';
+  if(row.usage_limit != null && Number(row.times_used || 0) + Number(row.reserved_uses || 0) >= Number(row.usage_limit)) return 'used_up';
   return 'live';
 }
 function validateInput(body = {}, now = new Date()){
@@ -70,6 +70,8 @@ function discountFor(row, grossCents){
 async function resolveDiscount(db, { sellerUserId, code, grossCents, now = new Date() }){
   const c = normCode(code);
   if(!c) return { none:true };
+  const r0 = await db.from('beat_discount_codes').select('id').eq('seller_user_id', String(sellerUserId)).eq('code', c).limit(1);
+  if(!r0.error && (r0.data || [])[0]) await releaseStaleReservations(db, r0.data[0].id, now);
   const r = await db.from('beat_discount_codes').select('*').eq('seller_user_id', String(sellerUserId)).eq('code', c).limit(1);
   if(r.error) return fail(r);
   const row = (r.data || [])[0];
@@ -81,16 +83,81 @@ async function resolveDiscount(db, { sellerUserId, code, grossCents, now = new D
   if(grossCents <= MIN_CHARGE_CENTS) return { validationError:'This beat is too cheap for a discount' };
   return { row, ...discountFor(row, grossCents) };
 }
-// Counts the use. Called once checkout is created; conditional on times_used so two buyers
-// racing for the last use can't both get it.
-async function recordRedemption(db, row, { orderId, buyerUserId, discountCents, now = new Date() }){
-  const used = Number(row.times_used || 0);
-  const u = await db.from('beat_discount_codes').update({ times_used:used + 1, updated_at:now.toISOString() }).eq('id', row.id).eq('times_used', used);
-  if(u.error) return fail(u);
-  if(Array.isArray(u.data) && !u.data.length) return { raced:true };
-  await db.from('beat_discount_redemptions').insert([{ id:newId('bdr'), code_id:row.id, order_id:orderId, buyer_user_id:String(buyerUserId), discount_cents:discountCents, created_at:now.toISOString() }]);
-  return { recorded:true };
+// Oct 20c: a code use only COUNTS once Stripe says the payment went through
+// (checkout.session.completed). While a buyer is still on the Stripe page, the use is
+// "reserved" so a limited code can't be oversold; the hold is released when Stripe says the
+// checkout expired or failed, or automatically after RESERVATION_MS if Stripe never tells us.
+const RESERVATION_MS = 24 * 60 * 60 * 1000; // Stripe Checkout sessions last 24 hours by default
+const RESERVATION_SCHEMA = '047_add_discount_code_reservations';
+async function bumpCounts(db, codeId, change, now, tries = 4){
+  for(let i = 0; i < tries; i++){
+    const r = await db.from('beat_discount_codes').select('*').eq('id', codeId).limit(1);
+    if(r.error) return failCounts(r);
+    const row = (r.data || [])[0];
+    if(!row) return { notFound:true };
+    const used = Number(row.times_used || 0), held = Number(row.reserved_uses || 0);
+    const next = { times_used:Math.max(0, used + (change.used || 0)), reserved_uses:Math.max(0, held + (change.held || 0)) };
+    if(change.needRoom && row.usage_limit != null && used + held >= Number(row.usage_limit)) return { raced:true };
+    // Conditional on both counters, so two webhooks or two buyers can't overwrite each other.
+    // .select() makes Supabase hand back the changed rows, so "nothing changed" (someone else
+    // got there first) is visible and we read again and retry.
+    const u = await db.from('beat_discount_codes').update({ ...next, updated_at:now.toISOString() }).eq('id', codeId).eq('times_used', used).eq('reserved_uses', held).select('id');
+    if(u.error) return failCounts(u);
+    if(!(Array.isArray(u.data) && !u.data.length)) return { ok:true, row:{ ...row, ...next } };
+  }
+  return { raced:true };
 }
+// Missing reserved_uses / status columns mean SQL 047 hasn't been run yet.
+function failCounts(r){ return isMissingTable(r.error) ? { schemaMissing:true, schema:RESERVATION_SCHEMA } : { error:r.error }; }
+// Releases holds whose checkout is long gone (Stripe never sent "expired").
+async function releaseStaleReservations(db, codeId, now = new Date()){
+  const r = await db.from('beat_discount_redemptions').select('*').eq('code_id', codeId).eq('status', 'reserved').limit(500);
+  if(r.error) return failCounts(r);
+  let released = 0;
+  for(const red of r.data || []){
+    if(red.expires_at && new Date(red.expires_at) <= now){ const x = await settleRedemption(db, red, 'released', now); if(x.settled) released++; }
+  }
+  return { released };
+}
+// Called when checkout starts: holds one use, doesn't count it yet.
+async function reserveRedemption(db, row, { orderId, buyerUserId, discountCents, now = new Date() }){
+  const held = await bumpCounts(db, row.id, { held:+1, needRoom:true }, now);
+  if(held.notFound) return { raced:true };
+  if(held.raced || held.error || held.schemaMissing) return held;
+  const ins = await db.from('beat_discount_redemptions').insert([{ id:newId('bdr'), code_id:row.id, order_id:String(orderId), buyer_user_id:String(buyerUserId), discount_cents:discountCents, status:'reserved', expires_at:new Date(now.getTime() + RESERVATION_MS).toISOString(), created_at:now.toISOString(), settled_at:null }]);
+  if(ins.error){ await bumpCounts(db, row.id, { held:-1 }, now); return failCounts(ins); }
+  return { reserved:true };
+}
+// Moves one redemption to 'confirmed' (counts the use) or 'released' (frees the hold).
+// Each move is conditional on the row's current status, so a repeated webhook can never count
+// a use twice. A payment that lands after its hold was auto-released (very late Stripe event)
+// still counts, but without touching the hold counter again.
+async function settleRedemption(db, red, to, now = new Date()){
+  if(!red) return { unchanged:true };
+  const from = red.status || 'reserved';
+  let change = null;
+  if(from === 'reserved') change = to === 'confirmed' ? { used:+1, held:-1 } : { held:-1 };
+  else if(from === 'released' && to === 'confirmed') change = { used:+1 };
+  if(!change) return { unchanged:true };
+  const u = await db.from('beat_discount_redemptions').update({ status:to, settled_at:now.toISOString() }).eq('id', red.id).eq('status', from).select('id');
+  if(u.error) return failCounts(u);
+  if(Array.isArray(u.data) && !u.data.length) return { unchanged:true };
+  const c = await bumpCounts(db, red.code_id, change, now, 8);
+  if(c.error || c.schemaMissing) return c;
+  return { settled:true, status:to };
+}
+// Webhook hook: paid => confirm, canceled/failed => release. Anything else is ignored.
+async function settleForOrder(db, orderId, paymentStatus, now = new Date()){
+  const to = paymentStatus === 'paid' ? 'confirmed' : (paymentStatus === 'canceled' || paymentStatus === 'failed') ? 'released' : null;
+  if(!to || !orderId) return { ignored:true };
+  const r = await db.from('beat_discount_redemptions').select('*').eq('order_id', String(orderId)).limit(5);
+  if(r.error) return failCounts(r);
+  const out = [];
+  for(const red of r.data || []) out.push(await settleRedemption(db, red, to, now));
+  return { results:out };
+}
+// Kept for older callers: now only reserves.
+const recordRedemption = reserveRedemption;
 // Read-only price preview for the "Apply" button in the Beat Store.
 async function previewDiscount(db, { listing, code, now = new Date() }){
   if(!listing) return { notFound:true };
@@ -101,4 +168,4 @@ async function previewDiscount(db, { listing, code, now = new Date() }){
   return { preview:{ code:d.row.code, originalCents:gross, discountCents:d.discountCents, finalCents:d.finalCents } };
 }
 
-module.exports = { SCHEMA, MIN_CHARGE_CENTS, validateInput, listCodes, createCode, setCodeActive, discountFor, resolveDiscount, recordRedemption, previewDiscount, codeState, publicCode };
+module.exports = { RESERVATION_MS, RESERVATION_SCHEMA, reserveRedemption, settleRedemption, settleForOrder, releaseStaleReservations, SCHEMA, MIN_CHARGE_CENTS, validateInput, listCodes, createCode, setCodeActive, discountFor, resolveDiscount, recordRedemption, previewDiscount, codeState, publicCode };

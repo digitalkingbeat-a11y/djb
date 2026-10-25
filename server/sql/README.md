@@ -39,3 +39,5 @@ If you want, I can also produce the exact `supabase` CLI commands or an automate
 - 044_create_dj_tips.sql — creates `dj_tips` ("Tip a DJ" through Stripe Checkout) (apply after 043)
 - 045_create_beat_discount_codes.sql — creates `beat_discount_codes` and `beat_discount_redemptions` (Beat Store discount codes) (apply after 044)
 - 046_create_view_events.sql — creates `view_events` ("Who's watching" weekly views and sources; stores no visitor details) (apply after 045)
+- 047_add_discount_code_reservations.sql — a discount code use now only counts after Stripe confirms payment (held while the buyer is on the checkout page, given back if it expires or fails) (apply after 046)
+- 048_create_dj_invites.sql — creates `dj_invite_codes` and `dj_invite_joins` (personal invite-a-friend links with join counts) and adds the "A friend joined from your invite" notification type (apply after 047)
