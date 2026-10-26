@@ -2270,3 +2270,34 @@ a.mention-link:hover{text-decoration:underline}
 .invite-welcome{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 16px;margin-bottom:16px;border:1px solid #34451e;border-radius:14px;background:linear-gradient(135deg,#161d11,#11151a)}
 .invite-welcome>span:nth-child(2){flex:1 1 220px}
 .invite-welcome-icon{font-size:1.4rem}
+
+/* Beat sales chart (sales_chart.js) */
+.store-insights{margin:4px 0 14px}
+.sales-insights-head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.sales-insights-head h4{margin:0}
+.sales-period{display:flex;gap:4px}
+.sales-period .active{border-color:var(--accent);color:var(--accent)}
+.sample-tag{font-size:.7em;padding:2px 6px;border-radius:6px;background:rgba(255,196,0,.18);color:#ffc400;vertical-align:middle}
+.sales-chart{display:flex;align-items:flex-end;gap:6px;height:150px;padding:8px 4px 0;border-bottom:1px solid var(--line);overflow-x:auto}
+.sales-chart-col{flex:1 0 34px;display:flex;flex-direction:column;align-items:center;height:100%}
+.sales-chart-bars{flex:1;width:100%;display:flex;align-items:flex-end;justify-content:center;gap:3px}
+.sales-chart-bars i{display:block;width:40%;max-width:16px;min-height:2px;border-radius:3px 3px 0 0}
+.sales-chart-col span{font-size:.68em;color:var(--muted);padding:4px 0;white-space:nowrap}
+.bar-sales{background:var(--accent)}
+.bar-free{background:#5ac8fa}
+.sales-chart-key{display:flex;gap:14px;font-size:.75em;color:var(--muted);margin:6px 0}
+.sales-chart-key i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.sales-best{margin:6px 0 0;padding-left:20px}
+.sales-best li{padding:4px 0;border-bottom:1px solid var(--line)}
+.sales-best li span{display:block;font-size:.8em;color:var(--muted)}
+.sales-empty{padding:16px;border:1px dashed var(--line);border-radius:10px;text-align:center;margin-top:8px}
+
+/* Auto-mix practice mode (automix.js) */
+.automix-controls{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin:8px 0}
+.automix-controls label{display:flex;flex-direction:column;gap:4px;font-size:.8em;color:var(--muted)}
+.automix-controls .automix-check{flex-direction:row;align-items:center}
+.automix-actions{display:flex;gap:8px}
+.automix-panel.automix-on{border-color:var(--accent)}
+.automix-queue{max-height:160px;overflow:auto;margin:6px 0 0;padding-left:22px;font-size:.85em}
+.automix-queue .is-done{opacity:.5}
+.automix-queue .is-now{color:var(--accent);font-weight:600}

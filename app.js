@@ -1515,6 +1515,7 @@ function switchView(view, options = {}){
   if(window.DJBInvites) window.DJBInvites.onView(view);
   if(window.DJBRemix) window.DJBRemix.onView(view);
   if(window.DJBStore25) window.DJBStore25.onView(view);
+  if(window.DJBAutomix) window.DJBAutomix.onView(view);
   window.scrollTo({top:0,behavior:'smooth'});
   return true;
 }
@@ -7758,6 +7759,15 @@ async function flushMusicLibrarySyncQueue(){
 // ---------- Oct 25 Studio: favourites, notes, play counts, recently played ----------
 var trackPrefs = window.DJBattleTrackPrefs ? window.DJBattleTrackPrefs.create({ localStorage }) : null;
 window.djbTrackPrefs = trackPrefs;
+// Auto-mix (automix.js) reads crates and tracks through these.
+window.djbAutomixHooks = {
+  crates: () => allLibraryCrates().filter(crate => crate && resolveCrateTrackIds(crate).length),
+  crateTrackIds: crate => resolveCrateTrackIds(crate),
+  track: id => getLibraryTrackById(id),
+  trackTitle: track => trackTitle(track),
+  canLoad: id => { const track = getLibraryTrackById(id); if(!track) return false; const check = libraryTrackLoadEligibility(track); return !check || check.allowed !== false; },
+  runtime: () => deckRuntimeManager
+};
 function trackPrefsSetContext(){
   if(!trackPrefs) return null;
   const session = typeof activeStudioBattleSession === 'function' ? activeStudioBattleSession() : null;
@@ -15192,7 +15202,7 @@ function installStorePracticeViews(){
     const section = document.createElement('section');
     section.id = 'store';
     section.className = 'view';
-    section.innerHTML = `<div class="product-page-head"><div><span class="eyebrow accent">BEAT STORE</span><h2>Beats from DJs</h2><p>Grab a free beat or sample pack by entering your email, or buy one straight from the producer. Free downloads share your email with the producer so they can keep you posted.</p></div><div class="store-head-actions"><button class="ghost compact" id="store-refresh" type="button">Refresh</button><button class="primary compact" id="store-create" type="button">List a free beat</button></div></div><div class="store-status" id="store-status" aria-live="polite"></div><div class="store-grid" id="store-grid"></div><div class="store-more"><button class="ghost small hidden" id="store-load-more" type="button">Load More</button></div><section class="panel store-mine hidden" id="store-mine"><span class="eyebrow">YOUR LISTINGS</span><div class="store-mine-head"><h3>Your beats</h3><button class="ghost small" type="button" id="store-export-fans">Download fan list</button></div><div class="store-totals" id="store-totals"></div><div class="store-seller" id="store-seller"></div><div id="store-mine-list"></div></section>`;
+    section.innerHTML = `<div class="product-page-head"><div><span class="eyebrow accent">BEAT STORE</span><h2>Beats from DJs</h2><p>Grab a free beat or sample pack by entering your email, or buy one straight from the producer. Free downloads share your email with the producer so they can keep you posted.</p></div><div class="store-head-actions"><button class="ghost compact" id="store-refresh" type="button">Refresh</button><button class="primary compact" id="store-create" type="button">List a free beat</button></div></div><div class="store-status" id="store-status" aria-live="polite"></div><div class="store-grid" id="store-grid"></div><div class="store-more"><button class="ghost small hidden" id="store-load-more" type="button">Load More</button></div><section class="panel store-mine hidden" id="store-mine"><span class="eyebrow">YOUR LISTINGS</span><div class="store-mine-head"><h3>Your beats</h3><button class="ghost small" type="button" id="store-export-fans">Download fan list</button></div><div class="store-totals" id="store-totals"></div><div class="store-insights" id="store-insights"></div><div class="store-seller" id="store-seller"></div><div id="store-mine-list"></div></section>`;
     main.insertBefore(section, document.getElementById('operations') || null);
   }
   if(!document.getElementById('practice')){
@@ -15212,6 +15222,8 @@ const MARKETPLACE_ALLOWED_RIGHTS = ['original', 'licensed', 'royalty_free', 'pla
 const BEAT_STORE_CLAIMS_KEY = 'djBattleBeatStoreClaims';
 state.beatStore = { status:'idle', listings:[], pagination:{ page:1, hasMore:false }, mine:[], mineStatus:'idle', mineTotals:null, leads:{}, error:'', loadedAt:null, config:null, seller:{ status:'idle', account:null, sales:null, error:'' } };
 // Read-only view of the Beat Store listings for feature scripts (beat_store_five.js).
+window.djbBeatStoreSeller = () => state.beatStore.seller;
+window.djbBeatStoreMine = () => state.beatStore.mine || [];
 window.djbBeatStoreListings = () => [...(state.beatStore.listings || []), ...(state.beatStore.mine || [])];
 
 function beatStoreClaims(){ return safeParse(BEAT_STORE_CLAIMS_KEY, {}) || {}; }
@@ -15305,6 +15317,7 @@ function renderBeatStoreMine(){
   if(!djbSignedIn()) return;
   renderBeatStoreSeller();
   renderBeatStoreTotals();
+  if(window.DJBSalesChart) window.DJBSalesChart.render();
   const exportBtn = document.getElementById('store-export-fans');
   if(exportBtn){ exportBtn.disabled = !store.mine.length; exportBtn.onclick = () => exportFanList().catch(err => showErrorToast(err)); }
   if(store.mineStatus === 'loading'){ list.innerHTML = '<p class="muted">Loading your listings…</p>'; return; }
@@ -15926,7 +15939,7 @@ async function loadSellerStatus(){
     seller.status = 'ready';
     seller.account = (accounts.data && accounts.data.accounts || []).find(a => a && a.provider === 'stripe') || null;
   }
-  seller.sales = sales.error ? null : { orders:sales.data && sales.data.orders || [], totals:sales.data && sales.data.totals || null };
+  seller.sales = sales.error ? null : { orders:sales.data && sales.data.orders || [], totals:sales.data && sales.data.totals || null, paidSales:sales.data && sales.data.paidSales || null };
   return seller;
 }
 function sellerCanBePaid(account){ return Boolean(account && account.accountStatus === 'connected' && account.chargesEnabled && account.payoutsEnabled); }
