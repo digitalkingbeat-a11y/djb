@@ -45,3 +45,4 @@ If you want, I can also produce the exact `supabase` CLI commands or an automate
 - 050_add_tournament_sizes_group_stage.sql — allows 4- and 32-DJ tournaments and adds the "group stage" format (`format`, `group_count`, match `stage`/`group_number`; group matches are round 0) (apply after 049)
 - 051_create_beat_wishlist.sql — creates `beat_wishlist_items` (the Beat Store heart) and adds the `wishlist_alert` / `gift_received` notification types (apply after 050)
 - 052_create_beat_gifts.sql — creates `marketplace_beat_gifts` (gift a beat at checkout, one-time hashed claim links) (apply after 051)
+- 053_create_beat_share_links.sql — creates `marketplace_share_links` and `marketplace_share_events` (beat share links that credit the DJ who shared; visitors stored only as a salted hash) (apply after 052)

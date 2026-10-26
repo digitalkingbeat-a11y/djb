@@ -7765,6 +7765,8 @@ window.djbAutomixHooks = {
   crateTrackIds: crate => resolveCrateTrackIds(crate),
   track: id => getLibraryTrackById(id),
   trackTitle: track => trackTitle(track),
+  camelot: track => (track ? parseCamelotKey(track.camelotKey || track.key) : ''),
+  bpm: track => (track ? parseBpm(track) : null),
   canLoad: id => { const track = getLibraryTrackById(id); if(!track) return false; const check = libraryTrackLoadEligibility(track); return !check || check.allowed !== false; },
   runtime: () => deckRuntimeManager
 };
@@ -15202,7 +15204,7 @@ function installStorePracticeViews(){
     const section = document.createElement('section');
     section.id = 'store';
     section.className = 'view';
-    section.innerHTML = `<div class="product-page-head"><div><span class="eyebrow accent">BEAT STORE</span><h2>Beats from DJs</h2><p>Grab a free beat or sample pack by entering your email, or buy one straight from the producer. Free downloads share your email with the producer so they can keep you posted.</p></div><div class="store-head-actions"><button class="ghost compact" id="store-refresh" type="button">Refresh</button><button class="primary compact" id="store-create" type="button">List a free beat</button></div></div><div class="store-status" id="store-status" aria-live="polite"></div><div class="store-grid" id="store-grid"></div><div class="store-more"><button class="ghost small hidden" id="store-load-more" type="button">Load More</button></div><section class="panel store-mine hidden" id="store-mine"><span class="eyebrow">YOUR LISTINGS</span><div class="store-mine-head"><h3>Your beats</h3><button class="ghost small" type="button" id="store-export-fans">Download fan list</button></div><div class="store-totals" id="store-totals"></div><div class="store-insights" id="store-insights"></div><div class="store-seller" id="store-seller"></div><div id="store-mine-list"></div></section>`;
+    section.innerHTML = `<div class="product-page-head"><div><span class="eyebrow accent">BEAT STORE</span><h2>Beats from DJs</h2><p>Grab a free beat or sample pack by entering your email, or buy one straight from the producer. Free downloads share your email with the producer so they can keep you posted.</p></div><div class="store-head-actions"><button class="ghost compact" id="store-refresh" type="button">Refresh</button><button class="primary compact" id="store-create" type="button">List a free beat</button></div></div><div class="store-status" id="store-status" aria-live="polite"></div><div class="store-grid" id="store-grid"></div><div class="store-more"><button class="ghost small hidden" id="store-load-more" type="button">Load More</button></div><section class="panel store-mine hidden" id="store-mine"><span class="eyebrow">YOUR LISTINGS</span><div class="store-mine-head"><h3>Your beats</h3><button class="ghost small" type="button" id="store-export-fans">Download fan list</button></div><div class="store-totals" id="store-totals"></div><div class="store-insights" id="store-insights"></div><div class="store-shares" id="store-shares"></div><div class="store-seller" id="store-seller"></div><div id="store-mine-list"></div></section>`;
     main.insertBefore(section, document.getElementById('operations') || null);
   }
   if(!document.getElementById('practice')){
@@ -15306,6 +15308,7 @@ function renderBeatStorePage(){
   if(window.DJBSocial) window.DJBSocial.decorateBeatStore();
   if(window.DJBOct20b) window.DJBOct20b.decorateBeatStore();
   if(window.DJBStore25) window.DJBStore25.decorateBeatStore();
+  if(window.DJBShareLinks) window.DJBShareLinks.decorate();
   renderBeatStoreMine();
 }
 function renderBeatStoreMine(){
@@ -15318,6 +15321,7 @@ function renderBeatStoreMine(){
   renderBeatStoreSeller();
   renderBeatStoreTotals();
   if(window.DJBSalesChart) window.DJBSalesChart.render();
+  if(window.DJBShareLinks) window.DJBShareLinks.renderStats();
   const exportBtn = document.getElementById('store-export-fans');
   if(exportBtn){ exportBtn.disabled = !store.mine.length; exportBtn.onclick = () => exportFanList().catch(err => showErrorToast(err)); }
   if(store.mineStatus === 'loading'){ list.innerHTML = '<p class="muted">Loading your listings…</p>'; return; }
@@ -16066,7 +16070,7 @@ async function buyBeat(listingId){
     gift = confirmed.gift || null;
   }
   const licenseType = listing.rights && listing.rights.licenseType;
-  const response = await djbRequest('/api/marketplace/checkout', { method:'POST', body:{ listingId, provider:'stripe', clientPriceCents:price, currency:listing.currency || 'USD', idempotencyKey:`buy-${listingId}-${Date.now().toString(36)}`, ...(licenseType ? { licenseType } : {}), ...(discountCode ? { discountCode } : {}), ...(gift ? { gift } : {}) } });
+  const response = await djbRequest('/api/marketplace/checkout', { method:'POST', body:{ listingId, provider:'stripe', clientPriceCents:price, currency:listing.currency || 'USD', idempotencyKey:`buy-${listingId}-${Date.now().toString(36)}`, ...(licenseType ? { licenseType } : {}), ...(discountCode ? { discountCode } : {}), ...(gift ? { gift } : {}), ...(window.DJBShareLinks ? window.DJBShareLinks.checkoutExtras(listingId) : {}) } });
   if(response.error){
     const text = response.status === 503 ? 'Paid sales aren\'t set up on the server yet.'
       : response.status === 409 ? 'This producer hasn\'t finished setting up payouts yet, so it can\'t be bought right now.'

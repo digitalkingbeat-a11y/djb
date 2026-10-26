@@ -374,6 +374,11 @@ html[data-theme="light"] .invite-welcome{border:1px solid #d1e0be;background:lin
 html[data-theme="light"] .sales-period .active{color:var(--accent-text)}
 html[data-theme="light"] .sample-tag{color:#755a00}
 html[data-theme="light"] .automix-queue .is-now{color:var(--accent-text)}
+html[data-theme="light"] .automix-key{background:rgba(15,23,42,0.12)}
+html[data-theme="light"] .automix-match--same,html[data-theme="light"] .automix-match--smooth{color:#176d2b}
+html[data-theme="light"] .automix-match--clash{color:#990000}
+html[data-theme="light"] .automix-match--unknown{background:rgba(15,23,42,0.12)}
+html[data-theme="light"] .share-link-url{background:rgba(15,23,42,0.06)}
 /* rankings.css */
 html[data-theme="light"] .rankings-console{background:#f1f3f7}
 html[data-theme="light"] .rankings-tab{border:1px solid #c4ccd8;background:#edf1f5;color:#232b36}

@@ -2,7 +2,7 @@
 // offline page instead of a blank screen. API, auth and any cross-origin (Supabase) traffic is
 // never cached. CACHE_VERSION is stamped by `npm run build` (scripts/stamp-sw-version.js) from a
 // hash of every shell file, so each change ships a new worker and the app shows "Update ready".
-const CACHE_VERSION = 'djb-shell-e307b7a1d2f8';
+const CACHE_VERSION = 'djb-shell-4e72f7e23ada';
 const CACHE_PREFIX = 'djb-shell-';
 const OFFLINE_URL = 'offline.html';
 const SHELL_FILES = [
@@ -12,7 +12,7 @@ const SHELL_FILES = [
   'manifest.webmanifest',
   'styles.css', 'battle-room.css', 'battle-results.css', 'battle-history.css', 'verified-results.css', 'rankings.css',
   'music-library.css', 'challenges.css', 'hardware.css', 'operations.css', 'professional-redesign.css', 'themes.css', 'social.css', 'light-theme.css',
-  'api_client.js', 'submission_upload.js', 'battle_modes.js', 'app.js', 'social.js', 'connect.js', 'oct20.js', 'oct20b.js', 'passkeys.js', 'invites.js', 'remix_contests.js', 'stems_zip.js', 'sales_chart.js', 'automix.js', 'window.js',
+  'api_client.js', 'submission_upload.js', 'battle_modes.js', 'app.js', 'social.js', 'connect.js', 'oct20.js', 'oct20b.js', 'passkeys.js', 'invites.js', 'remix_contests.js', 'stems_zip.js', 'sales_chart.js', 'automix.js', 'share_links.js', 'window.js',
   'studio/studio_pro.js', 'studio/studio_recording.js', 'studio/controller_mapping.js', 'studio/audio_setup.js',
   'studio/streaming.js', 'studio/playlist_transfer.js', 'studio/beatmatch_lessons.js', 'studio/track_prefs.js', 'studio/deck_perf.js', 'studio/studio_browser.js', 'studio/deck_runtime.js',
   'assets/favicon.svg', 'assets/favicon-64.png', 'assets/icon-192.png', 'assets/icon-512.png', 'assets/icon-maskable-512.png'
