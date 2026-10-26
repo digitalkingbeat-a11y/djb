@@ -191,6 +191,7 @@ html[data-theme="light"] .tour-steps button.active{border-color:#cbddb9;backgrou
 html[data-theme="light"] .guided-tour-backdrop{background:rgba(239,242,246,0.68)}
 html[data-theme="light"] .guided-tour-card{border:1px solid #cadbb4;background:#edf1f6}
 html[data-theme="light"] .guided-tour-progress{color:var(--accent-text)}
+html[data-theme="light"] .guided-tour-shade{background:rgba(239,242,246,0.86)}
 html[data-theme="light"] .compact-tabs button{background:#edf0f6;color:#242e3a}
 html[data-theme="light"] .compact-tabs button:hover,html[data-theme="light"] .battle-format-tour button:hover,html[data-theme="light"] #community-category-rail button:hover{border-color:#bec9d7}
 html[data-theme="light"] .compact-tabs button.active{background:#f0f5eb;border-color:#ceddbc;color:var(--accent-text)}
