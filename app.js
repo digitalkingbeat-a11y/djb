@@ -1516,6 +1516,7 @@ function switchView(view, options = {}){
   if(window.DJBRemix) window.DJBRemix.onView(view);
   if(window.DJBStore25) window.DJBStore25.onView(view);
   if(window.DJBAutomix) window.DJBAutomix.onView(view);
+  if(window.DJBStudio26) window.DJBStudio26.onView(view);
   window.scrollTo({top:0,behavior:'smooth'});
   return true;
 }
@@ -7770,6 +7771,12 @@ window.djbAutomixHooks = {
   canLoad: id => { const track = getLibraryTrackById(id); if(!track) return false; const check = libraryTrackLoadEligibility(track); return !check || check.allowed !== false; },
   runtime: () => deckRuntimeManager
 };
+window.djbStudioHooks = {
+  runtime: () => deckRuntimeManager,
+  recording: () => state.studioRecording || null,
+  stopRecording: () => studioRecordingManager.stop(),
+  battleTitle: () => { const s = typeof activeStudioBattleSession === 'function' ? activeStudioBattleSession() : null; return s ? (s.title || s.mode || '') : ''; }
+};
 function trackPrefsSetContext(){
   if(!trackPrefs) return null;
   const session = typeof activeStudioBattleSession === 'function' ? activeStudioBattleSession() : null;
@@ -13002,7 +13009,7 @@ function timerText(){
   const br = document.getElementById('br-clock'); if(br){ br.textContent = txt; if(timerSeconds<=60) br.classList.add('warning'); else br.classList.remove('warning'); }
 }
 function resetTimer(m=10){clearInterval(timerInt);timerInt=null;timerSeconds=m*60;timerText();const tbtn=document.getElementById('timer-toggle'); if(tbtn) tbtn.textContent='Start'; const brnote=document.getElementById('br-timer-note'); if(brnote) brnote.textContent='Ready';}
-document.getElementById('timer-toggle').onclick=()=>{if(timerInt){clearInterval(timerInt);timerInt=null;document.getElementById('timer-toggle').textContent='Start';return;}document.getElementById('timer-toggle').textContent='Pause';timerInt=setInterval(()=>{timerSeconds--;timerText();if(timerSeconds<=0){clearInterval(timerInt);timerInt=null;document.getElementById('timer-toggle').textContent='Done';}},1000)};
+document.getElementById('timer-toggle').onclick=()=>{if(timerInt){clearInterval(timerInt);timerInt=null;document.getElementById('timer-toggle').textContent='Start';return;}document.getElementById('timer-toggle').textContent='Pause';timerInt=setInterval(()=>{timerSeconds--;timerText();if(window.DJBStudio26) window.DJBStudio26.clockTick(timerSeconds);if(timerSeconds<=0){clearInterval(timerInt);timerInt=null;document.getElementById('timer-toggle').textContent='Done';}},1000)};
 
 document.getElementById('judge-score-preview').onclick=()=>{const cats=[['Timing',20],['Phrasing',20],['Transition',20],['EQ / Frequency',15],['Energy',10],['Creativity',10],['Audio',5]];document.getElementById('score-breakdown').innerHTML=`<div class="score-chip preview-label" style="grid-column:1/-1"><strong>PREVIEW</strong> — how a battle is scored. Real scores appear after a judged battle.</div>`+cats.map(x=>`<div class="score-chip">${esc(x[0])} <strong>— / ${x[1]}</strong></div>`).join('')+`<div class="score-chip" style="grid-column:1/-1;color:var(--accent)">TOTAL <strong style="color:var(--accent)">— / 100</strong></div>`;};
 

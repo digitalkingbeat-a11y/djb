@@ -379,6 +379,17 @@ html[data-theme="light"] .automix-match--same,html[data-theme="light"] .automix-
 html[data-theme="light"] .automix-match--clash{color:#990000}
 html[data-theme="light"] .automix-match--unknown{background:rgba(15,23,42,0.12)}
 html[data-theme="light"] .share-link-url{background:rgba(15,23,42,0.06)}
+html[data-theme="light"] .sf-zoom{color:var(--muted,#4b5462)}
+html[data-theme="light"] .sf-mic{border:1px solid rgba(15,23,42,0.12)}
+html[data-theme="light"] .sf-mic #sf-talk.live{color:#1a1a1a}
+html[data-theme="light"] .sf-mic-meter{background:rgba(15,23,42,0.12)}
+html[data-theme="light"] .sf-mic small{color:var(--muted,#4b5462)}
+html[data-theme="light"] .sf-awake-box button.on{color:#436600}
+html[data-theme="light"] .sf-awake-box small{color:var(--muted,#4b5462)}
+html[data-theme="light"] .timer-card.sf-warn strong{color:#755a00}
+html[data-theme="light"] .timer-card.sf-over strong{color:#990000}
+html[data-theme="light"] .sf-limit-banner.warn{color:#755a00}
+html[data-theme="light"] .sf-limit-banner.over{color:#990000}
 /* rankings.css */
 html[data-theme="light"] .rankings-console{background:#f1f3f7}
 html[data-theme="light"] .rankings-tab{border:1px solid #c4ccd8;background:#edf1f5;color:#232b36}
