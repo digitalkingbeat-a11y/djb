@@ -153,7 +153,10 @@ function sanitizeCommerceOrder(row, options = {}){
     failedAt: row.failed_at || null,
     canceledAt: row.canceled_at || null,
     refundedAt: row.refunded_at || null,
-    disputedAt: row.disputed_at || null
+    disputedAt: row.disputed_at || null,
+    // Oct 25 Store: the licence terms frozen at checkout, and whether this was bought as a gift.
+    licence: (safeObject(row.provider_metadata).licence && safeObject(row.provider_metadata).licence.label) ? safeObject(row.provider_metadata).licence : require('./store_five').licenceTerms(row.license_type),
+    gift: Boolean(safeObject(row.provider_metadata).gift)
   };
 }
 
@@ -408,7 +411,10 @@ function buildOrderPayload(input){
     provider_metadata: {
       provider: input.provider,
       sellerAccountId: input.sellerAccount.provider_account_id,
-      platformFeeBps: fee.platformFeeBps
+      platformFeeBps: fee.platformFeeBps,
+      // Oct 25 Store: copy of the plain-words licence the buyer agreed to.
+      licence: require('./store_five').licenceTerms(input.rights.license_type),
+      ...(input.gift ? { gift:true } : {})
     },
     created_at: timestamp,
     updated_at: timestamp,
@@ -762,6 +768,12 @@ async function createMarketplaceCheckout(dataClient, providerAdapter, buyerUserI
   if(clientPrice.validationError) return clientPrice;
   const clientLicense = validateClientLicense(input, rights);
   if(clientLicense.validationError) return clientLicense;
+  // Oct 25 Store: optional gift (recipient email + message).
+  let gift = null;
+  if(input.gift){
+    gift = require('./beat_gifts').validateGiftInput(input.gift);
+    if(gift.validationError) return gift;
+  }
 
   const seller = await getSellerAccount(dataClient, listing.seller_user_id, provider);
   if(seller.error || seller.validationError) return seller;
@@ -799,7 +811,8 @@ async function createMarketplaceCheckout(dataClient, providerAdapter, buyerUserI
     grossAmountCents: chargeCents,
     idempotencyKey,
     timestamp,
-    platformFeeBps: options.platformFeeBps
+    platformFeeBps: options.platformFeeBps,
+    gift: Boolean(gift)
   });
   const orderInsert = await insertSingle(dataClient, MARKETPLACE_ORDER_TABLE, orderPayload);
   if(orderInsert.error) return { error: orderInsert.error };
@@ -814,6 +827,10 @@ async function createMarketplaceCheckout(dataClient, providerAdapter, buyerUserI
   const itemPayload = buildOrderItemPayload(orderInsert.row, listing, product, rights, allowedFiles);
   const itemInsert = await insertSingle(dataClient, MARKETPLACE_ORDER_ITEM_TABLE, itemPayload);
   if(itemInsert.error){ await releaseHold(); return { error: itemInsert.error }; }
+  if(gift){
+    const pending = await require('./beat_gifts').createPendingGift(dataClient, { order:orderInsert.row, listing, gift, now });
+    if(pending.error || pending.schemaMissing){ await releaseHold(); return pending.schemaMissing ? { validationError:'Gifting needs a quick server update (SQL 052) first' } : pending; }
+  }
 
   let providerCheckout;
   try{
@@ -1048,10 +1065,16 @@ async function handleMarketplacePaymentEvent(dataClient, providerAdapter, rawEve
 
   let entitlement = null;
   let entitlementRestricted = null;
-  if(updatedOrder.payment_status === 'paid'){
+  let giftResult = null;
+  if(updatedOrder.payment_status === 'paid' && safeObject(updatedOrder.provider_metadata).gift){
+    // Oct 25 Store: a gift goes to the recipient (when they claim it), not the buyer.
+    giftResult = await require('./beat_gifts').onGiftOrderPaid(dataClient, updatedBundle, now, options.gifts || {});
+    if(giftResult.error) return { error: giftResult.error };
+  }else if(updatedOrder.payment_status === 'paid'){
     entitlement = await createOrActivatePurchaseEntitlement(dataClient, updatedBundle, timestamp);
     if(entitlement.error) return { error: entitlement.error };
   }else{
+    if(safeObject(updatedOrder.provider_metadata).gift){ try{ await require('./beat_gifts').onGiftOrderStopped(dataClient, updatedOrder, updatedOrder.payment_status, now); }catch(_e){ /* best effort */ } }
     entitlementRestricted = await restrictPurchaseEntitlements(dataClient, updatedOrder.id, updatedOrder.payment_status, timestamp);
     if(entitlementRestricted.error) return { error: entitlementRestricted.error };
   }
@@ -1068,7 +1091,8 @@ async function handleMarketplacePaymentEvent(dataClient, providerAdapter, rawEve
     entitlement: entitlement ? entitlement.entitlement : null,
     entitlementCreated:Boolean(entitlement && entitlement.created),
     entitlementActivated:Boolean(entitlement && entitlement.activated),
-    entitlementRestricted
+    entitlementRestricted,
+    gift: giftResult ? giftResult.gift || null : null
   };
 }
 
@@ -1192,6 +1216,8 @@ module.exports = {
   PURCHASE_ENTITLEMENT_SOURCE,
   checkMarketplaceCommerceSchemaReadiness,
   createMarketplaceCheckout,
+  createOrActivatePurchaseEntitlement,
+  loadOrderBundle,
   createMarketplacePaymentProviderAdapter,
   createPayPalCommerceAdapter,
   createStripeConnectAdapter,

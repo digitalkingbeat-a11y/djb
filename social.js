@@ -284,7 +284,7 @@
     const section = D.createElement('section');
     section.id = 'tournaments';
     section.className = 'view';
-    section.innerHTML = `<div class="product-page-head tournament-head"><div><span class="eyebrow accent">TOURNAMENTS</span><h2>Knockout tournaments</h2><p>8 or 16 DJs, single elimination. Every match is a normal battle, and winners move on automatically until there's a champion.</p></div><div class="tournament-actions"><button class="ghost compact" id="tournament-refresh" type="button">Refresh</button><button class="primary compact" id="tournament-create" type="button">Create a tournament</button></div></div><div class="social-note" id="tournament-status" aria-live="polite"></div><div id="tournament-detail"></div><div class="tournament-list" id="tournament-list"></div>`;
+    section.innerHTML = `<div class="product-page-head tournament-head"><div><span class="eyebrow accent">TOURNAMENTS</span><h2>Tournaments</h2><p>4, 8, 16 or 32 DJs. Straight knockout, or groups first (everyone in a group battles each other, the top two go through to the knockout). Every match is a normal battle, and winners move on automatically until there's a champion.</p></div><div class="tournament-actions"><button class="ghost compact" id="tournament-refresh" type="button">Refresh</button><button class="primary compact" id="tournament-create" type="button">Create a tournament</button></div></div><div class="social-note" id="tournament-status" aria-live="polite"></div><div id="tournament-detail"></div><div class="tournament-list" id="tournament-list"></div>`;
     main.insertBefore(section, D.getElementById('operations') || null);
   }
   function roundName(round, rounds){
@@ -359,9 +359,22 @@
   }
   function bracketHtml(t){
     const rounds = [];
-    for(let r = 1; r <= t.rounds; r++) rounds.push(t.matches.filter(m => m.round === r));
+    for(let r = 1; r <= t.rounds; r++) rounds.push(t.matches.filter(m => m.round === r && m.stage !== 'group'));
     const yourMatch = t.you && t.you.matchId;
-    return `<div class="bracket-scroll" role="region" aria-label="Tournament bracket" tabindex="0"><div class="bracket">${rounds.map((ms, i) => `<div class="bracket-round"><h5>${escHtml(roundName(i + 1, t.rounds))}</h5>${ms.map(m => `<div class="bracket-match${m.status === 'ready' || m.status === 'active' ? ' is-ready' : ''}" data-match="${escHtml(m.id)}">${slotHtml(m.first, m)}${slotHtml(m.second, m)}${deadlineHtml(m)}${forfeitHtml(m)}<div class="bracket-match-foot">${m.id === yourMatch ? `<button class="primary small" type="button" data-play-match="${escHtml(m.id)}">${m.hasBattle ? 'Go to your battle' : 'Start your battle'}</button>` : escHtml({ ready:'Ready to battle', active:'Battle in progress', completed:'Finished', bye:'Free pass', void:'No match', pending:'Waiting' }[m.status] || m.status)}</div></div>`).join('')}</div>`).join('')}</div></div>`;
+    if(t.format === 'groups' && !rounds.some(ms => ms.length)) return `${groupsHtml(t)}<p class="social-note">The knockout bracket is drawn when every group has finished: group winners meet runners-up from another group.</p>`;
+    return `${t.format === 'groups' ? groupsHtml(t) : ''}<div class="bracket-scroll" role="region" aria-label="Tournament bracket" tabindex="0"><div class="bracket">${rounds.map((ms, i) => `<div class="bracket-round"><h5>${escHtml(roundName(i + 1, t.rounds))}</h5>${ms.map(m => `<div class="bracket-match${m.status === 'ready' || m.status === 'active' ? ' is-ready' : ''}" data-match="${escHtml(m.id)}">${slotHtml(m.first, m)}${slotHtml(m.second, m)}${deadlineHtml(m)}${forfeitHtml(m)}<div class="bracket-match-foot">${m.id === yourMatch ? `<button class="primary small" type="button" data-play-match="${escHtml(m.id)}">${m.hasBattle ? 'Go to your battle' : 'Start your battle'}</button>` : escHtml({ ready:'Ready to battle', active:'Battle in progress', completed:'Finished', bye:'Free pass', void:'No match', pending:'Waiting' }[m.status] || m.status)}</div></div>`).join('')}</div>`).join('')}</div></div>`;
+  }
+  // Group stage: one table per group (played, wins, losses, points), top two marked as going through,
+  // then that group's matches with the same play/deadline/forfeit bits as the bracket.
+  function groupsHtml(t){
+    const groups = t.groups || [];
+    if(!groups.length) return '';
+    const yourMatch = t.you && t.you.matchId;
+    return `<h4>${t.stage === 'groups' ? 'Group stage' : 'Group results'}</h4><div class="tg-groups">${groups.map(g => {
+      const ms = (t.matches || []).filter(m => m.stage === 'group' && m.group === g.number);
+      return `<section class="tg-group" data-group="${escHtml(g.number)}"><h5>${escHtml(g.label || `Group ${g.number}`)}${g.complete ? ' · done' : ''}</h5><table><thead><tr><th scope="col">DJ</th><th scope="col" title="Played">P</th><th scope="col" title="Won">W</th><th scope="col" title="Lost">L</th><th scope="col" title="Points">Pts</th></tr></thead><tbody>${g.rows.map(r => `<tr class="${r.advancing ? 'tg-adv' : ''}"><td>${escHtml(r.dj ? r.dj.displayName : 'DJ')}${r.dj && r.dj.you ? ' (you)' : ''}</td><td>${escHtml(r.played)}</td><td>${escHtml(r.wins)}</td><td>${escHtml(r.losses)}</td><td>${escHtml(r.points)}</td></tr>`).join('')}</tbody></table>
+        <details><summary>${escHtml(ms.length)} match${ms.length === 1 ? '' : 'es'}</summary>${ms.map(m => `<div class="bracket-match${m.status === 'ready' || m.status === 'active' ? ' is-ready' : ''}" data-match="${escHtml(m.id)}">${slotHtml(m.first, m)}${slotHtml(m.second, m)}${deadlineHtml(m)}${forfeitHtml(m)}<div class="bracket-match-foot">${m.id === yourMatch ? `<button class="primary small" type="button" data-play-match="${escHtml(m.id)}">${m.hasBattle ? 'Go to your battle' : 'Start your battle'}</button>` : escHtml({ ready:'Ready to battle', active:'Battle in progress', completed:'Finished', void:'No match', pending:'Waiting' }[m.status] || m.status)}</div></div>`).join('')}</details></section>`;
+    }).join('')}</div><p class="social-note">▲ = going through. A win is 3 points; ties on points go to head-to-head, then fewer forfeits, then seed.</p>`;
   }
   function renderTournamentDetail(){
     const host = D.getElementById('tournament-detail');
@@ -376,7 +389,7 @@
     if(t.status === 'open' && you.host) actions.push(`<button class="primary small" type="button" id="tournament-start" ${t.entrantCount < 2 ? 'disabled' : ''}>Start now${t.entrantCount < t.capacity ? ' (empty seats become byes)' : ''}</button>`);
     const startLine = t.status === 'open' && t.startsAt ? `<p class="tournament-starts" id="tournament-starts">Starts ${escHtml(new Date(t.startsAt).toLocaleString([], { weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }))} (if at least 2 DJs have signed up)</p>` : '';
     const hostTools = hostCanEdit ? `<div class="tournament-host-tools" id="tournament-host-tools"><span class="eyebrow">HOST CONTROLS</span><div class="tournament-actions"><button class="ghost small" type="button" id="tournament-edit">Edit name${t.status === 'open' ? ' & start date' : ''}</button><button class="ghost small" type="button" id="tournament-remove-dj" ${t.entrants.length > 1 ? '' : 'disabled'}>Remove a DJ</button><button class="danger-btn small" type="button" id="tournament-cancel">Cancel tournament</button></div></div>` : '';
-    host.innerHTML = `<section class="panel"><span class="tournament-status">${escHtml(statusLabel(t))}</span><h3>${escHtml(t.title)}</h3><p class="social-note">${escHtml(t.capacity)}-DJ single elimination · ${escHtml(t.genre)} · ${t.seeding === 'signup' ? 'seeded in sign-up order' : 'random pairings'} · ${escHtml(roundLengthLabel(t.roundHours || 48))} per round · hosted by ${escHtml(t.host ? t.host.displayName : 'DJ')}</p>${startLine}
+    host.innerHTML = `<section class="panel"><span class="tournament-status">${escHtml(statusLabel(t))}</span><h3>${escHtml(t.title)}</h3><p class="social-note">${escHtml(t.capacity)}-DJ ${t.format === 'groups' ? 'groups then knockout' : 'single elimination'} · ${escHtml(t.genre)} · ${t.seeding === 'signup' ? 'seeded in sign-up order' : 'random pairings'} · ${escHtml(roundLengthLabel(t.roundHours || 48))} per round · hosted by ${escHtml(t.host ? t.host.displayName : 'DJ')}</p>${startLine}
       ${t.champion ? `<div class="tournament-champion" id="tournament-champion"><span style="font-size:32px" aria-hidden="true">🏆</span><div><span class="eyebrow">CHAMPION</span><br><strong>${escHtml(t.champion.displayName)}</strong></div></div>` : ''}
       <div class="tournament-actions">${actions.join('')}</div>${hostTools}
       ${t.status === 'active' ? `<p class="social-note">Each round has ${escHtml(roundLengthLabel(t.roundHours || 48))}. If a DJ doesn't send in a mix before the timer runs out, they lose by forfeit.</p>` : ''}
@@ -509,7 +522,8 @@
     if(!signedIn()){ if(typeof W.appAlert === 'function') W.appAlert('Sign in to create a tournament.', 'Tournaments'); return null; }
     W.openModal(`<span class="eyebrow accent">NEW TOURNAMENT</span><h3>Create a tournament</h3><div class="form-grid" id="tournament-create-form">
       <label>Name<input id="tournament-title" maxlength="120" required placeholder="Friday Night Knockout"></label>
-      <label>Size<select id="tournament-capacity"><option value="8">8 DJs (3 rounds)</option><option value="16">16 DJs (4 rounds)</option></select></label>
+      <label>Size<select id="tournament-capacity"><option value="4">4 DJs (2 rounds)</option><option value="8" selected>8 DJs (3 rounds)</option><option value="16">16 DJs (4 rounds)</option><option value="32">32 DJs (5 rounds)</option></select></label>
+      <label>Format<select id="tournament-format"><option value="knockout">Knockout (lose once and you're out)</option><option value="groups">Groups, then knockout (top 2 per group go through)</option></select></label>
       <label>Genre<input id="tournament-genre" maxlength="60" placeholder="Open Format"></label>
       <label>Pairings<select id="tournament-seeding"><option value="random">Random draw</option><option value="signup">Sign-up order (first to join is seed 1)</option></select></label>
       <label>Time per round<select id="tournament-hours">${ROUND_OPTIONS.map(([v, l]) => `<option value="${v}" ${v === 48 ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
@@ -519,7 +533,7 @@
       <div class="modal-actions"><button class="ghost" value="cancel" type="button" id="tournament-create-cancel">Cancel</button><button class="primary" type="button" id="tournament-create-submit">Create</button></div></div>`);
     D.getElementById('tournament-create-cancel').onclick = () => D.getElementById('modal').close();
     D.getElementById('tournament-create-submit').onclick = async () => {
-      const body = { title:D.getElementById('tournament-title').value, capacity:Number(D.getElementById('tournament-capacity').value), genre:D.getElementById('tournament-genre').value, seeding:D.getElementById('tournament-seeding').value, roundHours:Number(D.getElementById('tournament-hours').value) };
+      const body = { title:D.getElementById('tournament-title').value, capacity:Number(D.getElementById('tournament-capacity').value), genre:D.getElementById('tournament-genre').value, seeding:D.getElementById('tournament-seeding').value, roundHours:Number(D.getElementById('tournament-hours').value), format:(D.getElementById('tournament-format') || {}).value || 'knockout' };
       const starts = D.getElementById('tournament-starts').value;
       if(starts) body.startsAt = new Date(starts).toISOString();
       const response = await api('/api/tournaments', { method:'POST', body });
@@ -740,7 +754,9 @@
   const NOTIFY_TYPES = [
     ['tournament_match_ready', 'Tournament match is ready', 'When your next tournament battle can start (with its deadline).'],
     ['battle_chat_message', 'Battle chat messages', 'When your opponent writes in battle chat (at most one alert every 10 minutes).'],
-    ['timed_comment_received', 'Comments on your mixes', 'When someone pins a comment to a moment in one of your public mixes.']
+    ['timed_comment_received', 'Comments on your mixes', 'When someone pins a comment to a moment in one of your public mixes.'],
+    ['wishlist_alert', 'Price drops on saved beats', 'When a beat you saved with ♡ gets cheaper or its producer makes a discount code.'],
+    ['gift_received', 'Beat gifts', 'When a beat you gifted is claimed.']
   ];
   const notify = { status:'idle', prefs:null, error:'' };
   function renderNotifyPanel(){
@@ -877,7 +893,7 @@
     }else if(beat && typeof W.switchView === 'function') W.switchView('store', { fromHistory:true });
   })();
 
-  W.DJBSocial = {
+  W.DJBSocial = { _groupsHtml:groupsHtml,
     onBattleRoom, onPublicResult, onView, decorateBeatStore, renderThemePanel,
     themePref, setThemePref, applyTheme, resolvedTheme,
     loadChat, sendChat, renderChat, chatState:() => chat, stopChatPolling, unsendChat, unreadChatCount, markChatSeen, renderChatButton,

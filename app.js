@@ -1514,6 +1514,7 @@ function switchView(view, options = {}){
   if(window.DJBPasskeys) window.DJBPasskeys.onView(view);
   if(window.DJBInvites) window.DJBInvites.onView(view);
   if(window.DJBRemix) window.DJBRemix.onView(view);
+  if(window.DJBStore25) window.DJBStore25.onView(view);
   window.scrollTo({top:0,behavior:'smooth'});
   return true;
 }
@@ -11698,6 +11699,10 @@ async function openDjNotificationDestination(notificationId){
   if(destination.type === 'remix_contest' && destination.contestId && window.DJBRemix){
     return { opened:'remix_contest', response:await window.DJBRemix.openFromAnywhere(destination.contestId) };
   }
+  if(destination.type === 'store'){
+    switchView('store');
+    return { opened:'store' };
+  }
   if(destination.type === 'invites' && window.DJBInvites){
     return { opened:'invites', response:await window.DJBInvites.focus() };
   }
@@ -15206,6 +15211,8 @@ wireNewNavButtons();
 const MARKETPLACE_ALLOWED_RIGHTS = ['original', 'licensed', 'royalty_free', 'platform_cleared'];
 const BEAT_STORE_CLAIMS_KEY = 'djBattleBeatStoreClaims';
 state.beatStore = { status:'idle', listings:[], pagination:{ page:1, hasMore:false }, mine:[], mineStatus:'idle', mineTotals:null, leads:{}, error:'', loadedAt:null, config:null, seller:{ status:'idle', account:null, sales:null, error:'' } };
+// Read-only view of the Beat Store listings for feature scripts (beat_store_five.js).
+window.djbBeatStoreListings = () => [...(state.beatStore.listings || []), ...(state.beatStore.mine || [])];
 
 function beatStoreClaims(){ return safeParse(BEAT_STORE_CLAIMS_KEY, {}) || {}; }
 function saveBeatStoreClaim(listingId, claim){
@@ -15286,6 +15293,7 @@ function renderBeatStorePage(){
   if(more){ more.classList.toggle('hidden', !store.pagination.hasMore); more.onclick = () => loadBeatStore({ append:true }); }
   if(window.DJBSocial) window.DJBSocial.decorateBeatStore();
   if(window.DJBOct20b) window.DJBOct20b.decorateBeatStore();
+  if(window.DJBStore25) window.DJBStore25.decorateBeatStore();
   renderBeatStoreMine();
 }
 function renderBeatStoreMine(){
@@ -15314,6 +15322,7 @@ function renderBeatStoreMine(){
   }).join('');
   list.querySelectorAll('[data-store-leads]').forEach(btn => { btn.onclick = () => toggleBeatStoreLeads(btn.dataset.storeLeads); });
   list.querySelectorAll('[data-store-price]').forEach(btn => { btn.onclick = () => openListingPrice(btn.dataset.storePrice); });
+  if(window.DJBStore25) window.DJBStore25.decorateMine();
 }
 async function toggleBeatStoreLeads(listingId){
   if(state.beatStore.leads[listingId]){ delete state.beatStore.leads[listingId]; renderBeatStoreMine(); return; }
@@ -15373,7 +15382,8 @@ function openBeatStoreCreate(){
     <div class="store-track-list" id="store-track-list">${options || '<p class="muted">You have no tracks in My Music yet. Upload one first.</p>'}</div>
     <label>Title<input id="store-create-title" maxlength="160" placeholder="Uses the track title if empty"></label>
     <label>Description<textarea id="store-create-description" maxlength="600" rows="2" placeholder="Tell DJs what it's good for"></textarea></label>
-    <label class="store-attest"><input type="checkbox" id="store-create-attest"> I made this or have the rights to give it away for free.</label>
+    ${window.DJBStore25 ? window.DJBStore25.licencePickerHtml('store-create-licence') : ''}
+    <label class="store-attest"><input type="checkbox" id="store-create-attest"> I made this or have the rights to give it away for free and to offer the licence I picked.</label>
     <p class="store-create-error" id="store-create-error" role="alert"></p>
     <div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="store-create-submit" disabled>List it free</button></div>`);
   const submit = document.getElementById('store-create-submit');
@@ -15390,7 +15400,8 @@ function openBeatStoreCreate(){
     const result = await createFreeBeatListing({
       trackId:picked && picked.value,
       title:document.getElementById('store-create-title').value.trim(),
-      description:document.getElementById('store-create-description').value.trim()
+      description:document.getElementById('store-create-description').value.trim(),
+      licenseType:window.DJBStore25 ? window.DJBStore25.pickedLicence('store-create-licence') : undefined
     });
     if(result.error){
       const box = document.getElementById('store-create-error');
@@ -15408,7 +15419,7 @@ function openBeatStoreCreate(){
 }
 
 // Listing → free-download file → free-for-email offer. Each step reports its own problem.
-async function createFreeBeatListing({ trackId, title, description } = {}){
+async function createFreeBeatListing({ trackId, title, description, licenseType } = {}){
   const track = (state.library || []).find(item => String(item.id) === String(trackId));
   const check = beatStoreTrackEligibility(track);
   if(!check.ok) return { error:check.reason };
@@ -15422,7 +15433,10 @@ async function createFreeBeatListing({ trackId, title, description } = {}){
     downloadAllowed:true,
     previewAllowed:true,
     displayPriceCents:0,
-    licenseType:'creator_license'
+    // Oct 25 Store: the seller picks the licence (plain-words terms are shown to buyers).
+    licenseType:['battle_use', 'creator_license', 'royalty_free_use'].includes(licenseType) ? licenseType : 'creator_license',
+    ...(licenseType === 'royalty_free_use' || licenseType === 'creator_license' ? { commercialUseAllowed:true } : {}),
+    ...(licenseType === 'creator_license' || !licenseType ? { attributionRequired:true } : {})
   };
   let response = await djbRequest('/api/marketplace/listings', { method:'POST', body:listingBody });
   let listing = response.data && response.data.listing;
@@ -16031,7 +16045,15 @@ async function buyBeat(listingId){
   if(!djbSignedIn()){ appAlert('Sign in to buy beats, so your download stays tied to your account.', 'Beat Store'); return { error:'signed out' }; }
   if(djbOffline()){ appAlert('You\'re offline. Connect to buy.', 'Beat Store'); return { error:'offline' }; }
   const discountCode = typeof window.djbDiscountCodeFor === 'function' ? window.djbDiscountCodeFor(listingId) : '';
-  const response = await djbRequest('/api/marketplace/checkout', { method:'POST', body:{ listingId, provider:'stripe', clientPriceCents:price, currency:listing.currency || 'USD', idempotencyKey:`buy-${listingId}-${Date.now().toString(36)}`, ...(discountCode ? { discountCode } : {}) } });
+  // Oct 25 Store: show the plain-words licence first, and offer "send as a gift".
+  let gift = null;
+  if(window.DJBStore25){
+    const confirmed = await window.DJBStore25.confirmPurchase(listing);
+    if(!confirmed || confirmed.cancelled) return { cancelled:true };
+    gift = confirmed.gift || null;
+  }
+  const licenseType = listing.rights && listing.rights.licenseType;
+  const response = await djbRequest('/api/marketplace/checkout', { method:'POST', body:{ listingId, provider:'stripe', clientPriceCents:price, currency:listing.currency || 'USD', idempotencyKey:`buy-${listingId}-${Date.now().toString(36)}`, ...(licenseType ? { licenseType } : {}), ...(discountCode ? { discountCode } : {}), ...(gift ? { gift } : {}) } });
   if(response.error){
     const text = response.status === 503 ? 'Paid sales aren\'t set up on the server yet.'
       : response.status === 409 ? 'This producer hasn\'t finished setting up payouts yet, so it can\'t be bought right now.'
@@ -16043,7 +16065,8 @@ async function buyBeat(listingId){
   const order = response.data && response.data.order || {};
   const url = response.data && response.data.checkout && response.data.checkout.redirectUrl;
   if(!isStripeHostedUrl(url)){ appAlert('The server didn\'t return a Stripe checkout link.', 'Beat Store'); return { error:'unsafe url' }; }
-  saveBeatStorePurchase(listingId, { orderId:order.id, title:listing.title, startedAt:new Date().toISOString(), paid:false });
+  if(gift) saveBeatStorePurchase(`gift-${order.id}`, { orderId:order.id, title:listing.title, startedAt:new Date().toISOString(), paid:false, gift:true, giftTo:gift.recipientEmail });
+  else saveBeatStorePurchase(listingId, { orderId:order.id, title:listing.title, startedAt:new Date().toISOString(), paid:false });
   storeNavigate(url);
   return { redirected:true, url, orderId:order.id };
 }
@@ -16068,6 +16091,12 @@ async function openCheckoutSuccess(orderId, options = {}){
   const result = await checkOrderPaid(orderId, options);
   const box = document.getElementById('checkout-result');
   if(!box) return result;
+  if(result.paid && ((purchase && purchase.gift) || (result.order && result.order.gift))){
+    if(purchase) saveBeatStorePurchase(purchase.listingId, { paid:true, paidAt:new Date().toISOString() });
+    box.dataset.checkoutState = 'paid';
+    box.innerHTML = `<p class="checkout-ok">Payment received. We've emailed ${esc(purchase && purchase.giftTo || 'your friend')} a one-time link to claim ${esc(title)}.</p><p class="muted">It shows up in their purchases when they sign in with that email. You'll get an alert when they claim it.</p>`;
+    return result;
+  }
   if(result.paid){
     if(purchase) saveBeatStorePurchase(purchase.listingId, { paid:true, paidAt:new Date().toISOString() });
     else if(result.order && result.order.listingId) saveBeatStorePurchase(result.order.listingId, { orderId, paid:true, title });

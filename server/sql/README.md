@@ -42,3 +42,6 @@ If you want, I can also produce the exact `supabase` CLI commands or an automate
 - 047_add_discount_code_reservations.sql — a discount code use now only counts after Stripe confirms payment (held while the buyer is on the checkout page, given back if it expires or fails) (apply after 046)
 - 048_create_dj_invites.sql — creates `dj_invite_codes` and `dj_invite_joins` (personal invite-a-friend links with join counts) and adds the "A friend joined from your invite" notification type (apply after 047)
 - 049_create_remix_contests.sql — creates `remix_contests`, `remix_contest_entries` and `remix_contest_votes` (remix contests with crowd voting), lets contests and remixes be reported, and adds the "Your remix won" / "Sell your winning remix?" notification types (apply after 048)
+- 050_add_tournament_sizes_group_stage.sql — allows 4- and 32-DJ tournaments and adds the "group stage" format (`format`, `group_count`, match `stage`/`group_number`; group matches are round 0) (apply after 049)
+- 051_create_beat_wishlist.sql — creates `beat_wishlist_items` (the Beat Store heart) and adds the `wishlist_alert` / `gift_received` notification types (apply after 050)
+- 052_create_beat_gifts.sql — creates `marketplace_beat_gifts` (gift a beat at checkout, one-time hashed claim links) (apply after 051)

@@ -9,13 +9,14 @@ const { cleanText, isMissingTable } = require('./social_helpers');
 const TABLE = 'push_subscriptions';
 const SCHEMA = '040_create_push_subscriptions';
 // Reuses the Oct 19b Activity-bell types, plus incoming/accepted challenges.
-const PUSH_TYPES = Object.freeze(['tournament_match_ready', 'battle_chat_message', 'timed_comment_received', 'direct_message', 'challenge_received']);
+const PUSH_TYPES = Object.freeze(['tournament_match_ready', 'battle_chat_message', 'timed_comment_received', 'direct_message', 'challenge_received', 'wishlist_alert']);
 const PUSH_LABELS = Object.freeze({
   tournament_match_ready:'Tournament match is ready',
   battle_chat_message:'New battle chat message',
   timed_comment_received:'Someone commented on your mix',
   direct_message:'New direct message',
-  challenge_received:'New challenge (or your challenge was accepted)'
+  challenge_received:'New challenge (or your challenge was accepted)',
+  wishlist_alert:'Price drops and codes on beats you saved'
 });
 const MAX_DEVICES = 10;
 
@@ -98,11 +99,12 @@ function payloadFor(row){
     battle_chat_message:actor ? `${actor} sent a battle chat message` : 'New battle chat message',
     timed_comment_received:actor ? `${actor} commented on your mix` : 'New comment on your mix',
     direct_message:actor ? `New message from ${actor}` : 'New direct message',
-    challenge_received:row.type === 'challenge_accepted' ? 'Your challenge was accepted' : actor ? `${actor} challenged you` : 'You have a new challenge'
+    challenge_received:row.type === 'challenge_accepted' ? 'Your challenge was accepted' : actor ? `${actor} challenged you` : 'You have a new challenge',
+    wishlist_alert:'A beat you saved just got cheaper'
   };
   const dest = row.destination || {};
-  const view = dest.type === 'messages' ? 'messages' : dest.type === 'tournament' ? 'tournaments' : type === 'challenge_received' ? 'notifications' : 'activity';
-  return { title:titles[type] || 'DJ Battle', body:'Tap to open DJ Battle', tag:`djb-${type}`, url:`./#${view}`, type };
+  const view = dest.type === 'messages' ? 'messages' : dest.type === 'tournament' ? 'tournaments' : dest.type === 'store' ? 'store' : type === 'challenge_received' ? 'notifications' : 'activity';
+  return { title:titles[type] || 'DJ Battle', body:type === 'wishlist_alert' && row.summary ? cleanText(row.summary, 140) : 'Tap to open DJ Battle', tag:`djb-${type}`, url:`./#${view}`, type };
 }
 
 // sender(subscription, payloadString) → Promise; defaults to the web-push library.
