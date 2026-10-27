@@ -46,3 +46,4 @@ If you want, I can also produce the exact `supabase` CLI commands or an automate
 - 051_create_beat_wishlist.sql — creates `beat_wishlist_items` (the Beat Store heart) and adds the `wishlist_alert` / `gift_received` notification types (apply after 050)
 - 052_create_beat_gifts.sql — creates `marketplace_beat_gifts` (gift a beat at checkout, one-time hashed claim links) (apply after 051)
 - 053_create_beat_share_links.sql — creates `marketplace_share_links` and `marketplace_share_events` (beat share links that credit the DJ who shared; visitors stored only as a salted hash) (apply after 052)
+- 054_allow_m4a_mix_uploads.sql — lets the private `battle-mixes` bucket accept iPhone/Safari takes (audio/mp4, .m4a) (apply after 053)

@@ -332,6 +332,7 @@ function audioFileKind(product, path){
   const mime = cleanString(product.verified_mime_type || product.declared_mime_type || product.audio_mime_type, '', 80).toLowerCase();
   if(/mpeg|mp3/.test(mime) || /\.mp3$/i.test(path)) return { ext:'mp3', mimeType:'audio/mpeg' };
   if(/wav/.test(mime) || /\.wav$/i.test(path)) return { ext:'wav', mimeType:'audio/wav' };
+  if(/mp4|m4a|aac/.test(mime) || /\.(m4a|mp4)$/i.test(path)) return { ext:'m4a', mimeType:'audio/mp4' };
   return { ext:'webm', mimeType:'audio/webm' };
 }
 
@@ -1237,5 +1238,6 @@ module.exports = {
   sanitizeSellerAccount,
   upsertMarketplaceSellerAccount,
   verifyStripeSignature,
-  withOrderReturnParam
+  withOrderReturnParam,
+  audioFileKind
 };

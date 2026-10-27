@@ -1,4 +1,27 @@
 (function(global){
+  // Recording formats in order of preference. Chrome, Edge and Firefox record WebM/Opus;
+  // iPhone and Mac Safari record MP4/AAC, which we save as .m4a so phones and players open it.
+  const RECORDING_FORMATS = [
+    { mime:'audio/webm;codecs=opus', type:'audio/webm', ext:'webm', label:'WebM (Opus)' },
+    { mime:'audio/webm', type:'audio/webm', ext:'webm', label:'WebM' },
+    { mime:'audio/mp4;codecs=mp4a.40.2', type:'audio/mp4', ext:'m4a', label:'M4A (AAC)' },
+    { mime:'audio/mp4', type:'audio/mp4', ext:'m4a', label:'M4A (AAC)' }
+  ];
+  const DEFAULT_FORMAT = RECORDING_FORMATS[1];
+  function pickRecordingFormat(Ctor){
+    if(!Ctor || typeof Ctor.isTypeSupported !== 'function') return null;
+    for(const f of RECORDING_FORMATS){ try{ if(Ctor.isTypeSupported(f.mime)) return f; }catch(e){} }
+    return null;
+  }
+  // What the recorder really produced (Safari can ignore the hint), falling back to what we asked for.
+  function formatFromMime(mime, fallback){
+    const m = String(mime || '').toLowerCase();
+    if(/^audio\/mp4|^video\/mp4|aac|mp4a/.test(m)) return RECORDING_FORMATS[/mp4a|aac/.test(m) ? 2 : 3];
+    if(/webm/.test(m)) return /opus/.test(m) ? RECORDING_FORMATS[0] : RECORDING_FORMATS[1];
+    return fallback || DEFAULT_FORMAT;
+  }
+  function extFromName(name){ const m = /\.([a-z0-9]{2,5})$/i.exec(String(name || '')); return m ? m[1].toLowerCase() : ''; }
+
   function createStudioRecording(deps){
     const win = deps.window || global;
     const doc = deps.document || win.document;
@@ -11,6 +34,7 @@
     let meterTimer = null;
     let recorder = null;
     let chunks = [];
+    let recordingFormat = DEFAULT_FORMAT;
     let countInTimer = null;
     let reviewPeaks = null;
     const setT = deps.setTimeout || ((fn, ms) => setTimeout(fn, ms));
@@ -72,7 +96,7 @@
       if(rec && recordState.state === 'countin') rec.disabled = true;
       if(reviewPanel) reviewPanel.classList.toggle('hidden', !review);
       if(audio && objectUrl && audio.src !== objectUrl) audio.src = objectUrl;
-      if(metadata) metadata.innerHTML = review ? `<span>File</span><strong>${esc(recordState.fileName || 'Recorded take')}</strong><span>State</span><strong>${esc(recordState.state)}</strong><span>Submit</span><strong>${recordState.submitted ? 'Submitted' : 'Not submitted'}</strong>${recordState.draftSaved ? '<span>Draft</span><strong>Saved to Library → Drafts</strong>' : ''}` : '';
+      if(metadata) metadata.innerHTML = review ? `<span>File</span><strong>${esc(recordState.fileName || 'Recorded take')}</strong>${recordState.format && recordState.format.label ? `<span>Format</span><strong>${esc(recordState.format.label)}</strong>` : ''}<span>State</span><strong>${esc(recordState.state)}</strong><span>Submit</span><strong>${recordState.submitted ? 'Submitted' : 'Not submitted'}</strong>${recordState.draftSaved ? '<span>Draft</span><strong>Saved to Library → Drafts</strong>' : ''}` : '';
       const saveBtn = doc.getElementById('save-recording-draft');
       if(saveBtn){ saveBtn.textContent = recordState.draftSaved ? 'Draft Saved' : 'Save Draft'; saveBtn.disabled = Boolean(recordState.draftSaved); }
       if(duration) duration.textContent = recordState.duration || elapsedText(recordState.elapsedMs);
@@ -153,14 +177,16 @@
       const tracklist = deps.getTracklist && startedAtMs ? deps.getTracklist(startedAtMs, now()) : [];
       animateMeters(false);
       const elapsedMs = state.studioRecording.elapsedMs || (state.studioRecording.startedAt ? now() - state.studioRecording.startedAt : 0);
-      const name = `dj-battle-take-${now()}.webm`;
+      const chunkType = chunks[0] && chunks[0].type;
+      const fmt = chunkType ? formatFromMime(chunkType, recordingFormat) : recordingFormat;
+      const name = `dj-battle-take-${now()}.${fmt.ext}`;
       const BlobCtor = win.Blob || global.Blob;
       const FileCtor = win.File || global.File;
-      const blob = BlobCtor ? new BlobCtor(chunks, { type:'audio/webm' }) : null;
-      win.lastRecordedMixFile = FileCtor && blob ? new FileCtor([blob], name, { type:'audio/webm' }) : blob;
+      const blob = BlobCtor ? new BlobCtor(chunks, { type:fmt.type }) : null;
+      win.lastRecordedMixFile = FileCtor && blob ? new FileCtor([blob], name, { type:fmt.type }) : blob;
       if(objectUrl && win.URL && win.URL.revokeObjectURL) win.URL.revokeObjectURL(objectUrl);
       objectUrl = blob && win.URL && win.URL.createObjectURL ? win.URL.createObjectURL(blob) : '';
-      state.studioRecording = { ...state.studioRecording, state:'review', armed:false, startedAt:null, elapsedMs, fileName:name, duration:elapsedText(elapsedMs), error:'', submitted:false, tracklist };
+      state.studioRecording = { ...state.studioRecording, state:'review', armed:false, startedAt:null, elapsedMs, fileName:name, format:{ type:fmt.type, ext:fmt.ext, label:fmt.label }, duration:elapsedText(elapsedMs), error:'', submitted:false, tracklist };
       persist();
       reviewPeaks = null;
       renderWaveform();
@@ -244,7 +270,10 @@
         if(!audioCtx || !dest || !dest.stream) throw new Error('Recording graph is unavailable.');
         if(audioCtx.resume) await audioCtx.resume();
         chunks = [];
-        recorder = new MediaRecorderCtor(dest.stream);
+        const wanted = pickRecordingFormat(MediaRecorderCtor);
+        try{ recorder = wanted ? new MediaRecorderCtor(dest.stream, { mimeType:wanted.mime }) : new MediaRecorderCtor(dest.stream); }
+        catch(e){ recorder = new MediaRecorderCtor(dest.stream); }
+        recordingFormat = formatFromMime(recorder.mimeType, wanted);
         recorder.ondataavailable = event => { if(event.data && event.data.size) chunks.push(event.data); };
         recorder.onerror = event => {
           state.studioRecording = { ...state.studioRecording, state:'armed', error:event.error && event.error.message || 'Recording error.' };
@@ -376,7 +405,7 @@
     }
 
     // Safe filename from the battle title and the take date, e.g. "friday-night-house-battle-2026-10-18.webm".
-    function downloadFileName(title, date){
+    function downloadFileName(title, date, ext){
       // Duck-typed so a Date from another realm (e.g. a test harness) is still honoured.
       const d = date && typeof date.getFullYear === 'function' && !isNaN(date.getTime()) ? date : new Date(now());
       const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -387,7 +416,8 @@
         .replace(/^-+|-+$/g, '')
         .slice(0, 60)
         .replace(/-+$/g, '');
-      return `${slug || 'dj-battle-mix'}-${stamp}.webm`;
+      const safeExt = /^(webm|m4a|mp4|mp3|wav)$/.test(String(ext || '')) ? ext : 'webm';
+      return `${slug || 'dj-battle-mix'}-${stamp}.${safeExt}`;
     }
 
     function download(){
@@ -399,7 +429,7 @@
       }
       const session = deps.activeStudioBattleSession ? deps.activeStudioBattleSession() : null;
       const title = session && (session.title || session.name) || 'Practice mix';
-      const name = downloadFileName(title, new Date(now()));
+      const name = downloadFileName(title, new Date(now()), extFromName(file.name) || formatFromMime(file.type).ext);
       const URLs = win.URL || global.URL;
       const url = URLs && URLs.createObjectURL ? URLs.createObjectURL(file) : '';
       if(!url) return { ok:false, error:'download_unavailable', name };
@@ -485,9 +515,10 @@
       checkLimit,
       cancelCountIn,
       getReviewPeaks: () => reviewPeaks,
-      getObjectUrl: () => objectUrl
+      getObjectUrl: () => objectUrl,
+      getRecordingFormat: () => recordingFormat
     };
   }
 
-  global.DJBattleStudioRecording = { create: createStudioRecording };
+  global.DJBattleStudioRecording = { create: createStudioRecording, RECORDING_FORMATS, pickRecordingFormat, formatFromMime };
 })(typeof window !== 'undefined' ? window : globalThis);
