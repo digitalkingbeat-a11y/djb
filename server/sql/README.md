@@ -47,3 +47,4 @@ If you want, I can also produce the exact `supabase` CLI commands or an automate
 - 052_create_beat_gifts.sql — creates `marketplace_beat_gifts` (gift a beat at checkout, one-time hashed claim links) (apply after 051)
 - 053_create_beat_share_links.sql — creates `marketplace_share_links` and `marketplace_share_events` (beat share links that credit the DJ who shared; visitors stored only as a salted hash) (apply after 052)
 - 054_allow_m4a_mix_uploads.sql — lets the private `battle-mixes` bucket accept iPhone/Safari takes (audio/mp4, .m4a) (apply after 053)
+- 055_add_profile_links.sql — adds `website_url` and `booking_info` to `dj_progression_profiles` (website link and booking info on public DJ profiles) (apply after 054)

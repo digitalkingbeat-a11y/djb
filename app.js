@@ -427,7 +427,7 @@ function currentUser(){
   const bio = local.bio || String(meta.bio || '').replace(/\s+/g, ' ').trim().slice(0, LOCAL_PROFILE_BIO_MAX);
   // Profile photo: this browser's copy first, then the account's avatar_url (set by the server after upload).
   const avatar = local.avatar || (isSafeAvatarUrl(meta.avatar_url) && /^https:/i.test(String(meta.avatar_url)) ? String(meta.avatar_url) : '');
-  return { ...base, hometown, bio, avatar };
+  return { ...base, hometown, bio, avatar, website:local.website || '', bookingInfo:local.bookingInfo || '' };
 }
 
 // The DJ's real belt from local progress (White is the true starting belt for everyone).
@@ -452,6 +452,56 @@ const LOCAL_PROFILE_NAME_MAX = 40;
 const LOCAL_PROFILE_INITIALS_MAX = 3;
 const LOCAL_PROFILE_HOMETOWN_MAX = 60;
 const LOCAL_PROFILE_BIO_MAX = 160;
+const PROFILE_WEBSITE_MAX = 200;
+const PROFILE_BOOKING_MAX = 120;
+
+// Website link for a DJ's profile: http(s) only, no username/password, a real-looking host.
+// "djdan.com" is saved as "https://djdan.com/". Same rules as server/profile_links.js.
+function normalizeProfileWebsite(value){
+  let text = String(value == null ? '' : value).trim();
+  if(!text) return { value:'' };
+  const bad = { error:'Website must be a web address like https://yoursite.com.' };
+  if(/[\s<>"'`\\]/.test(text) || /[\u0000-\u001f\u007f]/.test(text)) return bad;
+  if(!/^[a-z][a-z0-9+.-]*:/i.test(text)) text = `https://${text.replace(/^\/+/, '')}`;
+  let url;
+  try{ url = new URL(text); }catch(e){ return bad; }
+  if(url.protocol !== 'https:' && url.protocol !== 'http:') return { error:'Website must start with http:// or https://.' };
+  if(url.username || url.password) return { error:'Website must not include a username or password.' };
+  if(!url.hostname || !/^[a-z0-9.-]+$/i.test(url.hostname) || !/\.[a-z]{2,}$/i.test(url.hostname) || /\.\./.test(url.hostname)) return bad;
+  if(url.href.length > PROFILE_WEBSITE_MAX) return { error:`Website must be ${PROFILE_WEBSITE_MAX} characters or fewer.` };
+  return { value:url.href };
+}
+// Booking info: one short line of plain text, e.g. an email, a phone number or "DM for bookings".
+function normalizeBookingInfo(value){
+  const text = String(value == null ? '' : value).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+  if(text.length > PROFILE_BOOKING_MAX) return { error:`Booking info must be ${PROFILE_BOOKING_MAX} characters or fewer.` };
+  return { value:text };
+}
+// Short label for a website link: "djdan.com/mixes" (no scheme, no trailing slash).
+function profileWebsiteLabel(url){
+  try{ const u = new URL(url); return `${u.hostname.replace(/^www\./i, '')}${u.pathname === '/' ? '' : u.pathname}`.slice(0, 60); }catch(e){ return ''; }
+}
+// Booking text with any email address turned into a mailto link. Everything is escaped.
+function bookingInfoHtml(text){
+  const clean = normalizeBookingInfo(text);
+  if(clean.error || !clean.value) return '';
+  const re = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+  let out = ''; let last = 0; let m;
+  while((m = re.exec(clean.value))){
+    out += esc(clean.value.slice(last, m.index)) + `<a href="mailto:${esc(m[0])}">${esc(m[0])}</a>`;
+    last = m.index + m[0].length;
+  }
+  return out + esc(clean.value.slice(last));
+}
+// Website + booking rows for a profile. Returns '' when the DJ has neither.
+function profileLinksHtml(links = {}){
+  const site = normalizeProfileWebsite(links.website);
+  const booking = bookingInfoHtml(links.bookingInfo);
+  const rows = [];
+  if(!site.error && site.value) rows.push(`<div class="profile-link-row"><span>Website</span><a class="profile-website-link" href="${esc(site.value)}" target="_blank" rel="noopener noreferrer">${esc(profileWebsiteLabel(site.value) || site.value)} ↗</a></div>`);
+  if(booking) rows.push(`<div class="profile-link-row"><span>Booking</span><p class="profile-booking-info">${booking}</p></div>`);
+  return rows.length ? `<div class="profile-links">${rows.join('')}</div>` : '';
+}
 
 function readLocalProfile(userId){
   const saved = plainObject(safeParse(`${LOCAL_PROFILE_STORAGE_PREFIX}${userId}`, {}));
@@ -469,7 +519,11 @@ function normalizeLocalProfileInput(input = {}){
   if(hometown.length > LOCAL_PROFILE_HOMETOWN_MAX) return { error:`Hometown must be ${LOCAL_PROFILE_HOMETOWN_MAX} characters or fewer.` };
   if(bio.length > LOCAL_PROFILE_BIO_MAX) return { error:`Bio must be ${LOCAL_PROFILE_BIO_MAX} characters or fewer.` };
   const avatar = isSafeAvatarUrl(input.avatar) ? String(input.avatar) : '';
-  return { value:{ displayName, initials, hometown, bio, avatar } };
+  const website = normalizeProfileWebsite(input.website);
+  if(website.error) return website;
+  const bookingInfo = normalizeBookingInfo(input.bookingInfo);
+  if(bookingInfo.error) return bookingInfo;
+  return { value:{ displayName, initials, hometown, bio, avatar, website:website.value, bookingInfo:bookingInfo.value } };
 }
 
 function saveLocalProfile(input){
@@ -480,6 +534,8 @@ function saveLocalProfile(input){
   const value = { displayName:normalized.value.displayName, initials:normalized.value.initials || initialsForName(normalized.value.displayName) };
   if(normalized.value.hometown) value.hometown = normalized.value.hometown;
   if(normalized.value.bio) value.bio = normalized.value.bio;
+  if(normalized.value.website) value.website = normalized.value.website;
+  if(normalized.value.bookingInfo) value.bookingInfo = normalized.value.bookingInfo;
   // avatar: undefined keeps the current photo, '' or null removes it.
   const keepAvatar = input && input.avatar === undefined ? readLocalProfile(before.id).avatar : normalized.value.avatar;
   if(keepAvatar) value.avatar = keepAvatar;
@@ -497,9 +553,9 @@ function saveLocalProfile(input){
 function openEditProfileModal(){
   const user = currentUser();
   const scopeNote = user.signedIn
-    ? 'Saved in this browser only. Your account profile on the server is not changed.'
+    ? 'Saved in this browser. Your website and booking info are also saved to your account so other DJs can see them.'
     : 'Saved in this browser only. Sign in later to sync battles and results.';
-  openModal(`<span class="eyebrow accent">PROFILE</span><h3>Edit Profile</h3><p style="color:var(--muted)" id="edit-profile-scope">${esc(scopeNote)}</p><div class="edit-profile-photo"><div class="avatar huge${user.avatar ? ' has-photo' : ''}" id="edit-profile-photo-preview">${avatarInnerHtml(user.initials, user.avatar)}</div><div class="edit-profile-photo-actions"><label class="ghost small file-button" for="edit-profile-photo">Choose photo<input type="file" id="edit-profile-photo" accept="${AVATAR_ACCEPT}" hidden></label><button class="ghost small" type="button" id="edit-profile-photo-remove"${user.avatar ? '' : ' disabled'}>Remove photo</button><small>${esc(AVATAR_HINT)}</small><small id="edit-profile-photo-status" class="edit-profile-photo-status" aria-live="polite"></small></div></div><div class="form-grid"><label>Display name<input id="edit-profile-name" maxlength="${LOCAL_PROFILE_NAME_MAX}" autocomplete="nickname" value="${esc(user.displayName)}"></label><label>Initials (avatar)<input id="edit-profile-initials" maxlength="${LOCAL_PROFILE_INITIALS_MAX}" value="${esc(user.initials)}"></label><label>Hometown <small style="color:var(--muted)">(optional, shown on your player card)</small><input id="edit-profile-hometown" maxlength="${LOCAL_PROFILE_HOMETOWN_MAX}" autocomplete="address-level2" placeholder="e.g. Atlanta, GA" value="${esc(user.hometown || '')}"></label><label class="full">Short bio <small style="color:var(--muted)">(optional)</small><textarea id="edit-profile-bio" maxlength="${LOCAL_PROFILE_BIO_MAX}" rows="2" placeholder="A line about your style">${esc(user.bio || '')}</textarea></label></div><p id="edit-profile-error" class="hidden" role="alert" style="color:var(--danger)"></p><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="save-profile">Save Profile</button></div>`);
+  openModal(`<span class="eyebrow accent">PROFILE</span><h3>Edit Profile</h3><p style="color:var(--muted)" id="edit-profile-scope">${esc(scopeNote)}</p><div class="edit-profile-photo"><div class="avatar huge${user.avatar ? ' has-photo' : ''}" id="edit-profile-photo-preview">${avatarInnerHtml(user.initials, user.avatar)}</div><div class="edit-profile-photo-actions"><label class="ghost small file-button" for="edit-profile-photo">Choose photo<input type="file" id="edit-profile-photo" accept="${AVATAR_ACCEPT}" hidden></label><button class="ghost small" type="button" id="edit-profile-photo-remove"${user.avatar ? '' : ' disabled'}>Remove photo</button><small>${esc(AVATAR_HINT)}</small><small id="edit-profile-photo-status" class="edit-profile-photo-status" aria-live="polite"></small></div></div><div class="form-grid"><label>Display name<input id="edit-profile-name" maxlength="${LOCAL_PROFILE_NAME_MAX}" autocomplete="nickname" value="${esc(user.displayName)}"></label><label>Initials (avatar)<input id="edit-profile-initials" maxlength="${LOCAL_PROFILE_INITIALS_MAX}" value="${esc(user.initials)}"></label><label>Hometown <small style="color:var(--muted)">(optional, shown on your player card)</small><input id="edit-profile-hometown" maxlength="${LOCAL_PROFILE_HOMETOWN_MAX}" autocomplete="address-level2" placeholder="e.g. Atlanta, GA" value="${esc(user.hometown || '')}"></label><label class="full">Short bio <small style="color:var(--muted)">(optional)</small><textarea id="edit-profile-bio" maxlength="${LOCAL_PROFILE_BIO_MAX}" rows="2" placeholder="A line about your style">${esc(user.bio || '')}</textarea></label><label class="full">Website <small style="color:var(--muted)">(optional)</small><input id="edit-profile-website" type="url" inputmode="url" autocomplete="url" maxlength="${PROFILE_WEBSITE_MAX}" placeholder="e.g. https://yoursite.com" value="${esc(user.website || '')}"></label><label class="full">Booking info <small style="color:var(--muted)">(optional, e.g. email, phone or “DM for bookings”)</small><input id="edit-profile-booking" maxlength="${PROFILE_BOOKING_MAX}" placeholder="e.g. bookings@yoursite.com" value="${esc(user.bookingInfo || '')}"></label></div><p id="edit-profile-error" class="hidden" role="alert" style="color:var(--danger)"></p><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="save-profile">Save Profile</button></div>`);
   const nameInput = document.getElementById('edit-profile-name');
   const initialsInput = document.getElementById('edit-profile-initials');
   let initialsTouched = false;
@@ -530,8 +586,10 @@ function openEditProfileModal(){
   if(save) save.onclick = () => {
     const hometownInput = document.getElementById('edit-profile-hometown');
     const bioInput = document.getElementById('edit-profile-bio');
+    const websiteInput = document.getElementById('edit-profile-website');
+    const bookingInput = document.getElementById('edit-profile-booking');
     const avatarValue = pendingAvatar === undefined ? undefined : pendingAvatar === null ? '' : pendingAvatar.dataUrl;
-    const result = saveLocalProfile({ displayName:nameInput ? nameInput.value : '', initials:initialsInput ? initialsInput.value : '', hometown:hometownInput ? hometownInput.value : '', bio:bioInput ? bioInput.value : '', avatar:avatarValue });
+    const result = saveLocalProfile({ displayName:nameInput ? nameInput.value : '', initials:initialsInput ? initialsInput.value : '', hometown:hometownInput ? hometownInput.value : '', bio:bioInput ? bioInput.value : '', website:websiteInput ? websiteInput.value : '', bookingInfo:bookingInput ? bookingInput.value : '', avatar:avatarValue });
     const errorNode = document.getElementById('edit-profile-error');
     if(result.error){
       if(errorNode){ errorNode.textContent = result.error; errorNode.classList.remove('hidden'); }
@@ -542,8 +600,46 @@ function openEditProfileModal(){
     renderPosts();
     renderProfile();
     if(pendingAvatar !== undefined) result.avatarSync = syncAvatarToServer(pendingAvatar);
+    result.linksSync = syncProfileLinksToServer(result.value);
     return result;
   };
+}
+
+// Website + booking info go to the account too (PUT /api/me/profileLinks) so other DJs see them.
+// Guests and offline use keep them in this browser only.
+async function syncProfileLinksToServer(user = currentUser()){
+  const api = window.DJBattleApi;
+  if(!user || !user.signedIn || !api || typeof api.apiRequest !== 'function') return { localOnly:true };
+  const saved = await api.apiRequest('/api/me/profileLinks', { method:'PUT', body:{ website:user.website || '', bookingInfo:user.bookingInfo || '' } });
+  if(saved.error){
+    const msg = saved.data && saved.data.error || saved.error;
+    appAlert(`Website and booking info saved in this browser only: ${msg}`, 'Profile');
+    return { error:msg };
+  }
+  return { saved:true, links:saved.data && saved.data.links };
+}
+// Signed in on a new browser: fill this browser's copy from the account once.
+let profileLinksLoadedFor = '';
+async function loadProfileLinksFromServer(){
+  const user = currentUser();
+  const api = window.DJBattleApi;
+  if(!user.signedIn || profileLinksLoadedFor === user.id || !api || typeof api.apiRequest !== 'function') return null;
+  profileLinksLoadedFor = user.id;
+  const res = await api.apiRequest('/api/me/profileLinks');
+  const links = res && !res.error && res.data && res.data.links;
+  if(!links) return null;
+  const local = readLocalProfile(user.id);
+  if(local.website || local.bookingInfo) return null;
+  const site = normalizeProfileWebsite(links.website);
+  const booking = normalizeBookingInfo(links.bookingInfo);
+  const next = { ...local };
+  if(!site.error && site.value) next.website = site.value;
+  if(!booking.error && booking.value) next.bookingInfo = booking.value;
+  if(!next.website && !next.bookingInfo) return null;
+  if(!next.displayName) next.displayName = user.displayName;
+  localStorage.setItem(`${LOCAL_PROFILE_STORAGE_PREFIX}${user.id}`, JSON.stringify(next));
+  renderCurrentUserUI();
+  return next;
 }
 
 // ---------- Profile photos ----------
@@ -682,6 +778,13 @@ function renderCurrentUserUI(){
     heroAbout.textContent = [user.hometown, user.bio].filter(Boolean).join(' • ');
     heroAbout.classList.toggle('hidden', !user.hometown && !user.bio);
   }
+  const heroLinks = document.getElementById('profile-hero-links');
+  if(heroLinks){
+    const html = profileLinksHtml(user);
+    heroLinks.innerHTML = html;
+    heroLinks.classList.toggle('hidden', !html);
+  }
+  if(user.signedIn && profileLinksLoadedFor !== user.id) loadProfileLinksFromServer().catch(() => {});
   const chip = document.querySelector('.profile-chip');
   if(chip) chip.dataset.userState = user.signedIn ? 'signed-in' : 'guest';
   return user;
@@ -12234,6 +12337,7 @@ function renderPublicDjProfile(profile, status){
         <div class="battle-result-module"><span>Views</span><strong>${esc(profile.views && profile.views.total || stats.totalViews || 0)}</strong><p>${esc(profile.views && profile.views.uniqueEstimate || 0)} unique estimate</p></div>
       </div>
       ${profile.bio ? `<div class="battle-result-module"><span>Public bio</span><p>${esc(profile.bio)}</p></div>` : ''}
+      ${profileLinksHtml(profile) ? `<div class="battle-result-module public-profile-links"><span>Website &amp; booking</span>${profileLinksHtml(profile)}</div>` : ''}
       <div class="battle-evidence-grid">
         ${profileResultList(profile.competitiveHistory, 'Competitive history')}
         ${profileResultList(profile.aiOnlyHighScores, 'AI-only high scores')}
