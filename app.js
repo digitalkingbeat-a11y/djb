@@ -3544,7 +3544,7 @@ function renderGuidedTour(){
   const overlay = document.getElementById('guided-tour-overlay') || document.body.appendChild(document.createElement('div'));
   overlay.id = 'guided-tour-overlay';
   overlay.className = 'guided-tour-overlay';
-  overlay.innerHTML = `<div class="guided-tour-backdrop"></div><section class="guided-tour-card" role="dialog" aria-modal="true" aria-label="Guided product tour"><span class="eyebrow accent">GUIDED TOUR</span><strong class="guided-tour-progress">${activeTourStep + 1} of ${TOUR_STEPS.length}</strong><h3>${esc(step.title)}</h3><p>${esc(step.copy)}</p><div class="guided-tour-actions"><button class="ghost small" id="guided-tour-exit" type="button">Exit</button><button class="ghost small" id="guided-tour-skip" type="button">Skip Tour</button><button class="ghost small" id="guided-tour-back" type="button" ${activeTourStep === 0 ? 'disabled' : ''}>Back</button><button class="primary small" id="guided-tour-next" type="button">${activeTourStep === TOUR_STEPS.length - 1 ? 'Finish' : 'Next'}</button></div></section>`;
+  overlay.innerHTML = `<div class="guided-tour-shade s-top"></div><div class="guided-tour-shade s-bottom"></div><div class="guided-tour-shade s-left"></div><div class="guided-tour-shade s-right"></div><div class="guided-tour-ring" aria-hidden="true"></div><section class="guided-tour-card" role="dialog" aria-modal="true" aria-label="Guided product tour"><span class="eyebrow accent">GUIDED TOUR</span><strong class="guided-tour-progress">${activeTourStep + 1} of ${TOUR_STEPS.length}</strong><h3>${esc(step.title)}</h3><p>${esc(step.copy)}</p><div class="guided-tour-actions"><button class="ghost small" id="guided-tour-exit" type="button">Exit</button><button class="ghost small" id="guided-tour-skip" type="button">Skip Tour</button><button class="ghost small" id="guided-tour-back" type="button" ${activeTourStep === 0 ? 'disabled' : ''}>Back</button><button class="primary small" id="guided-tour-next" type="button">${activeTourStep === TOUR_STEPS.length - 1 ? 'Finish' : 'Next'}</button></div></section>`;
   document.getElementById('guided-tour-exit').onclick = () => closeGuidedTour({ view:step.view });
   document.getElementById('guided-tour-skip').onclick = () => closeGuidedTour({ complete:true, view:'battles' });
   document.getElementById('guided-tour-back').onclick = () => { activeTourStep -= 1; startGuidedTour(); };
@@ -3558,9 +3558,73 @@ function renderGuidedTour(){
     if(!target) return;
     activeTourTarget = target;
     target.classList.add('guided-tour-target');
-    if(typeof target.scrollIntoView === 'function') target.scrollIntoView({ behavior:'smooth', block:'center', inline:'nearest' });
+    // Phones: bring the top of the target just under the screen edge so it sits above the docked tour card.
+    const phone = guidedTourIsPhone();
+    if(typeof target.scrollIntoView === 'function') target.scrollIntoView({ behavior:'auto', block:phone ? 'start' : 'center', inline:'nearest' });
+    layoutGuidedTour();
+    // The Studio can still be settling (late layout, view-switch scroll); check again and re-aim if the target drifted away.
+    setTimeout(() => {
+      if(activeTourTarget !== target || !document.getElementById('guided-tour-overlay')) return;
+      const r = target.getBoundingClientRect();
+      const h = window.innerHeight || 800;
+      const off = phone ? (r.top < 0 || r.top > h * 0.4) : (r.bottom < 0 || r.top > h);
+      if(off && typeof target.scrollIntoView === 'function') target.scrollIntoView({ behavior:'auto', block:phone ? 'start' : 'center', inline:'nearest' });
+      layoutGuidedTour();
+    }, 350);
   });
 }
+
+function guidedTourIsPhone(){
+  return (window.innerWidth || document.documentElement.clientWidth || 1024) <= 700;
+}
+
+// Pure geometry: the visible spotlight hole and where the card goes, so the card never covers the target.
+function guidedTourLayout(target, card, view, phone){
+  const pad = 6;
+  const v = { w:view.w, h:view.h };
+  let cardTop = phone ? v.h - card.h - 12 : v.h - card.h - 24;
+  let place = 'bottom';
+  const hole = { left:Math.max(8, target.left - pad), right:Math.min(v.w - 8, target.right + pad), top:Math.max(8, target.top - pad), bottom:Math.min(v.h - 8, target.bottom + pad) };
+  if(phone){
+    // Card is docked at the bottom; the hole is cut off above it instead of running underneath.
+    hole.bottom = Math.min(hole.bottom, cardTop - 10);
+  }else if(hole.bottom > cardTop - 10 && hole.right > v.w - card.w - 34){
+    place = 'top';
+    cardTop = 24;
+    if(hole.top < cardTop + card.h + 10) hole.top = Math.min(hole.bottom, Math.max(hole.top, cardTop + card.h + 10));
+  }
+  if(hole.bottom < hole.top) hole.bottom = hole.top;
+  return { hole, cardTop, place };
+}
+
+function layoutGuidedTour(){
+  const overlay = document.getElementById('guided-tour-overlay');
+  const card = overlay && overlay.querySelector('.guided-tour-card');
+  if(!overlay || !card) return null;
+  const view = { w:window.innerWidth || document.documentElement.clientWidth, h:window.innerHeight || document.documentElement.clientHeight };
+  const t = activeTourTarget && activeTourTarget.getBoundingClientRect ? activeTourTarget.getBoundingClientRect() : null;
+  const c = card.getBoundingClientRect();
+  const phone = guidedTourIsPhone();
+  overlay.classList.toggle('phone', phone);
+  const r = t && t.width ? guidedTourLayout(t, { w:c.width, h:c.height }, view, phone) : null;
+  card.classList.toggle('top', Boolean(r && r.place === 'top'));
+  const set = (cls, css) => { const el = overlay.querySelector(`.guided-tour-shade.${cls}`); if(el) el.style.cssText = css; };
+  if(!r){
+    set('s-top', 'top:0;left:0;right:0;bottom:0'); ['s-bottom', 's-left', 's-right'].forEach(k => set(k, 'display:none'));
+    const ring = overlay.querySelector('.guided-tour-ring'); if(ring) ring.style.display = 'none';
+    return null;
+  }
+  const h = r.hole;
+  set('s-top', `top:0;left:0;right:0;height:${h.top}px`);
+  set('s-bottom', `top:${h.bottom}px;left:0;right:0;bottom:0`);
+  set('s-left', `top:${h.top}px;left:0;width:${h.left}px;height:${h.bottom - h.top}px`);
+  set('s-right', `top:${h.top}px;left:${h.right}px;right:0;height:${h.bottom - h.top}px`);
+  const ring = overlay.querySelector('.guided-tour-ring');
+  if(ring) ring.style.cssText = `top:${h.top}px;left:${h.left}px;width:${h.right - h.left}px;height:${h.bottom - h.top}px`;
+  return r;
+}
+window.addEventListener('scroll', () => { if(document.getElementById('guided-tour-overlay')) layoutGuidedTour(); }, { passive:true });
+window.addEventListener('resize', () => { if(document.getElementById('guided-tour-overlay')) layoutGuidedTour(); });
 
 function startGuidedTour(){
   const step = TOUR_STEPS[Math.max(0, Math.min(TOUR_STEPS.length - 1, activeTourStep))];

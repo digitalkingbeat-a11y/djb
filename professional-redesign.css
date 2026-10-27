@@ -882,14 +882,23 @@ td{
   min-height:210px;
 }
 
-.guided-tour-overlay{position:fixed;inset:0;z-index:1000;pointer-events:none}
+.guided-tour-overlay{position:fixed;inset:0;z-index:2147483000;pointer-events:none}
 .guided-tour-backdrop{position:absolute;inset:0;background:rgba(3,6,10,.68)}
 .guided-tour-card{position:fixed;right:24px;bottom:24px;width:min(390px,calc(100vw - 32px));padding:18px;border:1px solid #536f2f;border-radius:8px;background:#101720;box-shadow:0 20px 60px rgba(0,0,0,.5);pointer-events:auto}
 .guided-tour-card h3{margin:8px 0 6px;font-size:20px}
 .guided-tour-card p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}
 .guided-tour-progress{float:right;color:var(--accent);font-size:12px}
 .guided-tour-actions{display:flex;justify-content:flex-end;gap:7px;flex-wrap:wrap;margin-top:16px}
-.guided-tour-target{position:relative;z-index:1001!important;outline:3px solid var(--accent)!important;outline-offset:4px;box-shadow:0 0 0 9999px rgba(3,6,10,.68),0 0 0 7px rgba(185,255,49,.22)!important}
+/* The target is no longer lifted above the overlay (that let it cover the tour card); the overlay cuts a spotlight hole instead. */
+.guided-tour-target{scroll-margin-top:12px}
+/* Guided tour spotlight: four blurred, near-opaque shades around the target so nothing behind bleeds through. */
+.guided-tour-shade{position:fixed;background:rgba(3,6,10,.86);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);pointer-events:auto}
+.guided-tour-shade.s-top{top:0;left:0;right:0;bottom:0}
+.guided-tour-ring{position:fixed;border:3px solid var(--accent,#b9ff31);border-radius:10px;box-shadow:0 0 0 6px rgba(185,255,49,.2);pointer-events:none}
+.guided-tour-overlay .guided-tour-card{z-index:2}
+.guided-tour-card.top{bottom:auto;top:24px}
+.guided-tour-overlay.phone .guided-tour-card{left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));width:auto;max-height:42vh;overflow:auto;padding:14px}
+.guided-tour-overlay.phone .guided-tour-card h3{font-size:18px}
 
 .activity-feed{
   display:grid;
@@ -2055,6 +2064,8 @@ a.mention-link:hover{text-decoration:underline}
 
   /* 4. Floating player sits just above the one-row menu, with room left for it. */
   .library-player{left:8px;right:8px;bottom:calc(72px + env(safe-area-inset-bottom,0px));grid-template-columns:44px minmax(0,1fr) auto auto;min-height:60px;padding:8px 10px;gap:10px}
+  /* Fill the thin gaps around the floating player so the page doesn't show through between it and the menu. */
+  .library-player:not(.is-minimized){box-shadow:0 0 0 8px var(--bg,#07090d),0 10px 0 8px var(--bg,#07090d)}
   .library-player-minimize{display:inline-grid;place-items:center;min-width:44px;min-height:44px;padding:0;font-size:18px;line-height:1}
   .library-player.is-minimized{left:auto;grid-template-columns:auto auto auto;min-height:0;padding:6px}
   .library-player.is-minimized .library-player-main,

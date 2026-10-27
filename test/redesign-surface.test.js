@@ -138,3 +138,41 @@ test('Battles and Community controls are styled and label/value pairs stay separ
   });
   assert.ok(chips.find(chip => chip.dataset.communityCategory === 'all').querySelector('b'));
 });
+
+test('phone tour: the card docks at the bottom and the spotlight stops above it, never under it', () => {
+  const window = loadAppDom();
+  const view = { w:390, h:844 };
+  const card = { w:366, h:240 };
+  // Deck A is taller than the screen: the hole is cut off above the card.
+  const tall = window.guidedTourLayout({ left:10, right:380, top:12, bottom:1900 }, card, view, true);
+  assert.equal(tall.cardTop, 844 - 240 - 12);
+  assert.ok(tall.hole.bottom <= tall.cardTop - 10);
+  assert.equal(tall.hole.top, 8);
+  // Desktop: a target in the card's bottom-right corner moves the card to the top.
+  const desk = window.guidedTourLayout({ left:900, right:1380, top:500, bottom:900 }, { w:390, h:200 }, { w:1400, h:950 }, false);
+  assert.equal(desk.place, 'top');
+  const clear = window.guidedTourLayout({ left:40, right:400, top:100, bottom:300 }, { w:390, h:200 }, { w:1400, h:950 }, false);
+  assert.equal(clear.place, 'bottom');
+});
+
+test('phone tour: the overlay shades the page with blurred panels and the target is not lifted over the card', async () => {
+  const window = loadAppDom();
+  const document = window.document;
+  Object.defineProperty(window, 'innerWidth', { configurable:true, value:390 });
+  Object.defineProperty(window, 'innerHeight', { configurable:true, value:844 });
+  window.__DJBattleTestHooks.startGuidedTour();
+  await new Promise(resolve => window.requestAnimationFrame(resolve));
+  for(let i = 0; i < 4; i++){ document.getElementById('guided-tour-next').click(); await new Promise(resolve => window.requestAnimationFrame(resolve)); }
+  const overlay = document.getElementById('guided-tour-overlay');
+  assert.match(overlay.textContent, /5 of 12/);
+  assert.equal(overlay.querySelectorAll('.guided-tour-shade').length, 4);
+  assert.ok(overlay.querySelector('.guided-tour-ring'));
+  assert.equal(overlay.classList.contains('phone'), true);
+  assert.ok(document.querySelector('#studio [data-deck="a"].guided-tour-target'));
+  const css = fs.readFileSync(path.join(__dirname, '..', 'professional-redesign.css'), 'utf8');
+  const targetRule = css.match(/\.guided-tour-target\{[^}]*\}/)[0];
+  assert.doesNotMatch(targetRule, /z-index|9999px/, 'the target must not sit above the tour card');
+  assert.match(css, /\.guided-tour-overlay\{[^}]*z-index:2147483000/, 'overlay covers the sticky header, player and menu');
+  assert.match(css, /\.guided-tour-shade\{[^}]*backdrop-filter:blur/);
+  assert.match(css, /\.library-player:not\(\.is-minimized\)\{box-shadow:0 0 0 8px var\(--bg/);
+});
