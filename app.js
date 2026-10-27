@@ -1330,7 +1330,7 @@ function installProfessionalShell(){
         <div class="recording-tracklist" id="recording-tracklist" aria-live="polite"></div>
         <audio id="recording-review-audio" controls></audio>
         <div class="review-meta" id="recording-metadata"></div>
-        <div class="modal-actions"><button class="ghost" id="restart-recording" type="button">Restart Recording</button><button class="ghost" id="save-recording-draft" type="button">Save Draft</button><button class="ghost" id="download-recording" type="button" title="Save this take to your computer as a .webm file">Download</button><button class="primary" id="submit-recording" type="button">Submit Battle</button></div>
+        <div class="modal-actions"><button class="ghost" id="restart-recording" type="button">Restart Recording</button><button class="ghost" id="save-recording-draft" type="button">Save Draft</button><button class="ghost" id="download-recording" type="button" title="Save this take to your device (.webm on most browsers, .m4a on iPhone and Safari)">Download</button><button class="primary" id="submit-recording" type="button">Submit Battle</button></div>
       </section>
       <div class="studio-analysis-row">
         <div class="panel ai-panel"><div><span class="eyebrow">JUDGE PANEL</span><h3>Battle Judging</h3><p>Timing / beatmatching / phrase mixing / transitions / technical evidence.</p></div><div class="judge-actions"><button class="primary" id="judge-score-preview" type="button">Preview Scoring</button><div id="score-breakdown" class="score-breakdown"></div></div></div>
@@ -12964,8 +12964,8 @@ async function saveRecordingDraftToLibrary(file, meta = {}){
     rightsCategory: 'Unverified',
     battleEligible: false,
     duration: meta.duration || '—',
-    fileName: file.name || `${id}.webm`,
-    mimeType: file.type || 'audio/webm',
+    fileName: file.name || `${id}.${/mp4|m4a|aac/i.test(file.type || '') ? 'm4a' : 'webm'}`,
+    mimeType: String(file.type || 'audio/webm').split(';')[0],
     createdAt: when.toISOString(),
     uploadDate: when.toISOString(),
     draftBattleId: meta.battleId || null,
@@ -12991,7 +12991,7 @@ async function submitDraftTake(trackId){
   const blob = await loadLibraryAudioBlob(track.id);
   if(!blob){ appAlert('The audio for this draft is missing from this browser.'); return { ok:false, error:'missing_audio' }; }
   const FileCtor = window.File;
-  window.lastRecordedMixFile = FileCtor ? new FileCtor([blob], track.fileName || `${track.id}.webm`, { type:track.mimeType || 'audio/webm' }) : blob;
+  window.lastRecordedMixFile = FileCtor ? new FileCtor([blob], track.fileName || `${track.id}.${/mp4|m4a/i.test(track.mimeType || blob.type || '') ? 'm4a' : 'webm'}`, { type:String(track.mimeType || blob.type || 'audio/webm').split(';')[0] }) : blob;
   return studioRecordingManager.submit();
 }
 

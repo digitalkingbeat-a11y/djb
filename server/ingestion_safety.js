@@ -14,7 +14,11 @@ const ALLOWED_AUDIO_MIME_TYPES = {
   'audio/mpeg': ['mp3'],
   'audio/wav': ['wav'],
   'audio/x-wav': ['wav'],
-  'audio/webm': ['webm']
+  'audio/webm': ['webm'],
+  // iPhone / Safari recordings (MP4 container, AAC audio).
+  'audio/mp4': ['m4a', 'mp4'],
+  'audio/x-m4a': ['m4a'],
+  'audio/m4a': ['m4a']
 };
 
 function parseByteLimit(value, fallback){

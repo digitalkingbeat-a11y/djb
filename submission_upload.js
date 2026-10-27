@@ -3,12 +3,14 @@
   if(typeof module === 'object' && module.exports) module.exports = api;
   if(root) root.DJBattleSubmission = api;
 })(typeof window !== 'undefined' ? window : globalThis, function(){
-  const allowedTypes = new Set(['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/webm']);
+  const allowedTypes = new Set(['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/webm', 'audio/mp4', 'audio/x-m4a', 'audio/m4a']);
+  // Browsers can add codec details ("audio/webm;codecs=opus"); only the base type matters here.
+  const baseType = type => String(type || '').split(';')[0].trim().toLowerCase();
   const maxSize = 100 * 1024 * 1024;
 
   function validateFile(file){
     if(!file) return 'Choose a mix file first.';
-    if(!allowedTypes.has(file.type)) return 'Unsupported audio format.';
+    if(!allowedTypes.has(baseType(file.type))) return 'Unsupported audio format. Use MP3, WAV, WebM or M4A.';
     if(!file.size) return 'Mix file is empty.';
     if(file.size > maxSize) return 'Mix file exceeds the 100 MB limit.';
     if(!file.name || /[\\/]|\.\./.test(file.name)) return 'Mix filename is not safe.';
@@ -27,7 +29,7 @@
     onStatus('Preparing upload');
     const entry = await apiRequest('/api/battleEntries', { method:'POST', body:{ battleId } });
     if(entry.error) return entry;
-    const draftBody = { originalFilename:file.name, declaredMimeType:file.type, fileSize:file.size, duration:null, submissionSource: submissionSource === 'battle_studio' ? 'battle_studio' : 'uploaded_mix' };
+    const draftBody = { originalFilename:file.name, declaredMimeType:baseType(file.type), fileSize:file.size, duration:null, submissionSource: submissionSource === 'battle_studio' ? 'battle_studio' : 'uploaded_mix' };
     if(battleContext) draftBody.battleContext = battleContext;
     const draft = await apiRequest(`/api/battleEntries/${entry.data.entry.id}/submissions`, { method:'POST', body:draftBody });
     if(draft.error) return draft;
@@ -41,13 +43,13 @@
     try{
       const signedUrl = signedUploadUrl(supabase, authorization.data);
       if(signedUrl && typeof XMLHttpRequest === 'function'){
-        const uploaded = await xhrUpload({ url:signedUrl, file, contentType:file.type, onProgress, signal });
+        const uploaded = await xhrUpload({ url:signedUrl, file, contentType:baseType(file.type), onProgress, signal });
         if(uploaded.cancelled) return cancelled();
         if(uploaded.error) return { error:'Signed upload failed.' };
       } else {
         const storage = supabase && supabase.storage && supabase.storage.from(authorization.data.bucket);
         if(!storage) return { error:'Sign in is required to continue.' };
-        const uploaded = await storage.uploadToSignedUrl(authorization.data.uploadPath, authorization.data.uploadToken, file, { contentType:file.type });
+        const uploaded = await storage.uploadToSignedUrl(authorization.data.uploadPath, authorization.data.uploadToken, file, { contentType:baseType(file.type) });
         if(signal && signal.aborted) return cancelled();
         if(uploaded.error) return { error:'Signed upload failed.' };
       }

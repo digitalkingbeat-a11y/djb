@@ -2358,3 +2358,8 @@ a.mention-link:hover{text-decoration:underline}
 .sf-limit-banner.over{background:rgba(255,93,93,.16);color:#ff5d5d}
 @keyframes sfPulse{50%{opacity:.45}}
 @media (max-width:720px){.sf-awake-box{align-items:flex-start;max-width:none}.sf-awake-box small{text-align:left}}
+
+/* Take review details (file, format, state) as label / value rows. */
+.review-meta{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;align-items:baseline;margin:10px 0;font-size:14px}
+.review-meta>span{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.review-meta>strong{overflow-wrap:anywhere}
