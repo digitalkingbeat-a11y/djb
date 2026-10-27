@@ -1601,7 +1601,7 @@ app.get('/api/marketplace/sales', requireAuth, async (req, res) => {
     const result = await listSellerSales(supabaseService, req.authUser.id);
     if(result.validationError) return res.status(422).json({ error:result.validationError });
     if(result.error) throw result.error;
-    return res.json({ success:true, orders:result.orders, totals:result.totals });
+    return res.json({ success:true, orders:result.orders, totals:result.totals, paidSales:result.paidSales || [] });
   }catch(err){
     console.error('marketplace seller sales error', err);
     return res.status(500).json({ error:'Sales request failed' });

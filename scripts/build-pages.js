@@ -13,7 +13,7 @@ const root = path.join(__dirname, '..');
 // Individual files at the repo root.
 const PAGES_FILES = [
   'index.html', 'offline.html', 'manifest.webmanifest', 'sw.js', 'window.js',
-  'api_client.js', 'submission_upload.js', 'battle_modes.js', 'app.js', 'social.js', 'connect.js', 'oct20.js', 'oct20b.js', 'passkeys.js', 'invites.js', 'remix_contests.js', 'stems_zip.js', 'beat_store_five.js',
+  'api_client.js', 'submission_upload.js', 'battle_modes.js', 'app.js', 'social.js', 'connect.js', 'oct20.js', 'oct20b.js', 'passkeys.js', 'invites.js', 'remix_contests.js', 'stems_zip.js', 'beat_store_five.js', 'sales_chart.js', 'automix.js',
   // Embeddable player that other sites can iframe (see embed.html).
   'embed.html', 'embed.js'
 ];

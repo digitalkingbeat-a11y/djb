@@ -269,7 +269,10 @@ async function listSellerSales(dataClient, sellerUserId){
     const order = sanitizeCommerceOrder(row, { ownerView:true });
     return { id:order.id, listingId:order.listingId, productId:order.productId, grossAmountCents:order.grossAmountCents, platformFeeCents:order.platformFeeCents, sellerAmountCents:order.sellerAmountCents, currency:order.currency, paymentStatus:order.paymentStatus, createdAt:order.createdAt, paidAt:order.paidAt };
   });
-  return { orders, totals };
+  // Every paid sale (up to the 500 rows read above) in a slim form for the seller's sales chart:
+  // which beat, when, and what the seller earned. No buyer details.
+  const paidSales = earning.map(row => ({ listingId:row.listing_id ? String(row.listing_id) : null, paidAt:row.paid_at || row.created_at || null, sellerAmountCents:Number(row.seller_amount_cents || 0), currency:row.currency || totals.currency }));
+  return { orders, totals, paidSales };
 }
 
 module.exports = {

@@ -184,6 +184,9 @@ describe('Paid beats with Stripe (Oct 18 c)', () => {
     const sales = await listSellerSales(db, 'seller-1');
     expect(sales.totals).to.include({ paidOrders:1, grossCents:1000, platformFeeCents:100, earningsCents:900 });
     expect(sales.orders[0]).to.not.have.property('buyerEmail');
+    expect(sales.paidSales).to.have.length(1);
+    expect(sales.paidSales[0]).to.include({ sellerAmountCents:900 });
+    expect(sales.paidSales[0]).to.have.all.keys('listingId', 'paidAt', 'sellerAmountCents', 'currency');
     expect((await listSellerSales(db, 'buyer-1')).orders).to.have.length(0);
   });
 

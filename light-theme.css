@@ -371,6 +371,9 @@ html[data-theme="light"] .invite-count strong{color:var(--accent-text)}
 html[data-theme="light"] .invite-badge{background:#f1f6ec;border:1px solid #d1e0be;color:var(--accent-text)}
 html[data-theme="light"] .invite-badge.locked{background:#edeff4}
 html[data-theme="light"] .invite-welcome{border:1px solid #d1e0be;background:linear-gradient(135deg,#f1f5ef,#f0f2f5)}
+html[data-theme="light"] .sales-period .active{color:var(--accent-text)}
+html[data-theme="light"] .sample-tag{color:#755a00}
+html[data-theme="light"] .automix-queue .is-now{color:var(--accent-text)}
 /* rankings.css */
 html[data-theme="light"] .rankings-console{background:#f1f3f7}
 html[data-theme="light"] .rankings-tab{border:1px solid #c4ccd8;background:#edf1f5;color:#232b36}
