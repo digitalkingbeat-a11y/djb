@@ -148,7 +148,7 @@ test('a non-host sees no host controls, and declining the confirm sends nothing'
   assert.ok(!calls.some(c => c.path.endsWith('/cancel')));
 });
 
-test('Settings has three Activity-bell switches that save to the server', async () => {
+test('Settings has the Activity-bell switches (Oct 25 adds wishlist and gift alerts) that save to the server', async () => {
   const w = loadAppDom(); signIn(w);
   const calls = stubApi(w, (p, o) => {
     if(p === '/api/notificationPreferences/social' && o.method === 'PUT') return { data:{ prefs:{ tournament_match_ready:true, battle_chat_message:o.body.enabled, timed_comment_received:true } } };
@@ -158,8 +158,8 @@ test('Settings has three Activity-bell switches that save to the server', async 
   w.switchView('settings');
   await settle();
   const boxes = [...w.document.querySelectorAll('#settings-social-notify [data-notify-type]')];
-  assert.deepEqual(boxes.map(b => b.dataset.notifyType), ['tournament_match_ready', 'battle_chat_message', 'timed_comment_received']);
-  assert.deepEqual(boxes.map(b => b.checked), [true, true, false]);
+  assert.deepEqual(boxes.map(b => b.dataset.notifyType), ['tournament_match_ready', 'battle_chat_message', 'timed_comment_received', 'wishlist_alert', 'gift_received']);
+  assert.deepEqual(boxes.slice(0, 3).map(b => b.checked), [true, true, false]);
   await S(w).saveNotifyPref('battle_chat_message', false);
   assert.equal(JSON.stringify(calls.find(c => c.method === 'PUT').body), JSON.stringify({ type:'battle_chat_message', enabled:false }));
   assert.equal(w.document.querySelector('[data-notify-type="battle_chat_message"]').checked, false);

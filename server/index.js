@@ -1546,7 +1546,14 @@ app.patch('/api/marketplace/listings/:listingId/price', requireAuth, async (req,
   if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
   if(!guardProtectedWrite(req, res, 'marketplaceListingPrice', { payload:{ userId:req.authUser.id, listingId:validation.value.listingId, priceCents:req.body && req.body.priceCents }, fingerprintReplay:false })) return;
   try{
+    // Oct 25 Store: remember the old price so wishlist savers hear about a drop.
+    const before = await supabaseService.from('marketplace_listings').select('*').eq('id', validation.value.listingId).limit(1);
+    const oldRow = before && !before.error ? (before.data || [])[0] : null;
     const result = await setListingPrice(supabaseService, req.authUser.id, validation.value.listingId, req.body || {});
+    if(!result.error && result.listing && oldRow){
+      require('./store_five').notifyPriceDrop(supabaseService, { listingId:oldRow.id, sellerUserId:req.authUser.id, title:result.listing.title, oldCents:oldRow.display_price_cents, newCents:result.listing.displayPriceCents })
+        .catch(err => console.warn('wishlist price alert failed', err && err.message));
+    }
     if(result.forbidden) return res.status(403).json({ error:'Cannot price another seller\'s listing' });
     if(result.unavailable) return res.status(404).json({ error:'Marketplace listing is unavailable' });
     if(result.validationError) return res.status(422).json({ error:result.validationError, code:result.code || null });
@@ -1713,7 +1720,8 @@ app.post('/api/marketplace/webhooks/:provider', async (req, res) => {
     const result = await handleMarketplacePaymentEvent(supabaseService, provider, req.body || {}, new Date(), {
       rawBody:req.rawBody || '',
       signature:req.get('stripe-signature') || req.get('paypal-transmission-sig') || '',
-      headers:req.headers || {}
+      headers:req.headers || {},
+      gifts:giftDeps()
     });
     if(result.providerUnavailable) return res.status(503).json({ error:'Marketplace payment provider webhook verification is not configured' });
     if(result.verificationFailed) return res.status(400).json({ error:'Marketplace payment event verification failed' });
@@ -3805,10 +3813,12 @@ app.get('/api/marketplace/discountCodes', requireAuth, oct20bRoute('Discount cod
 app.post('/api/marketplace/discountCodes', requireAuth, oct20bRoute('Create discount code', async (req, res) => {
   const r = await DiscountCodes.createCode(supabaseService, req.authUser.id, req.body || {});
   if(sendOct20bResult(res, r)) return; res.status(201).json({ success:true, code:r.code });
+  require('./store_five').notifyDiscountCode(supabaseService, { sellerUserId:req.authUser.id, code:r.code }).catch(err => console.warn('wishlist code alert failed', err && err.message));
 }));
 app.patch('/api/marketplace/discountCodes/:codeId', requireAuth, oct20bRoute('Edit discount code', async (req, res) => {
   const r = await DiscountCodes.setCodeActive(supabaseService, req.authUser.id, req.params.codeId, req.body && req.body.active !== false);
   if(sendOct20bResult(res, r)) return; res.json({ success:true, code:r.code });
+  if(r.code && r.code.active) require('./store_five').notifyDiscountCode(supabaseService, { sellerUserId:req.authUser.id, code:r.code }).catch(err => console.warn('wishlist code alert failed', err && err.message));
 }));
 app.post('/api/marketplace/listings/:listingId/discountPreview', oct20bRoute('Discount preview', async (req, res) => {
   const id = String(req.params.listingId || '').slice(0, 128);
@@ -3893,6 +3903,33 @@ app.post('/api/remix-contests/:id/store-offer', requireAuth, remixRoute('Beat St
 app.post('/api/remix-contests/:id/store-consent', requireAuth, remixRoute('Beat Store answer', req => RemixContests.answerStoreOffer(supabaseService, req.authUser.id, req.params.id, req.body || {})));
 app.post('/api/remix-contests/:id/store-listing', requireAuth, remixRoute('List winning remix', async req => ({ ...(await RemixContests.listWinnerInStore(supabaseService, req.authUser.id, req.params.id)), __status:201 })));
 app.post('/api/remix-contests/entries/:entryId/moderate', requireAuth, requireOperatorUser, remixRoute('Moderate remix', req => RemixContests.moderateEntry(supabaseService, req.params.entryId, req.body || {})));
+
+/* ================= Oct 25 Store: licences, previews, wishlist, gifts ================= */
+const StoreFive = require('./store_five');
+const BeatGifts = require('./beat_gifts');
+function sendStoreResult(res, r){
+  if(r.ffmpegUnavailable) { res.status(503).json({ error:'Preview making isn\u2019t set up on the server yet (FFmpeg is missing)', code:'ffmpeg_unavailable' }); return true; }
+  if(r.unavailable) { res.status(404).json({ error:'That beat isn\u2019t available' }); return true; }
+  if(r.conflict) { res.status(409).json({ error:r.message || 'Already done' }); return true; }
+  if(r.gone) { res.status(410).json({ error:r.message || 'This link has expired' }); return true; }
+  if(r.forbidden && r.message) { res.status(403).json({ error:r.message }); return true; }
+  return sendRemixResult(res, r);
+}
+const storeRoute = (label, fn) => oct20bRoute(label, async (req, res) => { const r = await fn(req); if(sendStoreResult(res, r)) return; res.status(r.__status || 200).json({ success:true, ...r }); });
+const giftDeps = () => ({ emailSender, appUrl:process.env.APP_PUBLIC_URL || '' });
+const storeUser = req => ({ id:req.authUser.id, email:req.authUser.email || '', emailVerified:Boolean(req.authUser.email_confirmed_at || req.authUser.confirmed_at) });
+app.get('/api/marketplace/licences', (req, res) => res.json({ success:true, choices:StoreFive.LICENCE_CHOICES, licences:Object.fromEntries(StoreFive.LICENCE_CHOICES.map(t => [t, StoreFive.licenceTerms(t)])) }));
+app.patch('/api/marketplace/listings/:listingId/licence', requireAuth, storeRoute('Beat licence', req => StoreFive.setListingLicence(supabaseService, req.authUser.id, req.params.listingId, req.body || {})));
+app.post('/api/marketplace/listings/:listingId/preview', requireAuth, storeRoute('Beat preview', req => {
+  const cap = getFFmpegCapability();
+  return StoreFive.generateListingPreview(supabaseService, req.authUser.id, req.params.listingId, req.body || {}, { storage:supabaseService.storage.from(MIX_BUCKET), ffmpegPath:cap.available ? cap.executablePath : null });
+}));
+app.get('/api/marketplace/wishlist', requireAuth, storeRoute('Wishlist', req => StoreFive.listWishlist(supabaseService, req.authUser.id)));
+app.post('/api/marketplace/wishlist/:listingId', requireAuth, storeRoute('Save beat', req => StoreFive.addToWishlist(supabaseService, req.authUser.id, req.params.listingId)));
+app.delete('/api/marketplace/wishlist/:listingId', requireAuth, storeRoute('Unsave beat', req => StoreFive.removeFromWishlist(supabaseService, req.authUser.id, req.params.listingId)));
+app.post('/api/marketplace/gifts/claim', requireAuth, storeRoute('Claim gift', req => BeatGifts.claimGift(supabaseService, storeUser(req), req.body || {})));
+app.get('/api/marketplace/gifts/inbox', requireAuth, storeRoute('Gift inbox', req => BeatGifts.claimWaitingGifts(supabaseService, storeUser(req))));
+app.get('/api/marketplace/gifts/sent', requireAuth, storeRoute('Sent gifts', req => BeatGifts.listSentGifts(supabaseService, req.authUser.id)));
 // Close contests whose voting ended (also done whenever someone opens them). Checked every 15 minutes.
 if(process.env.NODE_ENV !== 'test' && supabaseService && typeof supabaseService.from === 'function'){
   const remixTimer = setInterval(() => RemixContests.sweepDueContests(supabaseService).catch(err => console.warn('remix contest sweep failed', err && err.message)), 15 * 60 * 1000);

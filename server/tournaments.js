@@ -1,4 +1,6 @@
-// Single-elimination tournaments (8 or 16 DJs).
+// Single-elimination tournaments (4, 8, 16 or 32 DJs), optionally with a group stage first.
+// Oct 25: 'groups' format = round-robin groups of about four; the top two of each group go
+// through to a knockout bracket that then works exactly like a normal tournament.
 // Builds on the eight-seat foundation from the tranche11-tournament-foundation branch
 // (bracketFromSeats / advanceWinner), generalised to 16 seats, byes and real battles.
 // Every match is a normal battle: the two DJs enter it through the usual battle create/join
@@ -11,7 +13,10 @@ const TOURNAMENT_TABLE = 'dj_tournaments';
 const SEAT_TABLE = 'dj_tournament_seats';
 const MATCH_TABLE = 'dj_tournament_matches';
 const TOURNAMENT_SCHEMA = '032_create_tournaments';
-const CAPACITIES = Object.freeze([8, 16]);
+const CAPACITIES = Object.freeze([4, 8, 16, 32]);
+const FORMATS = Object.freeze(['knockout', 'groups']);
+const GROUPS_SCHEMA = '050_add_tournament_sizes_group_stage';
+const GROUP_LETTERS = 'ABCDEFGH';
 const SEATS = 8; // kept for the foundation contract
 const ROUNDS = Object.freeze([4, 2, 1]);
 // Oct 19b: each round has a deadline. A DJ who hasn't played by then loses by forfeit.
@@ -43,6 +48,94 @@ function forfeitDecision(match, played, now = new Date()){
 
 function roundsFor(capacity){ return Math.round(Math.log2(capacity)); }
 
+/* ---------- Oct 25: group stage ---------- */
+const isGroup = m => Boolean(m) && m.stage === 'group';
+const koOnly = matches => matches.filter(m => !isGroup(m));
+const groupOnly = matches => matches.filter(isGroup);
+function formatOf(t){ return t && t.format === 'groups' ? 'groups' : 'knockout'; }
+// Number of groups: a power of two, about four DJs each (at least three), never more than capacity / 4.
+function groupCountFor(entrants, capacity){
+  let g = 1;
+  while(g * 2 <= capacity / 4 && g * 2 * 3 <= entrants) g *= 2;
+  return g;
+}
+function groupLabel(n){ return `Group ${GROUP_LETTERS[(Number(n) || 1) - 1] || n}`; }
+// Snake draft by seed: 1..G go to groups 1..G, then G..1, so groups are balanced.
+function drawGroups(seeds, groupCount){
+  const groups = Array.from({ length:groupCount }, () => []);
+  seeds.forEach((id, i) => {
+    const lap = Math.floor(i / groupCount), idx = i % groupCount;
+    groups[lap % 2 ? groupCount - 1 - idx : idx].push(id);
+  });
+  return groups;
+}
+// Every DJ in a group plays every other DJ once. Round 0 = group stage (knockout rounds start at 1).
+function groupMatchesFor(groups){
+  const out = [];
+  groups.forEach((members, gi) => {
+    for(let a = 0; a < members.length; a++) for(let b = a + 1; b < members.length; b++){
+      out.push({ round:0, position:out.length + 1, stage:'group', group:gi + 1, firstUserId:members[a], secondUserId:members[b], winnerUserId:null, status:'ready', battleId:null });
+    }
+  });
+  return out;
+}
+function groupMembers(matches){
+  const map = new Map();
+  groupOnly(matches).forEach(m => { const set = map.get(m.group) || new Set(); [m.firstUserId, m.secondUserId].filter(Boolean).forEach(id => set.add(id)); map.set(m.group, set); });
+  return map;
+}
+// Table for each group: 3 points a win. Ties broken by head-to-head, then fewer forfeits, then seed.
+function groupStandings(matches, seedOf = () => 99){
+  const out = [];
+  for(const [group, set] of [...groupMembers(matches).entries()].sort((a, b) => a[0] - b[0])){
+    const games = groupOnly(matches).filter(m => m.group === group);
+    const rows = [...set].map(id => {
+      const mine = games.filter(m => [m.firstUserId, m.secondUserId].includes(id));
+      const done = mine.filter(m => m.winnerUserId);
+      const wins = done.filter(m => m.winnerUserId === id).length;
+      return { userId:id, played:done.length, wins, losses:done.length - wins, forfeits:done.filter(m => m.forfeitUserId === id).length, points:wins * 3, remaining:mine.length - done.length };
+    });
+    rows.sort((a, b) => {
+      if(b.points !== a.points) return b.points - a.points;
+      const h2h = games.find(m => m.winnerUserId && [m.firstUserId, m.secondUserId].includes(a.userId) && [m.firstUserId, m.secondUserId].includes(b.userId));
+      if(h2h) return h2h.winnerUserId === a.userId ? -1 : 1;
+      if(a.forfeits !== b.forfeits) return a.forfeits - b.forfeits;
+      return seedOf(a.userId) - seedOf(b.userId);
+    });
+    rows.forEach((r, i) => { r.rank = i + 1; r.advancing = i < 2; });
+    out.push({ group, label:groupLabel(group), rows, complete:games.every(m => m.winnerUserId || m.status === 'void') });
+  }
+  return out;
+}
+function groupStageDone(matches){
+  const g = groupOnly(matches);
+  return g.length > 0 && g.every(m => m.winnerUserId || m.status === 'void');
+}
+// Group winners are seeds 1..G and runners-up G+1..2G, so group k's winner meets another group's runner-up.
+function knockoutFromGroups(standings){
+  const firsts = standings.map(s => s.rows[0] && s.rows[0].userId).filter(Boolean);
+  const seconds = standings.map(s => s.rows[1] && s.rows[1].userId).filter(Boolean);
+  const seeds = [...firsts, ...seconds];
+  let size = 2; while(size < seeds.length) size *= 2;
+  return buildKnockout(seeds, size);
+}
+function knockoutSizeOf(t, matches){
+  if(formatOf(t) !== 'groups') return Number(t.capacity);
+  const groups = Number(t.group_count) || groupMembers(matches || []).size || Math.max(1, Number(t.capacity) / 4);
+  return Math.max(2, groups * 2);
+}
+function koRoundsOf(t, matches){ return roundsFor(knockoutSizeOf(t, matches)); }
+// Records a group result (no bracket to advance).
+function settleGroupMatch(matches, matchId, winnerUserId, forfeitUserId = null){
+  return matches.map(m => m.id === matchId ? { ...m, winnerUserId, status:'completed', forfeitUserId:forfeitUserId || m.forfeitUserId || null } : m);
+}
+// Applies a result to either stage; knockout results go through advanceWinner on the bracket only.
+function applyResult(matches, match, winnerUserId){
+  if(isGroup(match)) return settleGroupMatch(matches, match.id, winnerUserId);
+  const ko = advanceWinner(koOnly(matches).map(m => m.id === match.id ? { ...m, status:'ready' } : m), match.round, match.position, winnerUserId);
+  return [...groupOnly(matches), ...ko];
+}
+
 // Standard bracket order: seed 1 meets the lowest seed, and seeds 1 and 2 can only meet in the final.
 function seedOrder(size){
   let seeds = [1, 2];
@@ -67,7 +160,10 @@ function emptyBracket(capacity){
 
 // seeds: user ids in seed order (index 0 = seed 1). Fewer than capacity means byes for the top seeds.
 function bracketFromSeeds(seeds, capacity){
-  if(!CAPACITIES.includes(capacity)) throw new Error('Tournaments hold 8 or 16 DJs.');
+  if(!CAPACITIES.includes(capacity)) throw new Error('Tournaments hold 4, 8, 16 or 32 DJs.');
+  return buildKnockout(seeds, capacity);
+}
+function buildKnockout(seeds, capacity){
   if(!Array.isArray(seeds) || seeds.length < 2 || seeds.length > capacity) throw new Error('A tournament needs at least two DJs.');
   if(new Set(seeds).size !== seeds.length || seeds.some(id => typeof id !== 'string' || !id.trim())) throw new Error('Each DJ can only take one seat.');
   const order = seedOrder(capacity);
@@ -139,7 +235,9 @@ function advanceWinner(matches, round, position, winnerUserId){
   return 'status' in target ? settleByes(updated) : updated;
 }
 
-function championOf(matches){
+function championOf(input){
+  const matches = koOnly(input);
+  if(!matches.length) return null;
   const maxRound = Math.max(...matches.map(m => m.round));
   const final = find(matches, maxRound, 1);
   return final && final.winnerUserId || null;
@@ -166,23 +264,26 @@ function battleWinner(battleRow, match){
 
 /* ---------- persistence ---------- */
 function rowToMatch(row){
-  return { id:row.id, round:Number(row.round_number), position:Number(row.position), firstUserId:row.first_user_id || null, secondUserId:row.second_user_id || null, winnerUserId:row.winner_user_id || null, status:row.status || 'pending', battleId:row.battle_id || null, deadlineAt:row.deadline_at || null, forfeitUserId:row.forfeit_user_id || null };
+  return { id:row.id, round:Number(row.round_number), position:Number(row.position), firstUserId:row.first_user_id || null, secondUserId:row.second_user_id || null, winnerUserId:row.winner_user_id || null, status:row.status || 'pending', battleId:row.battle_id || null, deadlineAt:row.deadline_at || null, forfeitUserId:row.forfeit_user_id || null, ...(row.stage === 'group' ? { stage:'group', group:Number(row.group_number) || 1 } : {}) };
 }
 function matchToRow(match, tournamentId){
-  return { id:match.id, tournament_id:tournamentId, round_number:match.round, position:match.position, first_user_id:match.firstUserId, second_user_id:match.secondUserId, winner_user_id:match.winnerUserId, status:match.status, battle_id:match.battleId, deadline_at:match.deadlineAt || null, forfeit_user_id:match.forfeitUserId || null };
+  return { id:match.id, tournament_id:tournamentId, round_number:match.round, position:match.position, first_user_id:match.firstUserId, second_user_id:match.secondUserId, winner_user_id:match.winnerUserId, status:match.status, battle_id:match.battleId, deadline_at:match.deadlineAt || null, forfeit_user_id:match.forfeitUserId || null, ...(isGroup(match) ? { stage:'group', group_number:match.group } : {}) };
 }
 
 function sanitizeInput(input = {}, now = new Date()){
   const title = cleanText(input.title, 120);
   if(!title) return { validationError:'Give the tournament a name' };
   const capacity = Number(input.capacity);
-  if(!CAPACITIES.includes(capacity)) return { validationError:'Pick 8 or 16 DJs' };
+  if(!CAPACITIES.includes(capacity)) return { validationError:'Pick 4, 8, 16 or 32 DJs' };
+  const format = input.format === 'groups' ? 'groups' : 'knockout';
   const seeding = input.seeding === 'signup' ? 'signup' : 'random';
   const roundHours = input.roundHours == null || input.roundHours === '' ? DEFAULT_ROUND_HOURS : Number(input.roundHours);
   if(!ROUND_HOURS.includes(roundHours)) return { validationError:'Pick a round length of 12, 24, 48, 72 hours or 1 week' };
   const startsAt = parseStartsAt(input.startsAt, now);
   if(startsAt && startsAt.validationError) return startsAt;
-  return { value:{ title, capacity, seeding, genre:cleanText(input.genre, 60) || 'Open Format', mode_id:cleanId(input.modeId) || 'transition_battle', description:cleanText(input.description, 400), round_hours:roundHours, starts_at:startsAt || null } };
+  return { value:{ title, capacity, seeding, genre:cleanText(input.genre, 60) || 'Open Format', mode_id:cleanId(input.modeId) || 'transition_battle', description:cleanText(input.description, 400), round_hours:roundHours, starts_at:startsAt || null,
+    // Only sent when needed, so 8/16-DJ knockouts still work before SQL 050 is run.
+    ...(format === 'groups' ? { format } : {}) } };
 }
 
 function parseStartsAt(value, now = new Date()){
@@ -253,11 +354,14 @@ async function sanitizeTournament(dataClient, loaded, viewerId = null){
     entrantCount:seats.length,
     entrants:seats.map(s => pub(s.user_id)),
     champion:pub(tournament.champion_user_id),
-    rounds:roundsFor(Number(tournament.capacity)),
+    rounds:koRoundsOf(tournament, matches),
+    format:formatOf(tournament),
+    stage:formatOf(tournament) === 'groups' && !koOnly(matches).length ? 'groups' : 'knockout',
+    groups:formatOf(tournament) === 'groups' ? groupStandings(matches, seedLookup(seats)).map(g => ({ number:g.group, label:g.label, complete:g.complete, rows:g.rows.map(r => ({ dj:pub(r.userId), played:r.played, wins:r.wins, losses:r.losses, points:r.points, rank:r.rank, advancing:r.advancing, remaining:r.remaining })) })) : [],
     roundHours:roundHoursOf(tournament),
     startsAt:tournament.starts_at || null,
     cancelledAt:tournament.cancelled_at || null,
-    matches:matches.map(m => ({ id:m.id, round:m.round, position:m.position, status:m.status, first:pub(m.firstUserId), second:pub(m.secondUserId), winner:pub(m.winnerUserId), hasBattle:Boolean(m.battleId), deadlineAt:m.winnerUserId ? null : m.deadlineAt || null, forfeit:m.forfeitUserId ? pub(m.forfeitUserId) : null, battleId:viewerId && [m.firstUserId, m.secondUserId].includes(String(viewerId)) ? m.battleId : null })),
+    matches:matches.map(m => ({ id:m.id, round:m.round, position:m.position, stage:isGroup(m) ? 'group' : 'knockout', group:isGroup(m) ? m.group : null, status:m.status, first:pub(m.firstUserId), second:pub(m.secondUserId), winner:pub(m.winnerUserId), hasBattle:Boolean(m.battleId), deadlineAt:m.winnerUserId ? null : m.deadlineAt || null, forfeit:m.forfeitUserId ? pub(m.forfeitUserId) : null, battleId:viewerId && [m.firstUserId, m.secondUserId].includes(String(viewerId)) ? m.battleId : null })),
     you:viewerId ? { joined:Boolean(viewerSeat), host:String(tournament.created_by) === String(viewerId), matchId:yourMatch ? yourMatch.id : null } : null
   };
 }
@@ -268,7 +372,11 @@ async function createTournament(dataClient, userId, input = {}, now = new Date()
   if(rateLimited(`tournament-create:${userId}`, now.getTime(), 3, 60 * 60 * 1000)) return { rateLimited:true };
   const row = { id:newId('trn'), created_by:String(userId), ...parsed.value, status:'open', champion_user_id:null, created_at:now.toISOString(), started_at:null, completed_at:null };
   const inserted = await dataClient.from(TOURNAMENT_TABLE).insert([row]).select('*').single();
-  if(inserted.error) return isMissingTable(inserted.error) ? { schemaMissing:true, schema:TOURNAMENT_SCHEMA } : { error:inserted.error };
+  if(inserted.error){
+    if(isMissingTable(inserted.error)) return { schemaMissing:true, schema:TOURNAMENT_SCHEMA };
+    if(/column|check|constraint|format/i.test(String(inserted.error.message || ''))) return { schemaMissing:true, schema:GROUPS_SCHEMA };
+    return { error:inserted.error };
+  }
   if(input.joinAsPlayer !== false){
     const joined = await joinTournament(dataClient, userId, row.id, now);
     if(joined.error) return joined;
@@ -312,15 +420,28 @@ async function startTournament(dataClient, userId, tournamentId, now = new Date(
   if(String(t.created_by) !== String(userId)) return { forbidden:true };
   if(t.status !== 'open') return { conflict:true, reason:'The tournament has already started' };
   if(loaded.seats.length < 2) return { validationError:'At least 2 DJs need to sign up first' };
+  const groupsFormat = formatOf(t) === 'groups';
+  if(groupsFormat && loaded.seats.length < 3) return { validationError:'A group stage needs at least 3 DJs' };
   const signupOrder = loaded.seats.map(s => String(s.user_id));
   const seeds = t.seeding === 'signup' ? signupOrder : shuffle(signupOrder, options.random);
   for(let i = 0; i < seeds.length; i++){
     const r = await dataClient.from(SEAT_TABLE).update({ seed:i + 1 }).eq('tournament_id', t.id).eq('user_id', seeds[i]);
     if(r.error) return { error:r.error };
   }
-  const matches = stampDeadlines(bracketFromSeeds(seeds, Number(t.capacity)).map(m => ({ ...m, id:newId('trm') })), roundHoursOf(t), now);
+  let drawn;
+  let groupCount = null;
+  if(groupsFormat){
+    groupCount = groupCountFor(seeds.length, Number(t.capacity));
+    drawn = groupMatchesFor(drawGroups(seeds, groupCount));
+  }else drawn = bracketFromSeeds(seeds, Number(t.capacity));
+  const matches = stampDeadlines(drawn.map(m => ({ ...m, id:newId('trm') })), roundHoursOf(t), now);
   const ins = await dataClient.from(MATCH_TABLE).insert(matches.map(m => matchToRow(m, t.id)));
-  if(ins.error) return { error:ins.error };
+  if(ins.error) return groupsFormat && /column|check|constraint/i.test(String(ins.error.message || '')) ? { schemaMissing:true, schema:GROUPS_SCHEMA } : { error:ins.error };
+  if(groupsFormat){
+    const g = await dataClient.from(TOURNAMENT_TABLE).update({ group_count:groupCount }).eq('id', t.id);
+    if(g.error) return /column/i.test(String(g.error.message || '')) ? { schemaMissing:true, schema:GROUPS_SCHEMA } : { error:g.error };
+    t.group_count = groupCount;
+  }
   const champion = championOf(matches);
   const patch = { status:champion ? 'completed' : 'active', started_at:now.toISOString(), champion_user_id:champion, completed_at:champion ? now.toISOString() : null };
   const up = await dataClient.from(TOURNAMENT_TABLE).update(patch).eq('id', t.id).eq('status', 'open');
@@ -344,7 +465,7 @@ async function reconcileTournament(dataClient, loaded, now = new Date()){
       continue;
     }
     const winner = battleWinner(battleRow, match);
-    if(winner) matches = advanceWinner(matches.map(m => m.id === match.id ? { ...m, status:'ready' } : m), match.round, match.position, winner);
+    if(winner) matches = applyResult(matches, match, winner);
   }
   // Deadlines: anything still unplayed after its deadline is settled by forfeit.
   for(const match of matches.slice()){
@@ -355,12 +476,18 @@ async function reconcileTournament(dataClient, loaded, now = new Date()){
     if(played.error) return played;
     const decision = forfeitDecision(current, played, now);
     if(!decision) continue;
-    matches = advanceWinner(matches.map(m => m.id === current.id ? { ...m, status:'ready' } : m), current.round, current.position, decision.winnerUserId)
+    matches = applyResult(matches, current, decision.winnerUserId)
       .map(m => m.id === current.id ? { ...m, forfeitUserId:decision.forfeitUserId } : m);
   }
-  matches = stampDeadlines(matches, roundHoursOf(loaded.tournament), now);
-  const saved = await saveMatchChanges(dataClient, loaded.tournament.id, before, matches);
+  // Group stage finished: draw the knockout bracket from the top two of each group.
+  const created = drawKnockoutIfGroupsDone(loaded.tournament, loaded.seats, matches);
+  matches = stampDeadlines([...matches, ...created], roundHoursOf(loaded.tournament), now);
+  const saved = await saveMatchChanges(dataClient, loaded.tournament.id, before, matches.filter(m => !created.some(c => c.id === m.id)));
   if(saved.error) return saved;
+  if(created.length){
+    const ins = await dataClient.from(MATCH_TABLE).insert(matches.filter(m => created.some(c => c.id === m.id)).map(m => matchToRow(m, loaded.tournament.id)));
+    if(ins.error) return { error:ins.error };
+  }
   await notifyNewlyReady(dataClient, loaded.tournament, before, matches, now);
   const champion = championOf(matches);
   let tournament = loaded.tournament;
@@ -371,6 +498,15 @@ async function reconcileTournament(dataClient, loaded, now = new Date()){
     tournament = { ...tournament, ...patch };
   }
   return { ...loaded, tournament, matches };
+}
+
+function seedLookup(seats){
+  const map = new Map(seats.map(s => [String(s.user_id), Number(s.seed) || 99]));
+  return id => map.get(String(id)) || 99;
+}
+function drawKnockoutIfGroupsDone(t, seats, matches){
+  if(formatOf(t) !== 'groups' || koOnly(matches).length || !groupStageDone(matches)) return [];
+  return knockoutFromGroups(groupStandings(matches, seedLookup(seats))).map(m => ({ ...m, id:newId('trm') }));
 }
 
 async function getTournament(dataClient, tournamentId, viewerId = null, now = new Date()){
@@ -416,7 +552,7 @@ async function playTournamentMatch(dataClient, userId, tournamentId, matchId, in
   let outcome;
   if(!match.battleId){
     const t = loaded.tournament;
-    const roundName = roundLabel(match.round, roundsFor(Number(t.capacity)));
+    const roundName = isGroup(match) ? `${groupLabel(match.group)} match` : roundLabel(match.round, koRoundsOf(t, loaded.matches));
     outcome = await deps.createBattle(dataClient, me, {
       battleId:`battle-${crypto.createHash('sha256').update(`tournament:${match.id}`).digest('hex').slice(0, 24)}`,
       title:`${t.title}: ${roundName}`.slice(0, 160), modeId:t.mode_id, genre:t.genre, visibility:'private', crateId,
@@ -451,10 +587,10 @@ async function playedUserIds(dataClient, battleId){
 
 async function notifyNewlyReady(dataClient, tournament, before, after, now = new Date()){
   const wasReady = new Set(before.filter(m => m.status === 'ready' || m.status === 'active').map(m => m.id));
-  const rounds = roundsFor(Number(tournament.capacity));
+  const rounds = koRoundsOf(tournament, after);
   for(const m of after){
     if(m.status !== 'ready' || wasReady.has(m.id) || !m.firstUserId || !m.secondUserId) continue;
-    const label = roundLabel(m.round, rounds);
+    const label = isGroup(m) ? `${groupLabel(m.group)} match` : roundLabel(m.round, rounds);
     const due = m.deadlineAt ? ` Play by ${new Date(m.deadlineAt).toUTCString().replace(/:\d\d GMT$/, ' UTC')}.` : '';
     for(const [me, them] of [[m.firstUserId, m.secondUserId], [m.secondUserId, m.firstUserId]]){
       await notifyQuietly(dataClient, {
@@ -521,15 +657,30 @@ async function removeEntrant(dataClient, userId, tournamentId, publicProfileId, 
   }
   const before = loaded.matches.map(m => ({ ...m }));
   let matches = loaded.matches;
+  const groupLeft = groupOnly(matches).filter(m => !m.winnerUserId && [m.firstUserId, m.secondUserId].includes(target));
+  if(groupLeft.length){
+    // Group stage: the removed DJ forfeits every group match they still had to play.
+    for(const m of groupLeft) matches = settleGroupMatch(matches, m.id, m.firstUserId === target ? m.secondUserId : m.firstUserId, target);
+    const created = drawKnockoutIfGroupsDone(t, loaded.seats, matches);
+    matches = stampDeadlines([...matches, ...created], roundHoursOf(t), now);
+    const savedG = await saveMatchChanges(dataClient, t.id, before, matches.filter(m => !created.some(c => c.id === m.id)));
+    if(savedG.error) return savedG;
+    if(created.length){
+      const ins = await dataClient.from(MATCH_TABLE).insert(matches.filter(m => created.some(c => c.id === m.id)).map(m => matchToRow(m, t.id)));
+      if(ins.error) return { error:ins.error };
+      await notifyNewlyReady(dataClient, t, before, matches, now);
+    }
+    return { removed:true, forfeited:true };
+  }
   const live = matches.find(m => !m.winnerUserId && [m.firstUserId, m.secondUserId].includes(target) && ['ready', 'active'].includes(m.status));
   if(live){
     const opponent = live.firstUserId === target ? live.secondUserId : live.firstUserId;
-    matches = advanceWinner(matches.map(m => m.id === live.id ? { ...m, status:'ready' } : m), live.round, live.position, opponent)
+    matches = applyResult(matches, live, opponent)
       .map(m => m.id === live.id ? { ...m, forfeitUserId:target } : m);
   }else{
     const waiting = matches.find(m => !m.winnerUserId && m.status === 'pending' && [m.firstUserId, m.secondUserId].includes(target));
     if(!waiting) return { conflict:true, reason:'That DJ is already out of the tournament' };
-    matches = settleByes(matches.map(m => m.id === waiting.id ? { ...m, firstUserId:m.firstUserId === target ? null : m.firstUserId, secondUserId:m.secondUserId === target ? null : m.secondUserId } : m));
+    matches = groupOnly(matches).concat(settleByes(koOnly(matches).map(m => m.id === waiting.id ? { ...m, firstUserId:m.firstUserId === target ? null : m.firstUserId, secondUserId:m.secondUserId === target ? null : m.secondUserId } : m)));
   }
   matches = stampDeadlines(matches, roundHoursOf(t), now);
   const saved = await saveMatchChanges(dataClient, t.id, before, matches);
@@ -571,15 +722,19 @@ async function tournamentHistory(dataClient, userId){
     const loaded = await loadTournament(dataClient, seat.tournament_id);
     if(!loaded.tournament || loaded.tournament.status === 'cancelled') continue;
     const t = loaded.tournament;
-    const rounds = roundsFor(Number(t.capacity));
+    const rounds = koRoundsOf(t, loaded.matches);
     const mine = loaded.matches.filter(m => [m.firstUserId, m.secondUserId].includes(me));
+    const mineKo = koOnly(mine);
+    const groupsDone = formatOf(t) === 'groups' && koOnly(loaded.matches).length > 0;
     const furthest = mine.reduce((max, m) => Math.max(max, m.round), 0);
     const champion = String(t.champion_user_id || '') === me;
     const lost = mine.find(m => m.winnerUserId && m.winnerUserId !== me);
     let placement;
     if(t.status === 'open') placement = 'Signed up';
     else if(champion) placement = 'Champion';
-    else if(lost) placement = placementLabel(lost.round, rounds, false);
+    else if(formatOf(t) === 'groups' && !mineKo.length) placement = groupsDone || t.status === 'completed' ? 'Out in the group stage' : 'Still in · Group stage';
+    else if(koOnly(mine).find(m => m.winnerUserId && m.winnerUserId !== me)) placement = placementLabel(koOnly(mine).find(m => m.winnerUserId && m.winnerUserId !== me).round, rounds, false);
+    else if(lost && formatOf(t) !== 'groups') placement = placementLabel(lost.round, rounds, false);
     else placement = `Still in · ${roundLabel(furthest || 1, rounds)}`;
     out.push({ id:t.id, title:t.title, capacity:Number(t.capacity), status:t.status, placement, champion, roundReached:furthest, rounds, wonByForfeit:mine.some(m => m.winnerUserId === me && m.forfeitUserId), completedAt:t.completed_at || null });
   }
@@ -627,7 +782,8 @@ function roundLabel(round, rounds){
 }
 
 module.exports = {
-  SEATS, ROUNDS, CAPACITIES, TOURNAMENT_SCHEMA,
+  SEATS, ROUNDS, CAPACITIES, TOURNAMENT_SCHEMA, FORMATS, GROUPS_SCHEMA,
+  groupCountFor, drawGroups, groupMatchesFor, groupStandings, groupStageDone, knockoutFromGroups, groupLabel, applyResult,
   bracketFromSeats, bracketFromSeeds, advanceWinner, settleByes, seedOrder, championOf, battleWinner, roundLabel,
   createTournament, joinTournament, leaveTournament, startTournament, getTournament, listTournaments, reconcileTournament,
   playTournamentMatch, tournamentBattleJoinAllowed,

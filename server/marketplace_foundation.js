@@ -110,7 +110,8 @@ function sanitizeMarketplaceProduct(row, options = {}){
     rightsClassification: row.rights_classification,
     status: row.status,
     hasAudio: Boolean(row.audio_storage_object_path),
-    hasPreview: Boolean(row.preview_storage_object_path),
+    // Only a server-cut clip counts as a preview (Oct 25 Store), never the full file.
+    hasPreview: Boolean(row.preview_storage_object_path && String(row.preview_storage_object_path).startsWith('private/marketplace-previews/')),
     hasArtwork: Boolean(row.artwork_storage_object_path),
     createdAt: row.created_at || null,
     updatedAt: row.updated_at || null
@@ -138,6 +139,8 @@ function sanitizeMarketplaceRightsPolicy(row){
     territory: row.territory || 'worldwide',
     status: row.status,
     terms: sanitizeTerms(row.terms),
+    // Plain-words licence shown to buyers before they pay (Oct 25 Store).
+    licence: require('./store_five').licenceTerms(row.license_type),
     createdAt: row.created_at || null,
     updatedAt: row.updated_at || null
   };
@@ -208,7 +211,7 @@ function sanitizeMarketplacePlayerSession(row){
 function marketplaceProductPayloadFromTrack(userId, track, input = {}, timestamp){
   const productType = cleanEnum(input.productType || input.product_type, PRODUCT_TYPES, track.source_type === 'practice_recording' ? 'battle_recording' : 'beat');
   const audioPath = safeStoragePath(track.audio_storage_object_path, ['private/library-audio/', 'private/battle-entries/']);
-  const previewPath = safeStoragePath(input.previewStorageObjectPath || input.preview_storage_object_path, ['private/marketplace-previews/', 'private/library-audio/']);
+  const previewPath = safeStoragePath(input.previewStorageObjectPath || input.preview_storage_object_path, ['private/marketplace-previews/']);
   const artworkPath = safeStoragePath(track.artwork_storage_object_path || input.artworkStorageObjectPath || input.artwork_storage_object_path, ['private/library-artwork/', 'private/marketplace-artwork/']);
   const title = cleanString(input.title || track.title, 'Untitled Product', 160);
   const description = cleanString(input.description || '', '', 2000);
@@ -514,7 +517,9 @@ async function issueMarketplacePlayerAccess(dataClient, storage, userId, input =
   let entitlementId = null;
   if(String(product.creator_user_id) === String(userId)){
     accessScope = 'owner_stream';
-    objectPath = product.audio_storage_object_path;
+    // Sellers can listen back to their own preview clip.
+    const ownPreview = input.preview === true && String(product.preview_storage_object_path || '').startsWith('private/marketplace-previews/');
+    objectPath = ownPreview ? product.preview_storage_object_path : product.audio_storage_object_path;
   }else if(active.entitlement){
     accessScope = 'entitled_stream';
     objectPath = product.audio_storage_object_path;
@@ -522,6 +527,8 @@ async function issueMarketplacePlayerAccess(dataClient, storage, userId, input =
   }else if(input.preview === true && listing && listing.status === 'published' && listing.preview_enabled && rights.preview_allowed){
     accessScope = 'preview';
     objectPath = product.preview_storage_object_path;
+    // Previews may only ever be the short server-cut clip, so the clean full file can't leak.
+    if(!String(objectPath || '').startsWith('private/marketplace-previews/')) return { unavailable: true };
   }else{
     return { forbidden:true };
   }
@@ -606,6 +613,7 @@ module.exports = {
   PRODUCT_TYPES,
   LISTING_STATUSES,
   RIGHTS_CLASSIFICATIONS_ALLOWED_FOR_MARKETPLACE,
+  RIGHTS_LICENSE_TYPES,
   ENTITLEMENT_SOURCES,
   checkMarketplaceSchemaReadiness,
   createMarketplaceListing,
