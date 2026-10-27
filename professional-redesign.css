@@ -2301,3 +2301,21 @@ a.mention-link:hover{text-decoration:underline}
 .automix-queue{max-height:160px;overflow:auto;margin:6px 0 0;padding-left:22px;font-size:.85em}
 .automix-queue .is-done{opacity:.5}
 .automix-queue .is-now{color:var(--accent);font-weight:600}
+
+/* Auto-mix "Order by key" (automix.js) */
+.automix-key{font-size:.75em;padding:1px 5px;border-radius:5px;background:rgba(255,255,255,.08);color:var(--muted)}
+.automix-match{display:inline-block;font-size:.68em;padding:1px 6px;border-radius:8px;margin-right:2px;vertical-align:1px}
+.automix-match--same,.automix-match--smooth{background:rgba(90,220,120,.18);color:#5adc78}
+.automix-match--ok{background:rgba(255,196,0,.16);color:#e0ac00}
+.automix-match--clash{background:rgba(255,90,90,.16);color:#ff6a6a}
+.automix-match--unknown{background:rgba(255,255,255,.08);color:var(--muted)}
+
+/* Beat share links (share_links.js) */
+.store-shares{margin:4px 0 14px}
+.share-link-btn{margin-left:6px}
+.store-card.share-focus{outline:2px solid var(--accent);outline-offset:2px}
+.share-link-url{width:100%;font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:rgba(255,255,255,.04);color:inherit;margin:6px 0 10px}
+.share-table-wrap{overflow-x:auto}
+.share-table{width:100%;border-collapse:collapse;font-size:.85em}
+.share-table th,.share-table td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+.share-table th{color:var(--muted);font-weight:600;font-size:.85em}

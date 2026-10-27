@@ -414,7 +414,9 @@ function buildOrderPayload(input){
       platformFeeBps: fee.platformFeeBps,
       // Oct 25 Store: copy of the plain-words licence the buyer agreed to.
       licence: require('./store_five').licenceTerms(input.rights.license_type),
-      ...(input.gift ? { gift:true } : {})
+      ...(input.gift ? { gift:true } : {}),
+      // Oct 25: share link that brought the buyer here (credits the DJ who shared).
+      ...(input.shareCode ? { shareCode:input.shareCode } : {})
     },
     created_at: timestamp,
     updated_at: timestamp,
@@ -812,7 +814,8 @@ async function createMarketplaceCheckout(dataClient, providerAdapter, buyerUserI
     idempotencyKey,
     timestamp,
     platformFeeBps: options.platformFeeBps,
-    gift: Boolean(gift)
+    gift: Boolean(gift),
+    shareCode: input.shareCode ? await require('./share_links').shareCodeForCheckout(dataClient, input.shareCode, listing.id, buyerUserId) : null
   });
   const orderInsert = await insertSingle(dataClient, MARKETPLACE_ORDER_TABLE, orderPayload);
   if(orderInsert.error) return { error: orderInsert.error };

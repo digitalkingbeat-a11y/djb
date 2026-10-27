@@ -24,6 +24,43 @@
   }
   function otherDeck(deck){ return deck === 'a' ? 'b' : 'a'; }
 
+  // ---- Harmonic "Order by key" (Camelot wheel) ----
+  function parseCamelot(code){ const m = /^(1[0-2]|[1-9])([AB])$/.exec(String(code || '').trim().toUpperCase()); return m ? { n:Number(m[1]), l:m[2] } : null; }
+  // 0 = same key, 1 = perfect neighbour (±1 or relative major/minor), 2 = diagonal, higher = further apart.
+  function keyDistance(a, b){
+    const x = parseCamelot(a), y = parseCamelot(b);
+    if(!x || !y) return null;
+    const step = Math.min((x.n - y.n + 12) % 12, (y.n - x.n + 12) % 12);
+    const swap = x.l === y.l ? 0 : 1;
+    if(step === 0) return swap;
+    if(step === 1) return 1 + swap;
+    return step + 1 + swap;
+  }
+  function matchLabel(d){ if(d == null) return 'unknown'; if(d === 0) return 'same'; if(d === 1) return 'smooth'; if(d === 2) return 'ok'; return 'clash'; }
+  // items: [{ id, camelot, bpm }] in crate order. Greedy walk: always the closest key next, then the closest BPM,
+  // then crate order. Tracks with no key go last, in crate order.
+  function harmonicOrder(items){
+    const keyed = items.map((t, i) => ({ ...t, i })).filter(t => parseCamelot(t.camelot));
+    const unkeyed = items.filter(t => !parseCamelot(t.camelot));
+    const out = [];
+    const left = keyed.slice();
+    let cur = left.shift();
+    while(cur){
+      out.push(cur);
+      if(!left.length) break;
+      let best = 0;
+      left.forEach((t, k) => {
+        const b = left[best];
+        const dt = keyDistance(cur.camelot, t.camelot), db = keyDistance(cur.camelot, b.camelot);
+        const bt = (cur.bpm && t.bpm) ? Math.abs(cur.bpm - t.bpm) : 999, bb = (cur.bpm && b.bpm) ? Math.abs(cur.bpm - b.bpm) : 999;
+        if(dt < db || (dt === db && (bt < bb || (bt === bb && t.i < b.i)))) best = k;
+      });
+      cur = left.splice(best, 1)[0];
+    }
+    const ordered = [...out, ...unkeyed];
+    return ordered.map((t, k) => ({ id:t.id, camelot:parseCamelot(t.camelot) ? String(t.camelot).toUpperCase() : '', bpm:t.bpm || null, match:k === 0 ? null : matchLabel(keyDistance(ordered[k - 1].camelot, t.camelot)) }));
+  }
+
   // The engine. deps: { runtime, getAudio(deck), canLoad(id), now(), setInterval, clearInterval, setXfader(v), onChange(status) }
   function createEngine(deps){
     const s = { running:false, queue:[], index:-1, deck:'a', transition:DEFAULT_TRANSITION, fading:null, timer:null, message:'', played:0 };
@@ -101,6 +138,29 @@
   // ---- Studio panel ----
   let engine = null;
   function hooks(){ return W.djbAutomixHooks || null; }
+  function keyOrderSaved(){ try{ return W.localStorage.getItem('djbAutomixKeyOrder') === '1'; }catch(_){ return false; } }
+  const MATCH_TEXT = { same:'same key', smooth:'smooth', ok:'ok', clash:'key clash', unknown:'no key' };
+  // The play order for a crate, plus key info for the list.
+  function crateQueue(crate, byKey){
+    const h = hooks();
+    const ids = h.crateTrackIds(crate);
+    const items = ids.map(id => { const t = h.track(id); return { id, camelot:h.camelot ? h.camelot(t) : '', bpm:h.bpm ? h.bpm(t) : null }; });
+    if(!byKey) return items.map(t => ({ ...t, match:null }));
+    return harmonicOrder(items);
+  }
+  function selectedCrate(){ const h = hooks(); const sel = D.getElementById('automix-crate'); return sel && h ? h.crates().find(c => String(c.crateId) === String(sel.value)) : null; }
+  function queueHtml(queue, index){
+    const h = hooks();
+    return queue.slice(0, 40).map((t, i) => `<li class="${i === index ? 'is-now' : (index != null && i < index ? 'is-done' : '')}">${t.match ? `<span class="automix-match automix-match--${t.match}">${esc(MATCH_TEXT[t.match])}</span> ` : ''}${esc(h.trackTitle(h.track(t.id)))}${t.camelot ? ` <span class="automix-key">${esc(t.camelot)}</span>` : ''}${i === index ? ' <em>playing</em>' : ''}</li>`).join('');
+  }
+  function previewQueue(){
+    if(engine && engine.state.running) return;
+    const crate = selectedCrate(); const list = D.getElementById('automix-queue');
+    if(!crate || !list) return;
+    state.queue = crateQueue(crate, D.getElementById('automix-keyorder').checked);
+    list.innerHTML = queueHtml(state.queue, null);
+  }
+  const state = { queue:[] };
   function panelHtml(){
     const h = hooks();
     const crates = h ? h.crates() : [];
@@ -109,7 +169,8 @@
     return `<span class="eyebrow">PRACTICE</span><h3>Auto-mix</h3><p class="muted">The Studio plays a crate by itself and crossfades between Deck A and Deck B. Good for hearing your crate flow or practising over it.</p>
       <div class="automix-controls"><label>Crate<select id="automix-crate"${crates.length ? '' : ' disabled'}>${opts}</select></label>
       <label>Transition<select id="automix-length">${TRANSITIONS.map(n => `<option value="${n}"${n === saved ? ' selected' : ''}>${n} seconds</option>`).join('')}</select></label>
-      <label class="automix-check"><input type="checkbox" id="automix-sync" checked> Match tempo</label></div>
+      <label class="automix-check"><input type="checkbox" id="automix-sync" checked> Match tempo</label>
+      <label class="automix-check" title="Reorders the crate so each track's key blends into the next (Camelot wheel)"><input type="checkbox" id="automix-keyorder"${keyOrderSaved() ? ' checked' : ''}> Order by key</label></div>
       <div class="automix-actions"><button class="primary compact" type="button" id="automix-start"${crates.length ? '' : ' disabled'}>Start auto-mix</button><button class="ghost compact" type="button" id="automix-stop" disabled>Stop</button></div>
       <p class="automix-status muted" id="automix-status" aria-live="polite">${crates.length ? 'Pick a crate and press Start.' : 'Make a crate in your library first, then come back here.'}</p>
       <ol class="automix-queue" id="automix-queue"></ol>`;
@@ -122,8 +183,8 @@
     const panel = D.getElementById('automix-panel'); if(panel) panel.classList.toggle('automix-on', st.running);
     const list = D.getElementById('automix-queue'); const h = hooks();
     if(list && h && engine){
-      const q = engine.state.queue;
-      list.innerHTML = q.slice(0, 40).map((id, i) => `<li class="${i === st.index ? 'is-now' : (i < st.index ? 'is-done' : '')}">${esc(h.trackTitle(h.track(id)))}${i === st.index ? ' <em>playing</em>' : ''}</li>`).join('');
+      const info = new Map(state.queue.map(t => [t.id, t]));
+      list.innerHTML = queueHtml(engine.state.queue.map(id => info.get(id) || { id, match:null, camelot:'' }), st.index);
     }
   }
   function ensureEngine(){
@@ -154,14 +215,17 @@
     panel.innerHTML = panelHtml();
     D.getElementById('automix-length').onchange = e => { try{ W.localStorage.setItem('djbAutomixTransition', e.target.value); }catch(_){ /* storage off */ } };
     D.getElementById('automix-start').onclick = () => {
-      const h = hooks(); const id = D.getElementById('automix-crate').value;
-      const crate = h.crates().find(c => String(c.crateId) === String(id));
+      const crate = selectedCrate();
       if(!crate) return;
-      ensureEngine().start(h.crateTrackIds(crate), { transitionSec:D.getElementById('automix-length').value });
+      state.queue = crateQueue(crate, D.getElementById('automix-keyorder').checked);
+      ensureEngine().start(state.queue.map(t => t.id), { transitionSec:D.getElementById('automix-length').value });
     };
+    D.getElementById('automix-keyorder').onchange = e => { try{ W.localStorage.setItem('djbAutomixKeyOrder', e.target.checked ? '1' : '0'); }catch(_){ /* storage off */ } previewQueue(); };
+    D.getElementById('automix-crate').onchange = previewQueue;
+    previewQueue();
     D.getElementById('automix-stop').onclick = () => { if(engine) engine.stop(); };
   }
   function onView(view){ if(view === 'studio') mount(); }
 
-  W.DJBAutomix = { TRANSITIONS, cleanTransition, fadePosition, fadeStartAt, createEngine, mount, onView, engine:() => engine };
+  W.DJBAutomix = { parseCamelot, keyDistance, harmonicOrder, crateQueue, TRANSITIONS, cleanTransition, fadePosition, fadeStartAt, createEngine, mount, onView, engine:() => engine };
 })(window);

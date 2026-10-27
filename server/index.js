@@ -3916,6 +3916,42 @@ function sendStoreResult(res, r){
   return sendRemixResult(res, r);
 }
 const storeRoute = (label, fn) => oct20bRoute(label, async (req, res) => { const r = await fn(req); if(sendStoreResult(res, r)) return; res.status(r.__status || 200).json({ success:true, ...r }); });
+/* ---------- Oct 25: beat share links that credit the DJ who shared ---------- */
+const ShareLinks = require('./share_links');
+app.post('/api/marketplace/listings/:listingId/shareLink', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const r = await ShareLinks.createShareLink(supabaseService, req.authUser.id, req.params.listingId, { baseUrl:process.env.APP_PUBLIC_URL || '' });
+    if(r.validationError) return res.status(422).json({ error:r.validationError });
+    if(r.unavailable) return res.status(404).json({ error:'That beat is not available to share' });
+    if(r.schemaMissing) return res.status(503).json({ error:'Share links need a quick server update (SQL 053)', schema:r.schema });
+    if(r.error) throw r.error;
+    return res.json({ success:true, code:r.code, listingId:r.listingId, url:r.url });
+  }catch(err){ console.error('share link error', err); return res.status(500).json({ error:'Share link failed' }); }
+});
+app.post('/api/marketplace/shareEvents', optionalAuth, async (req, res) => {
+  if(!supabaseService) return res.json({ success:true, counted:false });
+  const ip = req.ip || '';
+  if(require('./social_helpers').rateLimited(`share-event:${ip}`, Date.now(), 60, 60 * 1000)) return res.status(429).json({ error:'Too many requests' });
+  try{
+    const body = req.body || {};
+    const r = await ShareLinks.recordShareEvent(supabaseService, { code:body.code, listingId:body.listingId, kind:body.kind, visitor:publicViewVisitor(req), viewerUserId:req.authUser && req.authUser.id, salt:process.env.SHARE_LINK_SALT || process.env.SUPABASE_URL || '' });
+    if(r.validationError) return res.status(422).json({ error:r.validationError });
+    if(r.error) console.warn('share event failed', r.error && r.error.message);
+    return res.json({ success:true, counted:Boolean(r.counted) });
+  }catch(err){ return res.json({ success:true, counted:false }); }
+});
+app.get('/api/marketplace/shareStats', requireAuth, async (req, res) => {
+  if(!requireConfiguredDataClient(supabaseService, res, 'Supabase service role client')) return;
+  try{
+    const r = await ShareLinks.sellerShareStats(supabaseService, req.authUser.id);
+    if(r.schemaMissing) return res.json({ success:true, schemaMissing:true, schema:r.schema, rows:[], totals:null });
+    if(r.validationError) return res.status(422).json({ error:r.validationError });
+    if(r.error) throw r.error;
+    return res.json({ success:true, rows:r.rows, totals:r.totals });
+  }catch(err){ console.error('share stats error', err); return res.status(500).json({ error:'Share stats unavailable' }); }
+});
+
 const giftDeps = () => ({ emailSender, appUrl:process.env.APP_PUBLIC_URL || '' });
 const storeUser = req => ({ id:req.authUser.id, email:req.authUser.email || '', emailVerified:Boolean(req.authUser.email_confirmed_at || req.authUser.confirmed_at) });
 app.get('/api/marketplace/licences', (req, res) => res.json({ success:true, choices:StoreFive.LICENCE_CHOICES, licences:Object.fromEntries(StoreFive.LICENCE_CHOICES.map(t => [t, StoreFive.licenceTerms(t)])) }));
