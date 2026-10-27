@@ -66,6 +66,23 @@
       if(store && store.setItem) store.setItem('djBattleDecks', JSON.stringify(state.decks));
     }
 
+    // Mic talkover: 1 = music at normal level, 0.5 = music at half level while the DJ talks.
+    let duckLevel = 1;
+    let duckRamp = false;
+    function setDuck(level){
+      const next = Math.max(0, Math.min(1, Number(level)));
+      duckLevel = Number.isFinite(next) ? next : 1;
+      duckRamp = true;
+      try{ return applyMix(); }finally{ duckRamp = false; }
+    }
+
+    // Waveform zoom: everything on the waveform lives in one layer so zooming keeps markers lined up.
+    function waveLayer(w){
+      let layer = w.querySelector('.wave-layer');
+      if(!layer){ layer = doc.createElement('div'); layer.className = 'wave-layer'; w.appendChild(layer); }
+      return layer;
+    }
+
     function applyMix(){
       const xf = doc.getElementById('xfader');
       const vaEl = doc.getElementById('vol-a');
@@ -74,11 +91,16 @@
       const va = vaEl ? Number(vaEl.value) : 1;
       const vb = vbEl ? Number(vbEl.value) : 1;
       const curve = crossfadeCurve(x);
-      const levels = { a:Math.max(0, Math.min(1, va * curve.a)), b:Math.max(0, Math.min(1, vb * curve.b)) };
+      const levels = { a:Math.max(0, Math.min(1, va * curve.a * duckLevel)), b:Math.max(0, Math.min(1, vb * curve.b * duckLevel)) };
       ['a','b'].forEach(deck => {
         const audio = deckAudio(deck);
         if(gains[deck] && gains[deck].gain){
-          try{ gains[deck].gain.value = levels[deck]; }catch(e){}
+          try{
+            const g = gains[deck].gain;
+            // Mic talkover ducks smoothly instead of clicking; ordinary fader moves stay instant.
+            if(duckRamp && g.setTargetAtTime && audioCtx){ g.cancelScheduledValues && g.cancelScheduledValues(audioCtx.currentTime); g.setTargetAtTime(levels[deck], audioCtx.currentTime, 0.06); }
+            else g.value = levels[deck];
+          }catch(e){}
           if(audio) try{ audio.volume = 1; }catch(e){}
         }else if(audio){
           // No Web Audio graph yet (before first Play): blend with element volume.
@@ -886,7 +908,9 @@
       const audio = deckAudio(deck);
       const marker = doc.querySelector(`#wave-${deck} .position-marker`);
       if(!marker || !audio || !(audio.duration > 0)) return;
-      marker.style.left = `${Math.max(0, Math.min(100, (audio.currentTime / audio.duration) * 100))}%`;
+      const frac = Math.max(0, Math.min(1, audio.currentTime / audio.duration));
+      marker.style.left = `${frac * 100}%`;
+      if(win.DJBStudio26 && win.DJBStudio26.followPlayhead) try{ win.DJBStudio26.followPlayhead(deck, frac); }catch(e){}
     }
 
     function seekDeckToFraction(deckInput, frac){
@@ -909,7 +933,7 @@
       const audio = deckAudio(deck);
       const dur = audio && audio.duration > 0 ? audio.duration : (peakCache[deckPeakKey[deck]] && peakCache[deckPeakKey[deck]].duration);
       if(!loop || !dur){ if(el) el.remove(); return; }
-      if(!el){ el = doc.createElement('div'); el.className = 'loop-region'; w.appendChild(el); }
+      if(!el){ el = doc.createElement('div'); el.className = 'loop-region'; waveLayer(w).appendChild(el); }
       el.style.left = `${(loop.start / dur) * 100}%`;
       el.style.width = `${Math.max(0.4, (loop.length / dur) * 100)}%`;
       el.title = `${loop.beats}-beat loop`;
@@ -957,6 +981,7 @@
       const w = doc.getElementById(`wave-${deck}`);
       if(!w) return;
       w.innerHTML = '';
+      const layer = waveLayer(w);
       const overview = doc.createElement('div');
       overview.className = 'wave-overview';
       const cached = peakCache[deckPeakKey[deck]];
@@ -975,15 +1000,15 @@
         note.textContent = deckPeakKey[deck] ? 'Reading waveform…' : 'No waveform yet';
         overview.appendChild(note);
       }
-      w.appendChild(overview);
+      layer.appendChild(overview);
       w.onclick = event => {
         if(event.target && event.target.closest && event.target.closest('.hotcue')) return;
-        const rect = w.getBoundingClientRect();
+        const rect = layer.getBoundingClientRect();
         if(rect.width > 0) seekDeckToFraction(deck, (event.clientX - rect.left) / rect.width);
       };
       const pos = doc.createElement('div');
       pos.className = 'position-marker';
-      w.appendChild(pos);
+      layer.appendChild(pos);
 
       const deckState = state.decks && state.decks[deck] || { cues:[], hotcues:[] };
       const audio = deckAudio(deck);
@@ -1000,7 +1025,7 @@
           if(audio && audio.duration && cue.time) left = Math.max(2, Math.min(98, (cue.time / audio.duration) * 100));
         }catch(e){}
         el.style.left = `${left}%`;
-        w.appendChild(el);
+        layer.appendChild(el);
       });
       hotcueSlots(deck).forEach((hotcue, slot) => {
         if(!hotcue) return;
@@ -1009,10 +1034,11 @@
         el.style.background = HOTCUE_COLORS[slot];
         el.title = `Hot cue ${slot + 1}`;
         el.style.left = `${Math.max(1, Math.min(99, hotcuePct(deck, hotcue) * 100))}%`;
-        w.appendChild(el);
+        layer.appendChild(el);
       });
       renderLoopRegion(deck);
       updatePlayhead(deck);
+      if(win.DJBStudio26 && win.DJBStudio26.waveRendered) try{ win.DJBStudio26.waveRendered(deck); }catch(e){}
     }
 
     function stopMeterAnimation(deckInput){
@@ -1552,6 +1578,8 @@
 
     return {
       applyMix,
+      setDuck,
+      getDuck:() => duckLevel,
       ensureAudioGraph,
       teardownAudioGraph,
       getAudioContext:() => audioCtx,

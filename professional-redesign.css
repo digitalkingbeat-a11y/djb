@@ -2319,3 +2319,31 @@ a.mention-link:hover{text-decoration:underline}
 .share-table{width:100%;border-collapse:collapse;font-size:.85em}
 .share-table th,.share-table td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
 .share-table th{color:var(--muted);font-weight:600;font-size:.85em}
+
+/* Oct 26 studio five: waveform zoom, mic talkover, keep awake, battle time limit */
+.wave{overflow:hidden;position:relative;touch-action:pan-y}
+.wave .wave-layer{position:absolute;top:0;bottom:0;left:0;width:100%;will-change:transform;transition:transform .12s linear}
+.sf-zoom{display:flex;align-items:center;justify-content:flex-end;gap:6px;margin:4px 0 2px;font-size:12px;color:var(--muted,#929bab)}
+.sf-zoom button{min-width:30px;padding:2px 8px;font-weight:700}
+.sf-zoom span{min-width:24px;text-align:center;font-variant-numeric:tabular-nums}
+.sf-mic{margin-top:10px;padding:10px;border:1px solid rgba(255,255,255,.1);border-radius:10px;display:grid;gap:8px}
+.sf-mic.live{border-color:#ff5d5d;box-shadow:0 0 0 1px rgba(255,93,93,.35) inset}
+.sf-mic-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sf-mic #sf-talk.live{background:#ff5d5d;border-color:#ff5d5d;color:#fff}
+.sf-mic-meter{height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden}
+.sf-mic-meter i{display:block;height:100%;width:0;background:linear-gradient(90deg,#b9ff31,#ffd23f,#ff5d5d);transition:width .1s}
+.sf-mic select{font-size:12px;padding:4px 6px}
+.sf-mic-monitor{font-size:12px;display:flex;align-items:center;gap:4px}
+.sf-mic small{color:var(--muted,#929bab);font-size:11px;line-height:1.35}
+.sf-awake-box{display:flex;flex-direction:column;align-items:flex-end;gap:4px;max-width:220px}
+.sf-awake-box button.on{border-color:#b9ff31;color:#b9ff31}
+.sf-awake-box small{font-size:11px;color:var(--muted,#929bab);text-align:right}
+.timer-card.sf-warn{border-color:#ffd23f!important;box-shadow:0 0 0 2px rgba(255,210,63,.35)}
+.timer-card.sf-warn strong{color:#ffd23f}
+.timer-card.sf-over{border-color:#ff5d5d!important}
+.timer-card.sf-over strong{color:#ff5d5d}
+.sf-limit-banner{flex-basis:100%;padding:6px 10px;border-radius:8px;font-weight:700;font-size:13px}
+.sf-limit-banner.warn{background:rgba(255,210,63,.16);color:#ffd23f;animation:sfPulse 1s ease-in-out 3}
+.sf-limit-banner.over{background:rgba(255,93,93,.16);color:#ff5d5d}
+@keyframes sfPulse{50%{opacity:.45}}
+@media (max-width:720px){.sf-awake-box{align-items:flex-start;max-width:none}.sf-awake-box small{text-align:left}}
