@@ -785,6 +785,7 @@ async function getPublicProfile(dataClient, publicProfileId){
   if(!publicResults.length) return { private:true };
   const profile = buildPublicProfileFromResults(requested, publicResults, certified.rows);
   if(!profile) return { unavailable:true };
+  await require('./profile_links').attachPublicProfileLinks(dataClient, profile, matchingRows[0].user_id);
   const relationships = await getPublicProfileRelationshipCounts(dataClient, requested);
   if(relationships.error) return relationships;
   if(relationships.counts){

@@ -2363,3 +2363,12 @@ a.mention-link:hover{text-decoration:underline}
 .review-meta{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;align-items:baseline;margin:10px 0;font-size:14px}
 .review-meta>span{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
 .review-meta>strong{overflow-wrap:anywhere}
+
+/* Website + booking info on DJ profiles (own hero and public profile). */
+.profile-links{display:grid;gap:6px;margin-top:8px;max-width:100%}
+.profile-link-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 10px;align-items:baseline}
+.profile-link-row>span{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em;min-width:64px}
+.profile-link-row a,.profile-link-row p{margin:0;overflow-wrap:anywhere;word-break:break-word}
+.profile-link-row a{color:var(--accent);font-weight:600;text-decoration:underline;text-underline-offset:2px}
+.profile-hero-links{margin-top:6px}
+@media (max-width:640px){.profile-link-row{grid-template-columns:1fr;gap:2px}.profile-link-row a{display:inline-block;padding:4px 0;min-height:24px}}

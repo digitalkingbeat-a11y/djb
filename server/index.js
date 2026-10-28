@@ -3416,6 +3416,20 @@ app.get('/api/djs/search', optionalAuth, connectRoute('DJ search', async (req, r
   if(sendConnectResult(res, result)) return;
   res.json({ success:true, results:result.results });
 }));
+const ProfileLinks = require('./profile_links');
+app.get('/api/me/profileLinks', requireAuth, connectRoute('Profile links', async (req, res) => {
+  const result = await ProfileLinks.getProfileLinks(supabaseService, req.authUser.id);
+  if(result.error) throw result.error;
+  res.json({ success:true, links:result.links, schemaMissing:Boolean(result.schemaMissing) });
+}));
+app.put('/api/me/profileLinks', requireAuth, connectRoute('Profile links', async (req, res) => {
+  if(!connectWrite(req, res, 'profileLinksUpdate')) return;
+  const result = await ProfileLinks.updateProfileLinks(supabaseService, req.authUser.id, req.body || {});
+  if(result.validationError) return res.status(422).json({ error:result.validationError });
+  if(result.schemaMissing) return res.status(503).json({ error:'Website and booking info need the 055 database update.', schema:result.schema });
+  if(result.error) throw result.error;
+  res.json({ success:true, links:result.links });
+}));
 app.put('/api/me/searchProfile', requireAuth, connectRoute('Search profile', async (req, res) => {
   if(!connectWrite(req, res, 'searchProfileUpdate')) return;
   const result = await Connect.updateSearchProfile(supabaseService, req.authUser.id, req.body || {});

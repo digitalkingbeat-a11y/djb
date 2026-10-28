@@ -100,7 +100,7 @@ test('signed in, the local profile edit is scoped to that user and stays local',
   const hooks = window.__DJBattleTestHooks;
   hooks.updateAuthUI({ id:'user-9', email:'dj9@example.com', user_metadata:{ full_name:'Server Name' } });
   window.document.getElementById('edit-profile-button').click();
-  assert.match(text(window, '#edit-profile-scope'), /account profile on the server is not changed/);
+  assert.match(text(window, '#edit-profile-scope'), /website and booking info are also saved to your account/);
   window.document.getElementById('edit-profile-name').value = 'Club Name';
   window.document.getElementById('save-profile').click();
   assert.equal(text(window, '#profile-name'), 'Club Name');
