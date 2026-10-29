@@ -205,6 +205,25 @@ function sanitizeSmartCrateRules(rules){
   return output;
 }
 
+// Oct 29: "I own or have the rights to this music" (sql/056). Only written when the client sends it,
+// so uploads keep working before 056 is applied; a missing column is retried without it.
+function applyRightsConfirmation(values, input = {}, now = new Date()){
+  if(!input || !Object.prototype.hasOwnProperty.call(input, 'rightsConfirmed')) return values;
+  const confirmed = input.rightsConfirmed === true;
+  values.rights_confirmed = confirmed;
+  values.rights_confirmed_at = confirmed ? now.toISOString() : null;
+  return values;
+}
+function rightsColumnMissing(error){
+  return /rights_confirmed/i.test(String(error && (error.message || error.details || error) || ''));
+}
+function withoutRightsColumns(values){
+  const copy = { ...values };
+  delete copy.rights_confirmed;
+  delete copy.rights_confirmed_at;
+  return copy;
+}
+
 function buildLibraryTrackPayload(userId, input = {}, now = new Date()){
   const metadata = normalizeLibraryMetadata(input);
   const id = input.id || randomUUID();
@@ -219,7 +238,7 @@ function buildLibraryTrackPayload(userId, input = {}, now = new Date()){
     if(!audioStorageObjectPath) audioStorageObjectPath = `private/library-audio/${userId}/tracks/${id}/audio.${ALLOWED_AUDIO_MIME_TYPES[audioValidation.mimeType][0]}`;
   }
   const hasDuplicateEvidence = Boolean(input.fileHash || input.sha256 || input.storageHash || audioValidation || input.sourceSubmissionId || input.linkedSubmissionId);
-  return {
+  return applyRightsConfirmation({
     id,
     user_id: userId,
     ...metadata,
@@ -239,7 +258,7 @@ function buildLibraryTrackPayload(userId, input = {}, now = new Date()){
     created_at: now.toISOString(),
     updated_at: now.toISOString(),
     archived_at: null
-  };
+  }, input, now);
 }
 
 function sanitizeLibraryTrack(row, options = {}){
@@ -257,6 +276,9 @@ function sanitizeLibraryTrack(row, options = {}){
     duration: row.duration,
     tags: row.tags || [],
     rightsClassification: row.rights_classification,
+    // null before sql/056 (column missing), so the browser keeps its own copy.
+    rightsConfirmed: row.rights_confirmed == null ? null : row.rights_confirmed === true,
+    rightsConfirmedAt: row.rights_confirmed === true ? (row.rights_confirmed_at || null) : null,
     visibility: row.visibility,
     analysisConfidence: row.analysis_confidence,
     sourceType: row.source_type,
@@ -388,9 +410,14 @@ async function createLibraryTrack(dataClient, userId, input = {}, now = new Date
   }
   const duplicate = await findDuplicateLibraryTrack(dataClient, userId, payload);
   if(duplicate.error || duplicate.duplicate) return duplicate;
-  const inserted = await dataClient.from(LIBRARY_TRACK_TABLE).insert([payload]).select('*').single();
+  let inserted = await dataClient.from(LIBRARY_TRACK_TABLE).insert([payload]).select('*').single();
+  let rightsSchemaMissing = false;
+  if(inserted.error && 'rights_confirmed' in payload && rightsColumnMissing(inserted.error)){
+    rightsSchemaMissing = true;
+    inserted = await dataClient.from(LIBRARY_TRACK_TABLE).insert([withoutRightsColumns(payload)]).select('*').single();
+  }
   if(inserted.error) return { error: inserted.error };
-  return { track: sanitizeLibraryTrack(inserted.data), rawTrack: inserted.data, created: true };
+  return { track: sanitizeLibraryTrack(inserted.data), rawTrack: inserted.data, created: true, ...(rightsSchemaMissing ? { rightsSchemaMissing } : {}) };
 }
 
 async function updateLibraryTrack(dataClient, userId, trackId, input = {}, now = new Date()){
@@ -427,9 +454,15 @@ async function updateLibraryTrack(dataClient, userId, trackId, input = {}, now =
     analysis_summary: input.analysisSummary != null ? sanitizeAnalysisSummary(input.analysisSummary) : sanitizeAnalysisSummary(owned.track.analysis_summary),
     updated_at: now.toISOString()
   };
-  const updated = await dataClient.from(LIBRARY_TRACK_TABLE).update(values).eq('id', trackId).eq('user_id', userId).select('*').single();
+  applyRightsConfirmation(values, input, now);
+  let updated = await dataClient.from(LIBRARY_TRACK_TABLE).update(values).eq('id', trackId).eq('user_id', userId).select('*').single();
+  let rightsSchemaMissing = false;
+  if(updated.error && 'rights_confirmed' in values && rightsColumnMissing(updated.error)){
+    rightsSchemaMissing = true;
+    updated = await dataClient.from(LIBRARY_TRACK_TABLE).update(withoutRightsColumns(values)).eq('id', trackId).eq('user_id', userId).select('*').single();
+  }
   if(updated.error) return { error: updated.error };
-  return { track: sanitizeLibraryTrack(updated.data), rawTrack: updated.data };
+  return { track: sanitizeLibraryTrack(updated.data), rawTrack: updated.data, ...(rightsSchemaMissing ? { rightsSchemaMissing } : {}) };
 }
 
 async function archiveLibraryTrack(dataClient, userId, trackId, now = new Date()){
@@ -794,6 +827,7 @@ async function createPracticeRecordingFromSubmission(dataClient, userId, input =
 }
 
 module.exports = {
+  applyRightsConfirmation,
   LIBRARY_ARTWORK_BUCKET,
   LIBRARY_TRACK_TABLE,
   LIBRARY_CRATE_TABLE,

@@ -496,7 +496,7 @@
       </section>
 
       <section id="profile" class="view">
-        <div class="profile-hero"><div class="avatar huge" id="profile-hero-avatar">G</div><div><span class="eyebrow accent">DJ PROFILE</span><h2><span id="profile-hero-name">Guest</span> <span id="profile-belt-hero" class="belt-badge">White</span></h2><p id="profile-hero-tagline">Guest • Local DJ profile saved in this browser</p><p id="profile-hero-about" class="profile-hero-about hidden"></p><div id="profile-hero-links" class="profile-hero-links hidden"></div><div class="profile-actions"><button class="primary" id="edit-profile-button" type="button">Edit Profile</button><button class="ghost" id="share-profile-button" type="button">Share</button></div><div style="margin-top:8px"><button class="primary" id="take-belt-test" type="button">Take Belt Test</button></div></div><div class="profile-score"><strong>0</strong><span>Battle Rating</span></div></div>
+        <div class="profile-hero"><div class="avatar huge" id="profile-hero-avatar">G</div><div><span class="eyebrow accent">DJ PROFILE</span><h2><span id="profile-hero-name">Guest</span> <span id="profile-belt-hero" class="belt-badge">White</span></h2><p id="profile-hero-tagline">Guest • Local DJ profile saved in this browser</p><p id="profile-hero-about" class="profile-hero-about hidden"></p><div id="profile-hero-links" class="profile-hero-links hidden"></div><div class="profile-actions"><button class="primary" id="edit-profile-button" type="button">Edit Profile</button><button class="ghost" id="share-profile-button" type="button">Share</button><button class="ghost" id="profile-qr-button" type="button">Show my QR code</button></div><div style="margin-top:8px"><button class="primary" id="take-belt-test" type="button">Take Belt Test</button></div></div><div class="profile-score"><strong>0</strong><span>Battle Rating</span></div></div>
         <div id="profile-rating-history" class="panel rating-history"></div>
         <div id="profile-streaks" class="panel profile-streaks"></div>
         <div id="profile-genre-stats" class="panel profile-genre-stats"></div>
@@ -587,6 +587,8 @@
   <script src="automix.js"></script>
   <script src="share_links.js"></script>
   <script src="studio_five.js"></script>
+  <script src="assets/vendor/qrcode.js"></script>
+  <script src="oct29_five.js"></script>
   <script>
     // Wire timing analysis to create practice events from loaded audio.
     const timingInspectorButton = document.getElementById('hc-run-timing');

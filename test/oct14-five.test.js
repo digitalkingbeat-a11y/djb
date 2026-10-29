@@ -113,9 +113,14 @@ test('no bare alert() left and appAlert shows a toast', () => {
 test('copyright check never invents a result; judge preview has no random scores', async () => {
   const { window } = loadAppDom();
   const track = { title:'My Track' };
-  for(let i=0;i<5;i++){ const r = await window.__inApp('runCopyrightCheck')(track); assert.equal(r.status, 'Not Checked'); }
-  assert.equal(track.copyrightCheck, 'Not Checked');
-  assert.match(window.document.getElementById('modal-content').textContent, /Coming soon/);
+  // Oct 29: the coming-soon check became an "I own or have the rights" tick; still no invented result.
+  const pending = window.__inApp('runCopyrightCheck')(track);
+  assert.match(window.document.getElementById('modal-content').textContent, /I own or have the rights to this music/);
+  assert.doesNotMatch(window.document.getElementById('modal-content').textContent, /Coming soon/);
+  window.document.querySelector('#modal-content button[value="cancel"]').click();
+  const r = await pending;
+  assert.equal(r.cancelled, true);
+  assert.equal(r.rightsConfirmed, false);
   const fnSrc = appSource.slice(appSource.indexOf('async function runCopyrightCheck'), appSource.indexOf('async function runCopyrightCheck') + 900);
   assert.doesNotMatch(fnSrc, /Math\.random/);
   window.document.getElementById('judge-score-preview').click();

@@ -107,7 +107,7 @@ test('signed in: saving sends website + booking info to the account', async () =
   assert.equal(out.saved, true);
   const put = calls.find(c => c.url === '/api/me/profileLinks');
   assert.equal(put.opts.method, 'PUT');
-  assert.deepEqual(plain(put.opts.body), { website:'https://djdan.com/', bookingInfo:'DM for bookings' });
+  assert.deepEqual(plain(put.opts.body), { website:'https://djdan.com/', bookingInfo:'DM for bookings', instagram:'', soundcloud:'', mixcloud:'', tiktok:'' });
 });
 
 test('public profile shows the website as a safe link and escapes hostile booking text', () => {

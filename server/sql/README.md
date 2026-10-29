@@ -48,3 +48,4 @@ If you want, I can also produce the exact `supabase` CLI commands or an automate
 - 053_create_beat_share_links.sql — creates `marketplace_share_links` and `marketplace_share_events` (beat share links that credit the DJ who shared; visitors stored only as a salted hash) (apply after 052)
 - 054_allow_m4a_mix_uploads.sql — lets the private `battle-mixes` bucket accept iPhone/Safari takes (audio/mp4, .m4a) (apply after 053)
 - 055_add_profile_links.sql — adds `website_url` and `booking_info` to `dj_progression_profiles` (website link and booking info on public DJ profiles) (apply after 054)
+- 056_add_social_links_and_rights.sql — adds `instagram_url`, `soundcloud_url`, `mixcloud_url`, `tiktok_url` to `dj_progression_profiles` and `rights_confirmed` / `rights_confirmed_at` to `music_library_tracks` (social links on DJ profiles; "I own or have the rights" tick on uploads) (apply after 055)

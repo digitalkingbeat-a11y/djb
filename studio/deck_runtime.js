@@ -20,6 +20,10 @@
     let masterTap = null;
     let masterAnalysers = [];
     const mixerValues = { a:{ gain:1, high:0, mid:0, low:0 }, b:{ gain:1, high:0, mid:0, low:0 } };
+    // Oct 29: EQ kill switches. A killed band is cut fully (-40 dB, the deepest a shelf/peaking filter goes);
+    // a second tap brings back whatever the slider says.
+    const EQ_KILL_DB = -40;
+    const eqKills = { a:{ high:false, mid:false, low:false }, b:{ high:false, mid:false, low:false } };
     const keyLock = { a:false, b:false };
     const syncRate = { a:null, b:null };
     const loops = { a:null, b:null };
@@ -273,17 +277,40 @@
       const chain = fx[deck];
       if(chain){
         try{ chain.trim.gain.value = v.gain; }catch(e){}
-        if(chain.low) try{ chain.low.gain.value = v.low; }catch(e){}
-        if(chain.mid) try{ chain.mid.gain.value = v.mid; }catch(e){}
-        if(chain.high) try{ chain.high.gain.value = v.high; }catch(e){}
+        const k = eqKills[deck];
+        if(chain.low) try{ chain.low.gain.value = k.low ? EQ_KILL_DB : v.low; }catch(e){}
+        if(chain.mid) try{ chain.mid.gain.value = k.mid ? EQ_KILL_DB : v.mid; }catch(e){}
+        if(chain.high) try{ chain.high.gain.value = k.high ? EQ_KILL_DB : v.high; }catch(e){}
       }
       applySendFx(deck);
       Object.keys(MIXER_DEFAULTS).forEach(band => {
         const out = doc.getElementById(`${mixerInputId(deck, band)}-out`);
-        if(out) out.textContent = formatMixerValue(band, v[band]);
+        if(out) out.textContent = band !== 'gain' && eqKills[deck][band] ? 'KILL' : formatMixerValue(band, v[band]);
       });
-      return { ...v, connected:Boolean(chain) };
+      updateKillButtons(deck);
+      return { ...v, connected:Boolean(chain), kills:{ ...eqKills[deck] } };
     }
+
+    function updateKillButtons(deckInput){
+      const deck = validDeck(deckInput);
+      ['high','mid','low'].forEach(band => {
+        const btn = doc.querySelector(`[data-eq-kill="${band}"][data-deck="${deck}"]`);
+        if(!btn) return;
+        const on = Boolean(eqKills[deck][band]);
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        const label = btn.closest('label') || (btn.parentNode && btn.parentNode.classList && btn.parentNode.classList.contains('eq-band') ? btn.parentNode : null);
+        if(label && label.classList) label.classList.toggle('eq-killed', on);
+      });
+    }
+    function toggleEqKill(deckInput, band, force){
+      const deck = validDeck(deckInput);
+      if(!['high','mid','low'].includes(band)) return { ok:false, error:'Unknown EQ band.' };
+      eqKills[deck][band] = typeof force === 'boolean' ? force : !eqKills[deck][band];
+      applyChannelFx(deck);
+      return { ok:true, deck, band, killed:eqKills[deck][band] };
+    }
+    function eqKillState(deckInput){ return { ...eqKills[validDeck(deckInput)] }; }
 
     function resetMixerControl(deckInput, band){
       const deck = validDeck(deckInput);
@@ -1516,6 +1543,10 @@
           el.oninput = () => applyChannelFx(deck);
           el.ondblclick = () => resetMixerControl(deck, band);
         });
+        ['high','mid','low'].forEach(band => {
+          const btn = doc.querySelector(`[data-eq-kill="${band}"][data-deck="${deck}"]`);
+          if(btn) btn.onclick = event => { if(event){ if(event.preventDefault) event.preventDefault(); if(event.stopPropagation) event.stopPropagation(); } toggleEqKill(deck, band); };
+        });
         ['filter','echo-beats','echo-wet','reverb-wet'].forEach(id => {
           const el = doc.getElementById(`${id}-${deck}`);
           if(!el) return;
@@ -1624,6 +1655,8 @@
       updateDeckButtons,
       applyChannelFx,
       resetMixerControl,
+      toggleEqKill,
+      eqKillState,
       formatMixerValue,
       levelsFromSamples,
       meterFraction,
