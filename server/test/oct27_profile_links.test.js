@@ -44,7 +44,7 @@ describe('Oct 27 profile website + booking info', () => {
   });
   it('reads links back, re-cleaning anything stored', async () => {
     const out = await PL.getProfileLinks(fakeDb([{ user_id:'u1', website_url:'javascript:alert(1)', booking_info:'DM me' }]), 'u1');
-    expect(out.links).to.deep.equal({ website:'', bookingInfo:'DM me' });
+    expect(out.links).to.deep.equal({ website:'', bookingInfo:'DM me', instagram:'', soundcloud:'', mixcloud:'', tiktok:'' });
   });
   it('adds links to public profiles but never for private ones, and never breaks the profile', async () => {
     const pub = await PL.attachPublicProfileLinks(fakeDb([{ user_id:'u1', website_url:'https://djdan.com/', booking_info:'DM' }]), { displayName:'Dan' }, 'u1');

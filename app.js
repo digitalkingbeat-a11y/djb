@@ -427,7 +427,7 @@ function currentUser(){
   const bio = local.bio || String(meta.bio || '').replace(/\s+/g, ' ').trim().slice(0, LOCAL_PROFILE_BIO_MAX);
   // Profile photo: this browser's copy first, then the account's avatar_url (set by the server after upload).
   const avatar = local.avatar || (isSafeAvatarUrl(meta.avatar_url) && /^https:/i.test(String(meta.avatar_url)) ? String(meta.avatar_url) : '');
-  return { ...base, hometown, bio, avatar, website:local.website || '', bookingInfo:local.bookingInfo || '' };
+  return { ...base, hometown, bio, avatar, website:local.website || '', bookingInfo:local.bookingInfo || '', instagram:local.instagram || '', soundcloud:local.soundcloud || '', mixcloud:local.mixcloud || '', tiktok:local.tiktok || '' };
 }
 
 // The DJ's real belt from local progress (White is the true starting belt for everyone).
@@ -471,6 +471,67 @@ function normalizeProfileWebsite(value){
   if(url.href.length > PROFILE_WEBSITE_MAX) return { error:`Website must be ${PROFILE_WEBSITE_MAX} characters or fewer.` };
   return { value:url.href };
 }
+// Oct 29: Instagram / SoundCloud / Mixcloud / TikTok. Same rules as server/social_links.js.
+const SOCIAL_LINK_MAX = 200;
+const SOCIAL_NETWORKS = {
+  instagram: { label:'Instagram', hosts:['instagram.com', 'www.instagram.com', 'm.instagram.com'], handle:/^[A-Za-z0-9._]{1,30}$/, base:'https://instagram.com/', at:false },
+  soundcloud: { label:'SoundCloud', hosts:['soundcloud.com', 'www.soundcloud.com', 'm.soundcloud.com', 'on.soundcloud.com'], handle:/^[A-Za-z0-9_-]{1,50}$/, base:'https://soundcloud.com/', at:false },
+  mixcloud: { label:'Mixcloud', hosts:['mixcloud.com', 'www.mixcloud.com', 'm.mixcloud.com'], handle:/^[A-Za-z0-9_-]{1,50}$/, base:'https://mixcloud.com/', at:false },
+  tiktok: { label:'TikTok', hosts:['tiktok.com', 'www.tiktok.com', 'm.tiktok.com', 'vm.tiktok.com'], handle:/^[A-Za-z0-9._]{1,24}$/, base:'https://tiktok.com/@', at:true }
+};
+const SOCIAL_KEYS = Object.keys(SOCIAL_NETWORKS);
+
+// A full https link on the right site, or an @handle that becomes one. Anything else is refused.
+function cleanSocialLink(network, value){
+  const spec = SOCIAL_NETWORKS[network];
+  if(!spec) return { error:'Unknown link type.' };
+  let text = String(value == null ? '' : value).trim();
+  if(!text) return { value:'' };
+  const bad = { error:`${spec.label} must be an https://${spec.hosts[0]}/… link or an @handle.` };
+  if(/[\s<>"'`\\]/.test(text) || /[\u0000-\u001f\u007f]/.test(text)) return bad;
+  const looksLikeLink = /^[a-z][a-z0-9+.-]*:/i.test(text) || text.includes('/') || /^([a-z0-9-]+\.)*[a-z0-9-]+\.com$/i.test(text);
+  if(!looksLikeLink){
+    const handle = text.replace(/^@/, '');
+    if(!spec.handle.test(handle)) return bad;
+    return { value:spec.base + handle };
+  }
+  if(/^[a-z][a-z0-9+.-]*:/i.test(text)){
+    if(!/^https:\/\//i.test(text)) return { error:`${spec.label} link must start with https://.` };
+  }else{
+    text = `https://${text.replace(/^\/+/, '')}`;
+  }
+  let url;
+  try{ url = new URL(text); }catch(e){ return bad; }
+  if(url.protocol !== 'https:' || url.username || url.password || url.port) return bad;
+  if(!spec.hosts.includes(url.hostname.toLowerCase())) return bad;
+  const path = url.pathname.replace(/\/+$/, '');
+  if(!path || path === '/' || !/^[A-Za-z0-9@._~\/-]+$/.test(path)) return bad;
+  const out = `https://${url.hostname.toLowerCase()}${path}`;
+  if(out.length > SOCIAL_LINK_MAX) return { error:`${spec.label} link must be ${SOCIAL_LINK_MAX} characters or fewer.` };
+  return { value:out };
+}
+
+function cleanSocialLinks(input = {}){
+  const out = {};
+  for(const key of SOCIAL_KEYS){
+    if(!input || !Object.prototype.hasOwnProperty.call(input, key)) continue;
+    const r = cleanSocialLink(key, input[key]);
+    if(r.error) return { error:r.error, field:key };
+    out[key] = r.value;
+  }
+  return { value:out };
+}
+const SOCIAL_ICON_TEXT = { instagram:'IG', soundcloud:'SC', mixcloud:'MC', tiktok:'TT' };
+// Small icon links for a profile's social accounts. Only cleaned https links on the right site are shown.
+function socialLinksHtml(links = {}){
+  const items = SOCIAL_KEYS.map(key => {
+    const cleaned = cleanSocialLink(key, links && links[key]);
+    if(cleaned.error || !cleaned.value) return '';
+    const label = SOCIAL_NETWORKS[key].label;
+    return `<a class="profile-social-link social-${key}" href="${esc(cleaned.value)}" target="_blank" rel="noopener noreferrer" title="${esc(label)}" aria-label="${esc(label)}"><span class="social-icon" aria-hidden="true">${SOCIAL_ICON_TEXT[key]}</span><span class="social-name">${esc(label)}</span></a>`;
+  }).filter(Boolean);
+  return items.length ? `<div class="profile-social-links">${items.join('')}</div>` : '';
+}
 // Booking info: one short line of plain text, e.g. an email, a phone number or "DM for bookings".
 function normalizeBookingInfo(value){
   const text = String(value == null ? '' : value).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -500,6 +561,8 @@ function profileLinksHtml(links = {}){
   const rows = [];
   if(!site.error && site.value) rows.push(`<div class="profile-link-row"><span>Website</span><a class="profile-website-link" href="${esc(site.value)}" target="_blank" rel="noopener noreferrer">${esc(profileWebsiteLabel(site.value) || site.value)} ↗</a></div>`);
   if(booking) rows.push(`<div class="profile-link-row"><span>Booking</span><p class="profile-booking-info">${booking}</p></div>`);
+  const social = socialLinksHtml(links);
+  if(social) rows.push(`<div class="profile-link-row"><span>Socials</span>${social}</div>`);
   return rows.length ? `<div class="profile-links">${rows.join('')}</div>` : '';
 }
 
@@ -523,7 +586,13 @@ function normalizeLocalProfileInput(input = {}){
   if(website.error) return website;
   const bookingInfo = normalizeBookingInfo(input.bookingInfo);
   if(bookingInfo.error) return bookingInfo;
-  return { value:{ displayName, initials, hometown, bio, avatar, website:website.value, bookingInfo:bookingInfo.value } };
+  const social = {};
+  for(const key of SOCIAL_KEYS){
+    const cleaned = cleanSocialLink(key, input[key]);
+    if(cleaned.error) return cleaned;
+    social[key] = cleaned.value;
+  }
+  return { value:{ displayName, initials, hometown, bio, avatar, website:website.value, bookingInfo:bookingInfo.value, ...social } };
 }
 
 function saveLocalProfile(input){
@@ -536,6 +605,7 @@ function saveLocalProfile(input){
   if(normalized.value.bio) value.bio = normalized.value.bio;
   if(normalized.value.website) value.website = normalized.value.website;
   if(normalized.value.bookingInfo) value.bookingInfo = normalized.value.bookingInfo;
+  SOCIAL_KEYS.forEach(key => { if(normalized.value[key]) value[key] = normalized.value[key]; });
   // avatar: undefined keeps the current photo, '' or null removes it.
   const keepAvatar = input && input.avatar === undefined ? readLocalProfile(before.id).avatar : normalized.value.avatar;
   if(keepAvatar) value.avatar = keepAvatar;
@@ -555,7 +625,7 @@ function openEditProfileModal(){
   const scopeNote = user.signedIn
     ? 'Saved in this browser. Your website and booking info are also saved to your account so other DJs can see them.'
     : 'Saved in this browser only. Sign in later to sync battles and results.';
-  openModal(`<span class="eyebrow accent">PROFILE</span><h3>Edit Profile</h3><p style="color:var(--muted)" id="edit-profile-scope">${esc(scopeNote)}</p><div class="edit-profile-photo"><div class="avatar huge${user.avatar ? ' has-photo' : ''}" id="edit-profile-photo-preview">${avatarInnerHtml(user.initials, user.avatar)}</div><div class="edit-profile-photo-actions"><label class="ghost small file-button" for="edit-profile-photo">Choose photo<input type="file" id="edit-profile-photo" accept="${AVATAR_ACCEPT}" hidden></label><button class="ghost small" type="button" id="edit-profile-photo-remove"${user.avatar ? '' : ' disabled'}>Remove photo</button><small>${esc(AVATAR_HINT)}</small><small id="edit-profile-photo-status" class="edit-profile-photo-status" aria-live="polite"></small></div></div><div class="form-grid"><label>Display name<input id="edit-profile-name" maxlength="${LOCAL_PROFILE_NAME_MAX}" autocomplete="nickname" value="${esc(user.displayName)}"></label><label>Initials (avatar)<input id="edit-profile-initials" maxlength="${LOCAL_PROFILE_INITIALS_MAX}" value="${esc(user.initials)}"></label><label>Hometown <small style="color:var(--muted)">(optional, shown on your player card)</small><input id="edit-profile-hometown" maxlength="${LOCAL_PROFILE_HOMETOWN_MAX}" autocomplete="address-level2" placeholder="e.g. Atlanta, GA" value="${esc(user.hometown || '')}"></label><label class="full">Short bio <small style="color:var(--muted)">(optional)</small><textarea id="edit-profile-bio" maxlength="${LOCAL_PROFILE_BIO_MAX}" rows="2" placeholder="A line about your style">${esc(user.bio || '')}</textarea></label><label class="full">Website <small style="color:var(--muted)">(optional)</small><input id="edit-profile-website" type="url" inputmode="url" autocomplete="url" maxlength="${PROFILE_WEBSITE_MAX}" placeholder="e.g. https://yoursite.com" value="${esc(user.website || '')}"></label><label class="full">Booking info <small style="color:var(--muted)">(optional, e.g. email, phone or “DM for bookings”)</small><input id="edit-profile-booking" maxlength="${PROFILE_BOOKING_MAX}" placeholder="e.g. bookings@yoursite.com" value="${esc(user.bookingInfo || '')}"></label></div><p id="edit-profile-error" class="hidden" role="alert" style="color:var(--danger)"></p><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="save-profile">Save Profile</button></div>`);
+  openModal(`<span class="eyebrow accent">PROFILE</span><h3>Edit Profile</h3><p style="color:var(--muted)" id="edit-profile-scope">${esc(scopeNote)}</p><div class="edit-profile-photo"><div class="avatar huge${user.avatar ? ' has-photo' : ''}" id="edit-profile-photo-preview">${avatarInnerHtml(user.initials, user.avatar)}</div><div class="edit-profile-photo-actions"><label class="ghost small file-button" for="edit-profile-photo">Choose photo<input type="file" id="edit-profile-photo" accept="${AVATAR_ACCEPT}" hidden></label><button class="ghost small" type="button" id="edit-profile-photo-remove"${user.avatar ? '' : ' disabled'}>Remove photo</button><small>${esc(AVATAR_HINT)}</small><small id="edit-profile-photo-status" class="edit-profile-photo-status" aria-live="polite"></small></div></div><div class="form-grid"><label>Display name<input id="edit-profile-name" maxlength="${LOCAL_PROFILE_NAME_MAX}" autocomplete="nickname" value="${esc(user.displayName)}"></label><label>Initials (avatar)<input id="edit-profile-initials" maxlength="${LOCAL_PROFILE_INITIALS_MAX}" value="${esc(user.initials)}"></label><label>Hometown <small style="color:var(--muted)">(optional, shown on your player card)</small><input id="edit-profile-hometown" maxlength="${LOCAL_PROFILE_HOMETOWN_MAX}" autocomplete="address-level2" placeholder="e.g. Atlanta, GA" value="${esc(user.hometown || '')}"></label><label class="full">Short bio <small style="color:var(--muted)">(optional)</small><textarea id="edit-profile-bio" maxlength="${LOCAL_PROFILE_BIO_MAX}" rows="2" placeholder="A line about your style">${esc(user.bio || '')}</textarea></label><label class="full">Website <small style="color:var(--muted)">(optional)</small><input id="edit-profile-website" type="url" inputmode="url" autocomplete="url" maxlength="${PROFILE_WEBSITE_MAX}" placeholder="e.g. https://yoursite.com" value="${esc(user.website || '')}"></label><label class="full">Booking info <small style="color:var(--muted)">(optional, e.g. email, phone or “DM for bookings”)</small><input id="edit-profile-booking" maxlength="${PROFILE_BOOKING_MAX}" placeholder="e.g. bookings@yoursite.com" value="${esc(user.bookingInfo || '')}"></label>${SOCIAL_KEYS.map(key => `<label class="social-field">${esc(SOCIAL_NETWORKS[key].label)} <small style="color:var(--muted)">(optional)</small><input id="edit-profile-${key}" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="${SOCIAL_LINK_MAX}" placeholder="@handle or https://${esc(SOCIAL_NETWORKS[key].hosts[0])}/…" value="${esc(user[key] || '')}"></label>`).join('')}</div><p id="edit-profile-error" class="hidden" role="alert" style="color:var(--danger)"></p><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="save-profile">Save Profile</button></div>`);
   const nameInput = document.getElementById('edit-profile-name');
   const initialsInput = document.getElementById('edit-profile-initials');
   let initialsTouched = false;
@@ -589,7 +659,7 @@ function openEditProfileModal(){
     const websiteInput = document.getElementById('edit-profile-website');
     const bookingInput = document.getElementById('edit-profile-booking');
     const avatarValue = pendingAvatar === undefined ? undefined : pendingAvatar === null ? '' : pendingAvatar.dataUrl;
-    const result = saveLocalProfile({ displayName:nameInput ? nameInput.value : '', initials:initialsInput ? initialsInput.value : '', hometown:hometownInput ? hometownInput.value : '', bio:bioInput ? bioInput.value : '', website:websiteInput ? websiteInput.value : '', bookingInfo:bookingInput ? bookingInput.value : '', avatar:avatarValue });
+    const result = saveLocalProfile({ displayName:nameInput ? nameInput.value : '', initials:initialsInput ? initialsInput.value : '', hometown:hometownInput ? hometownInput.value : '', bio:bioInput ? bioInput.value : '', website:websiteInput ? websiteInput.value : '', bookingInfo:bookingInput ? bookingInput.value : '', ...Object.fromEntries(SOCIAL_KEYS.map(key => { const el = document.getElementById(`edit-profile-${key}`); return [key, el ? el.value : '']; })), avatar:avatarValue });
     const errorNode = document.getElementById('edit-profile-error');
     if(result.error){
       if(errorNode){ errorNode.textContent = result.error; errorNode.classList.remove('hidden'); }
@@ -610,11 +680,15 @@ function openEditProfileModal(){
 async function syncProfileLinksToServer(user = currentUser()){
   const api = window.DJBattleApi;
   if(!user || !user.signedIn || !api || typeof api.apiRequest !== 'function') return { localOnly:true };
-  const saved = await api.apiRequest('/api/me/profileLinks', { method:'PUT', body:{ website:user.website || '', bookingInfo:user.bookingInfo || '' } });
+  const saved = await api.apiRequest('/api/me/profileLinks', { method:'PUT', body:{ website:user.website || '', bookingInfo:user.bookingInfo || '', ...Object.fromEntries(SOCIAL_KEYS.map(key => [key, user[key] || ''])) } });
   if(saved.error){
     const msg = saved.data && saved.data.error || saved.error;
     appAlert(`Website and booking info saved in this browser only: ${msg}`, 'Profile');
     return { error:msg };
+  }
+  if(saved.data && saved.data.socialSchemaMissing && SOCIAL_KEYS.some(key => user[key])){
+    appAlert('Website and booking info saved to your account. Social links are saved in this browser only until the 056 database update is applied.', 'Profile');
+    return { saved:true, socialLocalOnly:true, links:saved.data.links };
   }
   return { saved:true, links:saved.data && saved.data.links };
 }
@@ -629,13 +703,14 @@ async function loadProfileLinksFromServer(){
   const links = res && !res.error && res.data && res.data.links;
   if(!links) return null;
   const local = readLocalProfile(user.id);
-  if(local.website || local.bookingInfo) return null;
+  if(local.website || local.bookingInfo || SOCIAL_KEYS.some(key => local[key])) return null;
   const site = normalizeProfileWebsite(links.website);
   const booking = normalizeBookingInfo(links.bookingInfo);
   const next = { ...local };
   if(!site.error && site.value) next.website = site.value;
   if(!booking.error && booking.value) next.bookingInfo = booking.value;
-  if(!next.website && !next.bookingInfo) return null;
+  SOCIAL_KEYS.forEach(key => { const cleaned = cleanSocialLink(key, links[key]); if(!cleaned.error && cleaned.value) next[key] = cleaned.value; });
+  if(!next.website && !next.bookingInfo && !SOCIAL_KEYS.some(key => next[key])) return null;
   if(!next.displayName) next.displayName = user.displayName;
   localStorage.setItem(`${LOCAL_PROFILE_STORAGE_PREFIX}${user.id}`, JSON.stringify(next));
   renderCurrentUserUI();
@@ -1343,9 +1418,9 @@ function installProfessionalShell(){
             <div class="mixer-channel">
               <strong>CH A</strong>
               <label title="Double-click to reset">Gain<input id="gain-a" type="range" min="0" max="1.4" step="0.01" value="1"><output id="gain-a-out">0.0 dB</output></label>
-              <label title="Double-click to reset">High<input id="eq-high-a" type="range" min="-12" max="12" step="1" value="0"><output id="eq-high-a-out">0 dB</output></label>
-              <label title="Double-click to reset">Mid<input id="eq-mid-a" type="range" min="-12" max="12" step="1" value="0"><output id="eq-mid-a-out">0 dB</output></label>
-              <label title="Double-click to reset">Low<input id="eq-low-a" type="range" min="-12" max="12" step="1" value="0"><output id="eq-low-a-out">0 dB</output></label>
+              <div class="eq-band"><label title="Double-click to reset">High<input id="eq-high-a" type="range" min="-12" max="12" step="1" value="0"><output id="eq-high-a-out">0 dB</output></label><button class="eq-kill" type="button" data-eq-kill="high" data-deck="a" aria-pressed="false" aria-label="Kill highs, Channel A" title="Cut the highs completely. Tap again to bring them back.">KILL</button></div>
+              <div class="eq-band"><label title="Double-click to reset">Mid<input id="eq-mid-a" type="range" min="-12" max="12" step="1" value="0"><output id="eq-mid-a-out">0 dB</output></label><button class="eq-kill" type="button" data-eq-kill="mid" data-deck="a" aria-pressed="false" aria-label="Kill mids, Channel A" title="Cut the mids completely. Tap again to bring them back.">KILL</button></div>
+              <div class="eq-band"><label title="Double-click to reset">Low<input id="eq-low-a" type="range" min="-12" max="12" step="1" value="0"><output id="eq-low-a-out">0 dB</output></label><button class="eq-kill" type="button" data-eq-kill="low" data-deck="a" aria-pressed="false" aria-label="Kill bass, Channel A" title="Cut the bass completely. Tap again to bring them back.">KILL</button></div>
               <label class="filter-knob" title="Left: low-pass. Right: high-pass. Double-click to center (off)">Filter<input id="filter-a" type="range" min="-1" max="1" step="0.01" value="0"><output id="filter-a-out">Off</output></label>
               <div class="send-fx" aria-label="Channel A effects">
                 <label>Echo<select id="echo-beats-a" aria-label="Echo time, Deck A"><option value="0">Off</option><option value="0.25">1/4</option><option value="0.5">1/2</option><option value="1">1 beat</option></select></label>
@@ -1358,9 +1433,9 @@ function installProfessionalShell(){
             <div class="mixer-channel">
               <strong>CH B</strong>
               <label title="Double-click to reset">Gain<input id="gain-b" type="range" min="0" max="1.4" step="0.01" value="1"><output id="gain-b-out">0.0 dB</output></label>
-              <label title="Double-click to reset">High<input id="eq-high-b" type="range" min="-12" max="12" step="1" value="0"><output id="eq-high-b-out">0 dB</output></label>
-              <label title="Double-click to reset">Mid<input id="eq-mid-b" type="range" min="-12" max="12" step="1" value="0"><output id="eq-mid-b-out">0 dB</output></label>
-              <label title="Double-click to reset">Low<input id="eq-low-b" type="range" min="-12" max="12" step="1" value="0"><output id="eq-low-b-out">0 dB</output></label>
+              <div class="eq-band"><label title="Double-click to reset">High<input id="eq-high-b" type="range" min="-12" max="12" step="1" value="0"><output id="eq-high-b-out">0 dB</output></label><button class="eq-kill" type="button" data-eq-kill="high" data-deck="b" aria-pressed="false" aria-label="Kill highs, Channel B" title="Cut the highs completely. Tap again to bring them back.">KILL</button></div>
+              <div class="eq-band"><label title="Double-click to reset">Mid<input id="eq-mid-b" type="range" min="-12" max="12" step="1" value="0"><output id="eq-mid-b-out">0 dB</output></label><button class="eq-kill" type="button" data-eq-kill="mid" data-deck="b" aria-pressed="false" aria-label="Kill mids, Channel B" title="Cut the mids completely. Tap again to bring them back.">KILL</button></div>
+              <div class="eq-band"><label title="Double-click to reset">Low<input id="eq-low-b" type="range" min="-12" max="12" step="1" value="0"><output id="eq-low-b-out">0 dB</output></label><button class="eq-kill" type="button" data-eq-kill="low" data-deck="b" aria-pressed="false" aria-label="Kill bass, Channel B" title="Cut the bass completely. Tap again to bring them back.">KILL</button></div>
               <label class="filter-knob" title="Left: low-pass. Right: high-pass. Double-click to center (off)">Filter<input id="filter-b" type="range" min="-1" max="1" step="0.01" value="0"><output id="filter-b-out">Off</output></label>
               <div class="send-fx" aria-label="Channel B effects">
                 <label>Echo<select id="echo-beats-b" aria-label="Echo time, Deck B"><option value="0">Off</option><option value="0.25">1/4</option><option value="0.5">1/2</option><option value="1">1 beat</option></select></label>
@@ -1433,7 +1508,7 @@ function installProfessionalShell(){
         <div class="recording-tracklist" id="recording-tracklist" aria-live="polite"></div>
         <audio id="recording-review-audio" controls></audio>
         <div class="review-meta" id="recording-metadata"></div>
-        <div class="modal-actions"><button class="ghost" id="restart-recording" type="button">Restart Recording</button><button class="ghost" id="save-recording-draft" type="button">Save Draft</button><button class="ghost" id="download-recording" type="button" title="Save this take to your device (.webm on most browsers, .m4a on iPhone and Safari)">Download</button><button class="primary" id="submit-recording" type="button">Submit Battle</button></div>
+        <div class="modal-actions"><button class="ghost" id="restart-recording" type="button">Restart Recording</button><button class="ghost" id="save-recording-draft" type="button">Save Draft</button><button class="ghost" id="download-recording" type="button" title="Save this take to your device (.webm on most browsers, .m4a on iPhone and Safari)">Download</button><button class="ghost" id="download-recording-wav" type="button" title="Convert this take to an uncompressed .wav file in your browser" disabled>Save as WAV</button><button class="primary" id="submit-recording" type="button">Submit Battle</button></div>
       </section>
       <div class="studio-analysis-row">
         <div class="panel ai-panel"><div><span class="eyebrow">JUDGE PANEL</span><h3>Battle Judging</h3><p>Timing / beatmatching / phrase mixing / transitions / technical evidence.</p></div><div class="judge-actions"><button class="primary" id="judge-score-preview" type="button">Preview Scoring</button><div id="score-breakdown" class="score-breakdown"></div></div></div>
@@ -5396,6 +5471,7 @@ function serverTrackToLocal(track){
     rightsClassification: track.rightsClassification || 'unknown',
     rightsCategory: rights,
     battleEligible: !String(rights).toLowerCase().includes('commercial'),
+    ...(track.rightsConfirmed != null ? { rightsConfirmed: track.rightsConfirmed === true, rightsDeclared: track.rightsConfirmed === true } : {}),
     artworkMetadata: track.artwork || null,
     usageRelationships: track.usageRelationships || { playlists:[], battles:[], posts:[], practiceHistory:[], submissions:[] },
     practiceMetadata: track.practiceMetadata || null,
@@ -7225,6 +7301,7 @@ async function createServerBackedLibraryTrackFromFile(file, metadata){
       artist:metadata.artist,
       genre:metadata.genre,
       rightsClassification:metadata.rightsClassification,
+      ...(metadata.rightsConfirmed != null ? { rightsConfirmed:metadata.rightsConfirmed === true } : {}),
       originalFilename:file.name,
       declaredMimeType:file.type,
       fileSize:file.size,
@@ -7821,6 +7898,7 @@ function applyTrackPatchLocal(track, patch){
   if(patch.tags != null) track.tags = Array.isArray(patch.tags) ? patch.tags : [];
   if(patch.visibility != null) track.visibility = patch.visibility;
   if(patch.rightsClassification != null){ track.rightsClassification = patch.rightsClassification; track.rightsCategory = rightsClassificationLabel(patch.rightsClassification); track.battleEligible = !String(track.rightsCategory).toLowerCase().includes('commercial'); }
+  if(patch.rightsConfirmed != null){ track.rightsConfirmed = patch.rightsConfirmed === true; track.rightsDeclared = track.rightsConfirmed; track.rightsConfirmedAt = track.rightsConfirmed ? new Date().toISOString() : null; }
   if(patch.analysisConfidence != null) track.analysisConfidence = patch.analysisConfidence;
   if(patch.usageRelationships != null) track.usageRelationships = patch.usageRelationships;
   track.syncStatus = track.serverBacked ? 'optimistic' : track.syncStatus;
@@ -8149,7 +8227,7 @@ function handleLibraryFilesWithMeta(files, prefillMap){
     if(list.length===0){ persist(); persistPlatform(); renderLibrary(); renderPlatformLibrary(); renderStreamingServices(); return; }
     const f = list.shift();
     const pre = prefillMap && typeof prefillMap.get === 'function' ? prefillMap.get(f) : null;
-    openModal(`<span class="eyebrow accent">UPLOAD TRACK</span><h3>Upload ${esc(f.name)}</h3><div class="form-grid">${pre && pre.artwork ? `<div class="dd-prefill-art"><img id="meta-art-preview" src="${esc(pre.artwork)}" alt="Cover art from file tags"><small>Cover art from the file's tags</small></div>` : ''}${pre && pre.source ? `<p class="dd-prefill-note" id="meta-prefill-note">${pre.source === 'tags' ? 'Title and artist filled in from the file\'s tags. Edit if needed.' : 'Title and artist guessed from the file name. Edit if needed.'}</p>` : ''}<label>Title<input id="meta-title" value="${esc(pre && pre.title ? pre.title : f.name.replace(/\.[^/.]+$/, ''))}"></label><label>Artist<input id="meta-artist" placeholder="Artist" value="${esc(pre && pre.artist || '')}"></label><label>Genre<input id="meta-genre" placeholder="Genre" value="${esc(pre && pre.genre || '')}"></label>${bpmKeyFieldsHtml('meta')}<label>Rights Category<select id="meta-rights"><option>Original / I Own the Rights</option><option>Licensed / I Have Permission</option><option>Royalty-Free / Cleared</option><option>Commercial / Copyrighted Music</option><option>Unsure</option></select></label><label class="toggle-row">I confirm that I own the necessary rights to this music or have permission to upload and use it on this platform.<input type="checkbox" id="meta-declare"></label></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" id="meta-save">Upload</button></div>`);
+    openModal(`<span class="eyebrow accent">UPLOAD TRACK</span><h3>Upload ${esc(f.name)}</h3><div class="form-grid">${pre && pre.artwork ? `<div class="dd-prefill-art"><img id="meta-art-preview" src="${esc(pre.artwork)}" alt="Cover art from file tags"><small>Cover art from the file's tags</small></div>` : ''}${pre && pre.source ? `<p class="dd-prefill-note" id="meta-prefill-note">${pre.source === 'tags' ? 'Title and artist filled in from the file\'s tags. Edit if needed.' : 'Title and artist guessed from the file name. Edit if needed.'}</p>` : ''}<label>Title<input id="meta-title" value="${esc(pre && pre.title ? pre.title : f.name.replace(/\.[^/.]+$/, ''))}"></label><label>Artist<input id="meta-artist" placeholder="Artist" value="${esc(pre && pre.artist || '')}"></label><label>Genre<input id="meta-genre" placeholder="Genre" value="${esc(pre && pre.genre || '')}"></label>${bpmKeyFieldsHtml('meta')}<label>Rights Category<select id="meta-rights"><option>Original / I Own the Rights</option><option>Licensed / I Have Permission</option><option>Royalty-Free / Cleared</option><option>Commercial / Copyrighted Music</option><option>Unsure</option></select></label><label class="toggle-row rights-confirm-row" for="meta-declare"><input type="checkbox" id="meta-declare"> <span>I own or have the rights to this music</span></label></div><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" id="meta-save">Upload</button></div>`);
     setTimeout(()=>{
       wireTapTempo('meta');
       const metaBpm = document.getElementById('meta-bpm');
@@ -8175,16 +8253,17 @@ function handleLibraryFilesWithMeta(files, prefillMap){
         const genre = document.getElementById('meta-genre').value || 'Unsorted';
         const rights = document.getElementById('meta-rights').value;
         const declared = !!document.getElementById('meta-declare').checked;
-        const serverUpload = await createServerBackedLibraryTrackFromFile(f, { title, artist, genre, ...(bpmKey.bpm ? { bpm:bpmKey.bpm } : {}), ...(bpmKey.key ? { key:bpmKey.key } : {}), rightsClassification:rightsCategoryToClassification(rights) }).catch(error => ({ error:String(error && error.message || error) }));
+        const serverUpload = await createServerBackedLibraryTrackFromFile(f, { title, artist, genre, ...(bpmKey.bpm ? { bpm:bpmKey.bpm } : {}), ...(bpmKey.key ? { key:bpmKey.key } : {}), rightsClassification:rightsCategoryToClassification(rights), rightsConfirmed:declared }).catch(error => ({ error:String(error && error.message || error) }));
         if(serverUpload && serverUpload.data && serverUpload.data.track){
           await attachLibraryAudioBlob(serverUpload.data.track.id, f);
+          { const ed = getEditableLibraryTrack(serverUpload.data.track.id); if(ed && ed.track.rightsConfirmed !== declared){ ed.track.rightsConfirmed = declared; ed.track.rightsDeclared = declared; persist(); } }
           if(bpmKey.bpm && bpmSource){ const ed = getEditableLibraryTrack(serverUpload.data.track.id); if(ed){ ed.track.bpmSource = bpmSource; persist(); } }
           document.getElementById('modal').close();
           next();
           return;
         }
         const realDuration = await readAudioDuration(f);
-        const track = { id: 'u-'+Date.now(), title, name: title, artist, uploader: (document.getElementById('profile-name')?.textContent||'You'), album:null, artwork:(pre && pre.artwork) || null, artworkDataUrl:(pre && pre.artwork) || null, genre, bpm:'--', key:'--', duration: realDuration || '--', uploadDate: new Date().toISOString(), size: f.size||0, fileName: f.name, source:'MY_LIBRARY', rightsCategory: rights, rightsDeclared: declared, copyrightCheck: 'Not Checked', battleEligible: rights !== 'Commercial / Copyrighted Music', permissions: defaultPermissions(), stems:false, localAudioPersisted:false, audioMissing:false };
+        const track = { id: 'u-'+Date.now(), title, name: title, artist, uploader: (document.getElementById('profile-name')?.textContent||'You'), album:null, artwork:(pre && pre.artwork) || null, artworkDataUrl:(pre && pre.artwork) || null, genre, bpm:'--', key:'--', duration: realDuration || '--', uploadDate: new Date().toISOString(), size: f.size||0, fileName: f.name, source:'MY_LIBRARY', rightsCategory: rights, rightsDeclared: declared, rightsConfirmed: declared, rightsConfirmedAt: declared ? new Date().toISOString() : null, battleEligible: rights !== 'Commercial / Copyrighted Music', permissions: defaultPermissions(), stems:false, localAudioPersisted:false, audioMissing:false };
         applyTrackPatchLocal(track, { ...(bpmKey.bpm ? { bpm:bpmKey.bpm, ...(bpmSource ? { bpmSource } : {}) } : {}), ...(bpmKey.key ? { key:bpmKey.key } : {}) });
         state.library.push(track);
         await attachLibraryAudioBlob(track.id, f);
@@ -8248,7 +8327,7 @@ function renderLibrary(){
     body.innerHTML=rows.map((t)=>`
       <tr data-library-row="${esc(t.libraryId)}" tabindex="0" draggable="${crateEditing ? 'true' : 'false'}" class="${selected && selected.libraryId === t.libraryId ? 'selected' : ''} ${selectedCrateIds.has(t.libraryId) ? 'crate-selected' : ''} ${state.crateEditor.dragOverTrackId === t.libraryId ? 'crate-drop-target' : ''}">
         <td>${crateEditing ? `<label class="crate-row-select"><input type="checkbox" data-crate-select-track="${esc(t.libraryId)}" ${selectedCrateIds.has(t.libraryId) ? 'checked' : ''}><span class="drag-handle" data-crate-drag="${esc(t.libraryId)}" aria-label="Drag reorder handle">::</span></label>` : artworkMarkup(t)}</td>
-        <td>${trackStarHtml(t.libraryId)}<strong class="library-track-title">${esc(trackTitle(t))}</strong>${trackPrefsTitleExtras(t.libraryId)}<small class="library-track-meta">${esc(t.duration || '—')} / ${t.battleEligible ? 'Battle ready' : 'Rights locked'}${t.audioMissing ? ' / <span class="library-audio-missing">audio missing - re-attach</span>' : ''}</small></td>
+        <td>${trackStarHtml(t.libraryId)}<strong class="library-track-title">${esc(trackTitle(t))}</strong>${rightsConfirmedBadgeHtml(t)}${trackPrefsTitleExtras(t.libraryId)}<small class="library-track-meta">${esc(t.duration || '—')} / ${t.battleEligible ? 'Battle ready' : 'Rights locked'}${t.audioMissing ? ' / <span class="library-audio-missing">audio missing - re-attach</span>' : ''}</small></td>
         <td>${esc(trackArtist(t))}</td>
         <td>${esc(trackSource(t))}</td>
         <td>${esc(t.genre || 'Unsorted')}</td>
@@ -12337,7 +12416,7 @@ function renderPublicDjProfile(profile, status){
         <div class="battle-result-module"><span>Views</span><strong>${esc(profile.views && profile.views.total || stats.totalViews || 0)}</strong><p>${esc(profile.views && profile.views.uniqueEstimate || 0)} unique estimate</p></div>
       </div>
       ${profile.bio ? `<div class="battle-result-module"><span>Public bio</span><p>${esc(profile.bio)}</p></div>` : ''}
-      ${profileLinksHtml(profile) ? `<div class="battle-result-module public-profile-links"><span>Website &amp; booking</span>${profileLinksHtml(profile)}</div>` : ''}
+      ${profileLinksHtml(profile) ? `<div class="battle-result-module public-profile-links"><span>Links &amp; booking</span>${profileLinksHtml(profile)}</div>` : ''}
       <div class="battle-evidence-grid">
         ${profileResultList(profile.competitiveHistory, 'Competitive history')}
         ${profileResultList(profile.aiOnlyHighScores, 'AI-only high scores')}
@@ -12555,14 +12634,40 @@ async function addTrackToPlaylist(track){
   return result;
 }
 
-// Copyright check simulator
+// Oct 29: the DJ ticks "I own or have the rights to this music" (no fake automatic check).
+function trackRightsConfirmed(track){
+  return Boolean(track && (track.rightsConfirmed === true || (track.rightsConfirmed == null && track.rightsDeclared === true)));
+}
+function rightsConfirmedBadgeHtml(track){
+  return trackRightsConfirmed(track) ? ' <span class="rights-confirmed-badge" title="The uploader confirmed they own or have the rights to this music">✓ Rights confirmed</span>' : '';
+}
+async function setTrackRightsConfirmed(trackId, confirmed){
+  const editable = getEditableLibraryTrack(trackId);
+  if(!editable) return { ok:false, error:'Library track is unavailable.' };
+  return updateLibraryTrackMetadataOptimistic(editable.track.id, { rightsConfirmed: confirmed === true });
+}
 async function runCopyrightCheck(track){
-  if(!track) return { status:'Not Checked' };
-  // No real copyright service yet: never invent a result.
-  track.copyrightCheck = 'Not Checked';
-  persist();
-  openModal(`<span class="eyebrow accent">COPYRIGHT CHECK</span><h3>Not checked</h3><p style="color:var(--muted)" id="copyright-check-note"><strong>${esc(track.title || track.name || 'This track')}</strong> has not been checked. Automatic copyright checking is <span class="badge-coming-soon">Coming soon</span> — until then, only upload music you own or have rights to battle with.</p><div class="modal-actions"><button class="primary" value="cancel">OK</button></div>`);
-  return { status:'Not Checked', comingSoon:true };
+  if(!track) return { ok:false };
+  const confirmed = trackRightsConfirmed(track);
+  openModal(`<span class="eyebrow accent">MUSIC RIGHTS</span><h3>${esc(track.title || track.name || 'This track')}</h3><p style="color:var(--muted)" id="rights-confirm-note">Only battle with music you own or have permission to use.</p><label class="toggle-row rights-confirm-row" for="rights-confirm-input"><input type="checkbox" id="rights-confirm-input" ${confirmed ? 'checked' : ''}> <span>I own or have the rights to this music</span></label><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="rights-confirm-save">Save</button></div>`);
+  return new Promise(resolve => {
+    const save = document.getElementById('rights-confirm-save');
+    const modal = document.getElementById('modal');
+    let done = false;
+    const finish = value => { if(!done){ done = true; resolve(value); } };
+    const cancel = () => finish({ ok:true, cancelled:true, rightsConfirmed:confirmed });
+    if(modal) modal.addEventListener('close', cancel, { once:true });
+    const cancelButton = document.querySelector('#modal-content button[value="cancel"]');
+    if(cancelButton) cancelButton.addEventListener('click', cancel, { once:true });
+    if(save) save.onclick = async () => {
+      const input = document.getElementById('rights-confirm-input');
+      const next = Boolean(input && input.checked);
+      const id = track.id;
+      const result = await setTrackRightsConfirmed(id, next);
+      finish({ ...result, rightsConfirmed:next });
+      if(modal) modal.close();
+    };
+  });
 }
 
 async function renderOfficialRankings(){
@@ -13663,7 +13768,7 @@ document.addEventListener('keydown', handleStudioShortcut);
 // Oct 20: lets oct20.js know whether Judging Operations is available to this account.
 window.djbIsOperator = () => Boolean(state.operatorUser);
 window.__DJBattleTestHooks = {
-  getAppState: () => state, getPlaylistTransfer: () => playlistTransferManager,
+  getAppState: () => state, getPlaylistTransfer: () => playlistTransferManager, getDeckRuntime: () => deckRuntimeManager,
   isSafeAvatarUrl, validateAvatarFile, processAvatarFile, syncAvatarToServer, avatarUrlForDj, djAvatarHtml, setAvatarCropper: fn => { avatarCropper = fn || cropAvatarToSquare; }, editProfileModalState,
   STUDIO_SHORTCUTS, handleStudioShortcut, openShortcutHelp, closeShortcutHelp, toggleShortcutHelp, shortcutHelpOpen,
   syncBeltBadges, beltTapOffsets, beltTapPreviewScore, createBeltTapTest, loadBeltPromotion, renderBeltPromotion, startBeltTest, submitBeltTestAttempt, currentBeltName, getBeltPromotionState: () => state.beltPromotion,

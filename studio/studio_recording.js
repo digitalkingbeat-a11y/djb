@@ -56,6 +56,7 @@
       if(store && store.setItem) store.setItem('djBattleStudioRecording', JSON.stringify(safe));
     }
 
+    let wavBusy = false;
     function updateUi(){
       const recordState = state.studioRecording || {};
       const armed = recordState.state === 'armed';
@@ -76,6 +77,8 @@
       if(stop) stop.disabled = !recording;
       const dl = doc.getElementById('download-recording');
       if(dl) dl.disabled = !win.lastRecordedMixFile;
+      const dlWav = doc.getElementById('download-recording-wav');
+      if(dlWav) dlWav.disabled = !win.lastRecordedMixFile || wavBusy;
       if(status) status.textContent = recordState.error || (recordState.state === 'countin' ? 'Get ready…' : recording ? (recordState.limitMs ? 'REC battle take' : 'REC active') : armed ? 'Armed' : review ? (recordState.autoStopped ? 'Battle time reached. Take stopped.' : 'Review take ready') : 'Recording idle');
       if(timer) timer.textContent = elapsedText(recording && recordState.startedAt ? now() - recordState.startedAt : recordState.elapsedMs);
       const left = doc.getElementById('record-time-left');
@@ -445,6 +448,59 @@
       return { ok:true, name };
     }
 
+    // Oct 29: "Save as WAV" turns the take into 16-bit PCM WAV right here in the browser (Web Audio API).
+    async function downloadWav(){
+      const file = win.lastRecordedMixFile;
+      if(!file){
+        state.studioRecording.error = 'Record a take before downloading.';
+        updateUi();
+        return { ok:false, error:'no_take' };
+      }
+      const Ctx = win.OfflineAudioContext || win.webkitOfflineAudioContext || win.AudioContext || win.webkitAudioContext;
+      if(!Ctx || typeof file.arrayBuffer !== 'function'){
+        state.studioRecording.error = 'This browser cannot convert to WAV. Use Download instead.';
+        updateUi();
+        return { ok:false, error:'wav_unavailable' };
+      }
+      wavBusy = true;
+      const button = doc.getElementById('download-recording-wav');
+      const label = button ? button.textContent : '';
+      if(button){ button.textContent = 'Converting…'; button.disabled = true; }
+      let ctx = null;
+      try{
+        const bytes = await file.arrayBuffer();
+        ctx = (Ctx === win.OfflineAudioContext || Ctx === win.webkitOfflineAudioContext) ? new Ctx(2, 44100, 44100) : new Ctx();
+        const buffer = await new Promise((resolve, reject) => {
+          const p = ctx.decodeAudioData(bytes, resolve, reject);
+          if(p && typeof p.then === 'function') p.then(resolve, reject);
+        });
+        const channels = [];
+        for(let c = 0; c < Math.min(2, buffer.numberOfChannels); c += 1) channels.push(buffer.getChannelData(c));
+        const wav = encodeWav(channels, buffer.sampleRate);
+        const Blobs = win.Blob || global.Blob;
+        const blob = new Blobs([wav], { type:'audio/wav' });
+        const session = deps.activeStudioBattleSession ? deps.activeStudioBattleSession() : null;
+        const title = session && (session.title || session.name) || 'Practice mix';
+        const name = downloadFileName(title, new Date(now()), 'wav');
+        const URLs = win.URL || global.URL;
+        const url = URLs && URLs.createObjectURL ? URLs.createObjectURL(blob) : '';
+        if(!url) return { ok:false, error:'download_unavailable', name };
+        const a = doc.createElement('a');
+        a.href = url; a.download = name; a.rel = 'noopener'; a.style.display = 'none';
+        doc.body.appendChild(a); a.click(); a.remove();
+        setT(() => { if(URLs.revokeObjectURL) URLs.revokeObjectURL(url); }, 4000);
+        return { ok:true, name, bytes:wav.byteLength, sampleRate:buffer.sampleRate, channels:channels.length };
+      }catch(err){
+        state.studioRecording.error = 'Could not convert this take to WAV. Use Download instead.';
+        return { ok:false, error:'wav_failed' };
+      }finally{
+        wavBusy = false;
+        if(ctx && typeof ctx.close === 'function' && ctx.state !== 'closed'){ try{ ctx.close(); }catch(e){} }
+        if(button) button.textContent = label || 'Save as WAV';
+        updateUi();
+      }
+    }
+
     function submit(){
       if(!win.lastRecordedMixFile){
         state.studioRecording.error = 'Record and review a take before submitting.';
@@ -486,11 +542,14 @@
       if(submitButton) submitButton.onclick = submit;
       const downloadButton = doc.getElementById('download-recording');
       if(downloadButton) downloadButton.onclick = download;
+      const wavButton = doc.getElementById('download-recording-wav');
+      if(wavButton) wavButton.onclick = downloadWav;
       updateUi();
       renderTracklist();
     }
 
     return {
+      downloadWav,
       renderTracklist,
       copyTracklist,
       tracklistLines,
@@ -520,5 +579,30 @@
     };
   }
 
-  global.DJBattleStudioRecording = { create: createStudioRecording, RECORDING_FORMATS, pickRecordingFormat, formatFromMime };
+  // 16-bit PCM WAV (RIFF) from Float32 channel data; 1 or 2 channels, interleaved.
+  function encodeWav(channels, sampleRate){
+    const list = (channels || []).filter(Boolean).slice(0, 2);
+    const numCh = Math.max(1, list.length);
+    const frames = list.length ? Math.min(...list.map(ch => ch.length)) : 0;
+    const rate = Math.max(1, Math.round(Number(sampleRate) || 44100));
+    const dataBytes = frames * numCh * 2;
+    const buf = new ArrayBuffer(44 + dataBytes);
+    const v = new DataView(buf);
+    const str = (o, t) => { for(let i = 0; i < t.length; i += 1) v.setUint8(o + i, t.charCodeAt(i)); };
+    str(0, 'RIFF'); v.setUint32(4, 36 + dataBytes, true); str(8, 'WAVE');
+    str(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, numCh, true);
+    v.setUint32(24, rate, true); v.setUint32(28, rate * numCh * 2, true); v.setUint16(32, numCh * 2, true); v.setUint16(34, 16, true);
+    str(36, 'data'); v.setUint32(40, dataBytes, true);
+    let o = 44;
+    for(let i = 0; i < frames; i += 1){
+      for(let c = 0; c < numCh; c += 1){
+        const x = list.length ? Math.max(-1, Math.min(1, Number(list[c][i]) || 0)) : 0;
+        v.setInt16(o, x < 0 ? Math.round(x * 0x8000) : Math.round(x * 0x7fff), true);
+        o += 2;
+      }
+    }
+    return buf;
+  }
+
+  global.DJBattleStudioRecording = { encodeWav, create: createStudioRecording, RECORDING_FORMATS, pickRecordingFormat, formatFromMime };
 })(typeof window !== 'undefined' ? window : globalThis);

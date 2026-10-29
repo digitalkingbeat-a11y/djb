@@ -2,6 +2,9 @@
 // Saved on dj_progression_profiles (website_url, booking_info; see sql/055). Everything is
 // cleaned here so nothing a DJ types can break a page or run code where it is shown.
 const crypto = require('crypto');
+const { SOCIAL_KEYS, cleanSocialLink } = require('./social_links');
+const SOCIAL_SCHEMA = '056_add_social_links_and_rights';
+const SOCIAL_COLUMNS = { instagram:'instagram_url', soundcloud:'soundcloud_url', mixcloud:'mixcloud_url', tiktok:'tiktok_url' };
 
 const PROFILE_TABLE = 'dj_progression_profiles';
 const WEBSITE_MAX = 200;
@@ -37,10 +40,18 @@ function cleanBookingInfo(value){
 }
 
 function linksFromRow(row){
-  if(!row) return { website:'', bookingInfo:'' };
+  const out = { website:'', bookingInfo:'' };
+  SOCIAL_KEYS.forEach(key => { out[key] = ''; });
+  if(!row) return out;
   const site = cleanWebsite(row.website_url);
   const booking = cleanBookingInfo(row.booking_info);
-  return { website:site.error ? '' : site.value, bookingInfo:booking.error ? '' : booking.value };
+  out.website = site.error ? '' : site.value;
+  out.bookingInfo = booking.error ? '' : booking.value;
+  SOCIAL_KEYS.forEach(key => {
+    const cleaned = cleanSocialLink(key, row[SOCIAL_COLUMNS[key]]);
+    out[key] = cleaned.error ? '' : cleaned.value;
+  });
+  return out;
 }
 
 function schemaMissing(error){
@@ -49,7 +60,7 @@ function schemaMissing(error){
 
 async function getProfileLinks(dataClient, userId){
   const found = await dataClient.from(PROFILE_TABLE).select('*').eq('user_id', String(userId)).limit(1);
-  if(found.error) return schemaMissing(found.error) ? { links:{ website:'', bookingInfo:'' }, schemaMissing:true, schema:LINKS_SCHEMA } : { error:found.error };
+  if(found.error) return schemaMissing(found.error) ? { links:linksFromRow(null), schemaMissing:true, schema:LINKS_SCHEMA } : { error:found.error };
   return { links:linksFromRow((found.data || [])[0]) };
 }
 
@@ -65,12 +76,30 @@ async function updateProfileLinks(dataClient, userId, input = {}, now = new Date
     if(booking.error) return { validationError:booking.error };
     patch.booking_info = booking.value || null;
   }
+  for(const key of SOCIAL_KEYS){
+    if(!(key in input)) continue;
+    const cleaned = cleanSocialLink(key, input[key]);
+    if(cleaned.error) return { validationError:cleaned.error, field:key };
+    patch[SOCIAL_COLUMNS[key]] = cleaned.value || null;
+  }
   const found = await dataClient.from(PROFILE_TABLE).select('*').eq('user_id', String(userId)).limit(1);
   if(found.error) return { error:found.error };
-  const result = (found.data || [])[0]
-    ? await dataClient.from(PROFILE_TABLE).update(patch).eq('user_id', String(userId))
-    : await dataClient.from(PROFILE_TABLE).insert([{ user_id:String(userId), ...patch }]);
-  if(result.error) return schemaMissing(result.error) ? { schemaMissing:true, schema:LINKS_SCHEMA } : { error:result.error };
+  const exists = Boolean((found.data || [])[0]);
+  const write = (values) => exists
+    ? dataClient.from(PROFILE_TABLE).update(values).eq('user_id', String(userId))
+    : dataClient.from(PROFILE_TABLE).insert([{ user_id:String(userId), ...values }]);
+  let result = await write(patch);
+  let socialSchemaMissing = false;
+  const socialCols = Object.values(SOCIAL_COLUMNS).filter(col => col in patch);
+  // Before sql/056 the social columns do not exist: still save website / booking, and say so.
+  if(result.error && socialCols.length && schemaMissing(result.error)){
+    const basic = { ...patch };
+    socialCols.forEach(col => { delete basic[col]; });
+    socialSchemaMissing = true;
+    result = await write(basic);
+    if(!result.error) return { saved:true, links:linksFromRow(basic), socialSchemaMissing:true, schema:SOCIAL_SCHEMA };
+  }
+  if(result.error) return schemaMissing(result.error) ? { schemaMissing:true, schema:socialSchemaMissing ? SOCIAL_SCHEMA : LINKS_SCHEMA } : { error:result.error };
   return { saved:true, links:linksFromRow(patch) };
 }
 
@@ -85,8 +114,9 @@ async function attachPublicProfileLinks(dataClient, profile, userId){
     const links = linksFromRow(row);
     if(links.website) profile.website = links.website;
     if(links.bookingInfo) profile.bookingInfo = links.bookingInfo;
+    SOCIAL_KEYS.forEach(key => { if(links[key]) profile[key] = links[key]; });
   }catch(e){ /* optional extra; never break the profile */ }
   return profile;
 }
 
-module.exports = { PROFILE_TABLE, WEBSITE_MAX, BOOKING_MAX, LINKS_SCHEMA, cleanWebsite, cleanBookingInfo, linksFromRow, getProfileLinks, updateProfileLinks, attachPublicProfileLinks, stablePublicProfileId };
+module.exports = { SOCIAL_SCHEMA, SOCIAL_COLUMNS, PROFILE_TABLE, WEBSITE_MAX, BOOKING_MAX, LINKS_SCHEMA, cleanWebsite, cleanBookingInfo, linksFromRow, getProfileLinks, updateProfileLinks, attachPublicProfileLinks, stablePublicProfileId };

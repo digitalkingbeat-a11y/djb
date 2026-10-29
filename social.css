@@ -383,3 +383,11 @@ html[data-theme="light"] .tg-group{border-color:#c6cdd9;background:#f7f8fb}
 .tg-group tr{display:table-row !important}
 .tg-group th,.tg-group td{display:table-cell !important;width:auto !important;min-width:0 !important;max-width:none !important;padding:5px 6px !important;white-space:nowrap}
 .tg-group td:first-child,.tg-group th:first-child{width:auto !important}
+
+/* Oct 29: social link icons keep their brand colours in both themes (social.css is not light-converted). */
+.profile-social-link .social-icon { display:inline-grid; place-items:center; width:28px; height:28px; border-radius:50%; font-size:11px; font-weight:800; letter-spacing:.02em; color:#fff; }
+.social-instagram .social-icon { background:linear-gradient(45deg,#f58529,#dd2a7b 55%,#8134af); }
+.social-soundcloud .social-icon { background:#ff5500; }
+.social-mixcloud .social-icon { background:#5000ff; }
+.social-tiktok .social-icon { background:#111; box-shadow:inset -2px 0 0 #25f4ee, inset 2px 0 0 #fe2c55; }
+html .profile-social-links .profile-social-link .social-icon { color:#fff !important; text-shadow:0 1px 1px rgba(0,0,0,.35); }

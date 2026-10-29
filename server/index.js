@@ -1054,7 +1054,7 @@ app.post('/api/musicLibrary/tracks', requireAuth, async (req, res) => {
     if(result.duplicate) return res.status(409).json({ error:'This audio is already in your library', track:result.track });
     if(result.validationError) return res.status(422).json({ error:result.validationError });
     if(result.error) throw result.error;
-    return res.status(201).json({ success:true, track:result.track });
+    return res.status(201).json({ success:true, track:result.track, ...(result.rightsSchemaMissing ? { rightsSchemaMissing:true } : {}) });
   }catch(err){
     console.error('musicLibrary create error', err);
     return res.status(500).json({ error:'Music library track creation failed' });
@@ -1087,7 +1087,7 @@ app.patch('/api/musicLibrary/tracks/:trackId', requireAuth, async (req, res) => 
     if(result.forbidden) return res.status(403).json({ error:'Cannot update another user\'s library track' });
     if(result.unavailable) return res.status(404).json({ error:'Library track is unavailable' });
     if(result.error) throw result.error;
-    return res.json({ success:true, track:result.track });
+    return res.json({ success:true, track:result.track, ...(result.rightsSchemaMissing ? { rightsSchemaMissing:true } : {}) });
   }catch(err){
     console.error('musicLibrary update error', err);
     return res.status(500).json({ error:'Music library track update failed' });
@@ -3425,10 +3425,10 @@ app.get('/api/me/profileLinks', requireAuth, connectRoute('Profile links', async
 app.put('/api/me/profileLinks', requireAuth, connectRoute('Profile links', async (req, res) => {
   if(!connectWrite(req, res, 'profileLinksUpdate')) return;
   const result = await ProfileLinks.updateProfileLinks(supabaseService, req.authUser.id, req.body || {});
-  if(result.validationError) return res.status(422).json({ error:result.validationError });
-  if(result.schemaMissing) return res.status(503).json({ error:'Website and booking info need the 055 database update.', schema:result.schema });
+  if(result.validationError) return res.status(422).json({ error:result.validationError, ...(result.field ? { field:result.field } : {}) });
+  if(result.schemaMissing) return res.status(503).json({ error:result.schema === ProfileLinks.SOCIAL_SCHEMA ? 'Social links need the 056 database update.' : 'Website and booking info need the 055 database update.', schema:result.schema });
   if(result.error) throw result.error;
-  res.json({ success:true, links:result.links });
+  res.json({ success:true, links:result.links, ...(result.socialSchemaMissing ? { socialSchemaMissing:true, schema:result.schema } : {}) });
 }));
 app.put('/api/me/searchProfile', requireAuth, connectRoute('Search profile', async (req, res) => {
   if(!connectWrite(req, res, 'searchProfileUpdate')) return;

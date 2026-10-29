@@ -392,6 +392,10 @@ html[data-theme="light"] .timer-card.sf-over strong{color:#990000}
 html[data-theme="light"] .sf-limit-banner.warn{color:#755a00}
 html[data-theme="light"] .sf-limit-banner.over{color:#990000}
 html[data-theme="light"] .profile-link-row a{color:var(--accent-text)}
+html[data-theme="light"] .eq-kill{border:1px solid rgba(15,23,42,0.12)}
+html[data-theme="light"] .eq-kill.active{color:#1a1a1a}
+html[data-theme="light"] .eq-band.eq-killed label output{color:#99001a}
+html[data-theme="light"] .profile-social-link{border:1px solid rgba(15,23,42,0.12);background:rgba(15,23,42,0.06)}
 /* rankings.css */
 html[data-theme="light"] .rankings-console{background:#f1f3f7}
 html[data-theme="light"] .rankings-tab{border:1px solid #c4ccd8;background:#edf1f5;color:#232b36}
