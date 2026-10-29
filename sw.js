@@ -2,7 +2,7 @@
 // offline page instead of a blank screen. API, auth and any cross-origin (Supabase) traffic is
 // never cached. CACHE_VERSION is stamped by `npm run build` (scripts/stamp-sw-version.js) from a
 // hash of every shell file, so each change ships a new worker and the app shows "Update ready".
-const CACHE_VERSION = 'djb-shell-f8ef17df5109';
+const CACHE_VERSION = 'djb-shell-41cb55117306';
 const CACHE_PREFIX = 'djb-shell-';
 const OFFLINE_URL = 'offline.html';
 const SHELL_FILES = [
@@ -10,11 +10,11 @@ const SHELL_FILES = [
   './',
   'index.html',
   'manifest.webmanifest',
-  'styles.bundle.0227721f07.css',
+  'styles.bundle.fe489d958e.css',
   'api_client.20bb2c98c3.js',
   'submission_upload.859ddd1bbc.js',
   'battle_modes.6bd2a08bd2.js',
-  'app.6ce4b06f56.js',
+  'app.754817da67.js',
   'social.5f0113f17f.js',
   'connect.c14e239b8e.js',
   'oct20.cbedc4eb0e.js',
@@ -27,9 +27,11 @@ const SHELL_FILES = [
   'automix.b9521e34b2.js',
   'share_links.08cbd6b305.js',
   'studio_five.bb455c4d98.js',
+  'assets/vendor/qrcode.3d6cd68c78.js',
+  'oct29_five.acdb7f93d7.js',
   'window.js',
   'studio/studio_pro.c4196939dd.js',
-  'studio/studio_recording.8b6df64bf9.js',
+  'studio/studio_recording.730a77671a.js',
   'studio/controller_mapping.6a00a6af91.js',
   'studio/audio_setup.25b83d1b96.js',
   'studio/streaming.38e7817992.js',
@@ -38,7 +40,7 @@ const SHELL_FILES = [
   'studio/track_prefs.de98e65fc5.js',
   'studio/deck_perf.eb57473d92.js',
   'studio/studio_browser.5254d06105.js',
-  'studio/deck_runtime.878925b43c.js',
+  'studio/deck_runtime.8c9ada762b.js',
   'assets/favicon.svg',
   'assets/favicon-64.png',
   'assets/icon-192.png',
