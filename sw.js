@@ -2,7 +2,7 @@
 // offline page instead of a blank screen. API, auth and any cross-origin (Supabase) traffic is
 // never cached. CACHE_VERSION is stamped by `npm run build` (scripts/stamp-sw-version.js) from a
 // hash of every shell file, so each change ships a new worker and the app shows "Update ready".
-const CACHE_VERSION = 'djb-shell-41cb55117306';
+const CACHE_VERSION = 'djb-shell-8136bc882783';
 const CACHE_PREFIX = 'djb-shell-';
 const OFFLINE_URL = 'offline.html';
 const SHELL_FILES = [
@@ -10,7 +10,7 @@ const SHELL_FILES = [
   './',
   'index.html',
   'manifest.webmanifest',
-  'styles.bundle.fe489d958e.css',
+  'styles.bundle.37b2889e98.css',
   'api_client.20bb2c98c3.js',
   'submission_upload.859ddd1bbc.js',
   'battle_modes.6bd2a08bd2.js',
@@ -29,6 +29,7 @@ const SHELL_FILES = [
   'studio_five.bb455c4d98.js',
   'assets/vendor/qrcode.3d6cd68c78.js',
   'oct29_five.acdb7f93d7.js',
+  'share_target.999f21abde.js',
   'window.js',
   'studio/studio_pro.c4196939dd.js',
   'studio/studio_recording.730a77671a.js',
@@ -84,6 +85,44 @@ function parsePushData(data){
   return { title:text(raw.title, 80, 'DJ Battle'), body:text(raw.body, 120, 'Tap to open DJ Battle'), tag:text(raw.tag, 60, 'djb'), url:safePushUrl(raw.url) };
 }
 
+// Nov 1: "Share to DJ Battle". The installed app's manifest share_target POSTs shared audio here.
+// The worker keeps the files in a private cache (never sent anywhere) and sends the page to My Music.
+const SHARE_CACHE = 'djb-share-inbox';
+const SHARE_MAX_FILES = 10;
+const SHARE_MAX_BYTES = 300 * 1024 * 1024;
+const SHARE_AUDIO_EXT = /\.(mp3|wav|aif|aiff|flac|m4a|aac|ogg|oga|opus|webm)$/i;
+function isShareTargetPath(pathname, scopePath){
+  const base = String(scopePath || '/').replace(/[^/]*$/, '');
+  return String(pathname || '') === base + 'share-target';
+}
+function isShareableAudio(file){
+  if(!file || typeof file.size !== 'number' || file.size <= 0 || file.size > SHARE_MAX_BYTES) return false;
+  return /^audio\//i.test(String(file.type || '')) || SHARE_AUDIO_EXT.test(String(file.name || ''));
+}
+function pickSharedAudio(files){
+  const list = Array.from(files || []);
+  const audio = list.filter(isShareableAudio).slice(0, SHARE_MAX_FILES);
+  return { audio, skipped:list.length - audio.length };
+}
+function shareRedirectUrl(scope, count, skipped){
+  return new URL(`index.html?shared=${Number(count) || 0}&skipped=${Number(skipped) || 0}#library`, scope).href;
+}
+async function storeSharedFiles(cacheStorage, scope, files){
+  await cacheStorage.delete(SHARE_CACHE);
+  const cache = await cacheStorage.open(SHARE_CACHE);
+  await Promise.all(files.map((file, i) => cache.put(new URL(`__share/${i}`, scope).href, new Response(file, { headers:{
+    'Content-Type': file.type || 'application/octet-stream',
+    'X-Share-Name': encodeURIComponent(String(file.name || `shared-${i + 1}`).slice(0, 200)),
+    'X-Share-Time': String(Date.now())
+  } }))));
+}
+async function handleShareTarget(request, cacheStorage, scope){
+  let picked = { audio:[], skipped:0 };
+  try{ const form = await request.formData(); picked = pickSharedAudio(form.getAll('audio')); }catch(e){ picked = { audio:[], skipped:1 }; }
+  try{ if(picked.audio.length) await storeSharedFiles(cacheStorage, scope, picked.audio); }catch(e){ picked = { audio:[], skipped:picked.audio.length + picked.skipped }; }
+  return Response.redirect(shareRedirectUrl(scope, picked.audio.length, picked.skipped), 303);
+}
+
 if(typeof self !== 'undefined' && typeof self.addEventListener === 'function'){
   self.addEventListener('install', event => {
     event.waitUntil(caches.open(CACHE_VERSION)
@@ -123,6 +162,10 @@ if(typeof self !== 'undefined' && typeof self.addEventListener === 'function'){
   self.addEventListener('fetch', event => {
     const request = event.request;
     const url = new URL(request.url);
+    if(request.method === 'POST' && isSameOrigin(url, self.location.origin) && isShareTargetPath(url.pathname, new URL(self.registration.scope).pathname)){
+      event.respondWith(handleShareTarget(request, caches, self.registration.scope));
+      return;
+    }
     if(!isSameOrigin(url, self.location.origin) || isNeverCached(url, request)) return;
     if(request.mode === 'navigate'){
       // Pages: always try the network first so a deploy shows up immediately.
@@ -143,5 +186,5 @@ if(typeof self !== 'undefined' && typeof self.addEventListener === 'function'){
 }
 
 if(typeof module !== 'undefined' && module.exports){
-  module.exports = { CACHE_VERSION, CACHE_PREFIX, OFFLINE_URL, SHELL_FILES, isNeverCached, isShellPath, isSameOrigin, isOldShellCache, cacheableResponse, safePushUrl, parsePushData };
+  module.exports = { CACHE_VERSION, CACHE_PREFIX, OFFLINE_URL, SHELL_FILES, isNeverCached, isShellPath, isSameOrigin, isOldShellCache, cacheableResponse, safePushUrl, parsePushData, SHARE_CACHE, SHARE_MAX_FILES, SHARE_MAX_BYTES, isShareTargetPath, isShareableAudio, pickSharedAudio, shareRedirectUrl, storeSharedFiles, handleShareTarget };
 }
