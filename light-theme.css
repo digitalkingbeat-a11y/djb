@@ -149,6 +149,7 @@ html[data-theme="light"] .studio-library-wave{background:repeating-linear-gradie
 html[data-theme="light"] .library-audio-missing{color:#8a5100}
 html[data-theme="light"] .library-audio-status{border:1px solid rgba(15,23,42,0.12)}
 html[data-theme="light"] .library-audio-status.missing strong{color:#8a5100}
+html[data-theme="light"] .cast-btn.casting{color:var(--accent-text)}
 /* operations.css */
 html[data-theme="light"] .ops-auto-label select{background:#edeff4;color:#1a1a1a}
 html[data-theme="light"] .ops-lamp{background:#cdd1d6}

@@ -533,3 +533,10 @@
 .library-audio-status.missing strong{
   color:#ffb347;
 }
+
+/* Nov 1: cast button (Play on a speaker or TV) */
+.cast-btn{display:inline-flex;align-items:center;gap:6px;min-height:40px;min-width:40px;padding:6px 10px}
+.cast-btn[hidden]{display:none}
+.cast-btn.casting{color:var(--accent,#b6ff3b);border-color:currentColor}
+.cast-row{display:flex;justify-content:flex-end;margin-top:6px}
+@media (max-width:640px){.library-player .cast-btn .cast-label{display:none}}
