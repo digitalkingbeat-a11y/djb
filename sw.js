@@ -2,7 +2,7 @@
 // offline page instead of a blank screen. API, auth and any cross-origin (Supabase) traffic is
 // never cached. CACHE_VERSION is stamped by `npm run build` (scripts/stamp-sw-version.js) from a
 // hash of every shell file, so each change ships a new worker and the app shows "Update ready".
-const CACHE_VERSION = 'djb-shell-8136bc882783';
+const CACHE_VERSION = 'djb-shell-7808f655e38f';
 const CACHE_PREFIX = 'djb-shell-';
 const OFFLINE_URL = 'offline.html';
 const SHELL_FILES = [
@@ -10,7 +10,7 @@ const SHELL_FILES = [
   './',
   'index.html',
   'manifest.webmanifest',
-  'styles.bundle.37b2889e98.css',
+  'styles.bundle.5fbbc510eb.css',
   'api_client.20bb2c98c3.js',
   'submission_upload.859ddd1bbc.js',
   'battle_modes.6bd2a08bd2.js',
@@ -30,6 +30,7 @@ const SHELL_FILES = [
   'assets/vendor/qrcode.3d6cd68c78.js',
   'oct29_five.acdb7f93d7.js',
   'share_target.999f21abde.js',
+  'cast.ea96472e34.js',
   'window.js',
   'studio/studio_pro.c4196939dd.js',
   'studio/studio_recording.730a77671a.js',
