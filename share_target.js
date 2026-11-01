@@ -104,7 +104,7 @@
   if(typeof window !== 'undefined' && window.document){
     window.DJBShareTarget = api;
     Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), { shareTarget:api });
-    renderNote(window);
+    try{ renderNote(window); }catch(e){}
     if(!window.__DJBattleSkipShareTarget) pickUpSharedFiles(window).catch(() => {});
   }
   if(typeof module !== 'undefined' && module.exports) module.exports = api;
