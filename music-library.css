@@ -533,3 +533,8 @@
 .library-audio-status.missing strong{
   color:#ffb347;
 }
+
+/* Nov 1: Share to DJ Battle note */
+.share-target-note{margin:6px 0 0;font-size:.85rem;opacity:.8;line-height:1.4}
+.share-target-note.supported{opacity:.9}
+@media (max-width:640px){.share-target-note{font-size:.8rem}}
