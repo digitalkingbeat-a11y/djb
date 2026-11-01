@@ -540,3 +540,7 @@
 .cast-btn.casting{color:var(--accent,#b6ff3b);border-color:currentColor}
 .cast-row{display:flex;justify-content:flex-end;margin-top:6px}
 @media (max-width:640px){.library-player .cast-btn .cast-label{display:none}}
+/* Nov 1: Share to DJ Battle note */
+.share-target-note{margin:6px 0 0;font-size:.85rem;opacity:.8;line-height:1.4}
+.share-target-note.supported{opacity:.9}
+@media (max-width:640px){.share-target-note{font-size:.8rem}}
