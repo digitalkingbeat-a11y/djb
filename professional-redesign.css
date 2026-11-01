@@ -2067,6 +2067,10 @@ a.mention-link:hover{text-decoration:underline}
   /* Fill the thin gaps around the floating player so the page doesn't show through between it and the menu. */
   .library-player:not(.is-minimized){box-shadow:0 0 0 8px var(--bg,#07090d),0 10px 0 8px var(--bg,#07090d)}
   .library-player-minimize{display:inline-grid;place-items:center;min-width:44px;min-height:44px;padding:0;font-size:18px;line-height:1}
+  /* Nov 1: room for the cast button on the same row. */
+  .library-player:has(.cast-btn:not([hidden])){grid-template-columns:44px minmax(0,1fr) auto auto auto;gap:8px}
+  .library-player .cast-btn{min-width:44px;min-height:44px;padding:0 10px;justify-content:center}
+  .library-player.is-minimized .cast-btn{display:none}
   .library-player.is-minimized{left:auto;grid-template-columns:auto auto auto;min-height:0;padding:6px}
   .library-player.is-minimized .library-player-main,
   .library-player.is-minimized .library-player-readouts,
