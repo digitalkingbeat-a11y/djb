@@ -72,6 +72,10 @@
       audio.addEventListener('webkitplaybacktargetavailabilitychanged', e => { btn.hidden = e.availability !== 'available'; });
     }
     if(opts && opts.before) host.insertBefore(btn, opts.before); else host.appendChild(btn);
+    // A class instead of CSS :has(), so older iPhones lay the player out the same way.
+    const syncHost = () => host.classList.toggle('has-cast', !btn.hidden);
+    syncHost();
+    if(s.airplay && !s.remote) audio.addEventListener('webkitplaybacktargetavailabilitychanged', () => setTimeout(syncHost, 0));
     return btn;
   }
 
@@ -91,8 +95,17 @@
   if(typeof window !== 'undefined' && window.document){
     window.DJBCast = api;
     Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), { cast:api });
-    wireAll(window);
-    if(typeof MutationObserver !== 'undefined') new MutationObserver(() => wireAll(window)).observe(window.document.body, { childList:true, subtree:true });
+    // Never let the cast button break the rest of the app: errors are caught, and the watcher only
+    // wakes up when an <audio> element is added (batched), not on every DOM change.
+    const safeWire = () => { try{ wireAll(window); }catch(e){} };
+    safeWire();
+    let queued = false;
+    const hasAudio = list => list.some(m => Array.from(m.addedNodes || []).some(n => n.nodeType === 1 && (n.tagName === 'AUDIO' || (n.querySelector && n.querySelector('audio')))));
+    if(typeof MutationObserver !== 'undefined') new MutationObserver(list => {
+      if(queued || !hasAudio(list)) return;
+      queued = true;
+      setTimeout(() => { queued = false; safeWire(); }, 50);
+    }).observe(window.document.body, { childList:true, subtree:true });
   }
   if(typeof module !== 'undefined' && module.exports) module.exports = api;
 })();

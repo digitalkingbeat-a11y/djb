@@ -2068,7 +2068,7 @@ a.mention-link:hover{text-decoration:underline}
   .library-player:not(.is-minimized){box-shadow:0 0 0 8px var(--bg,#07090d),0 10px 0 8px var(--bg,#07090d)}
   .library-player-minimize{display:inline-grid;place-items:center;min-width:44px;min-height:44px;padding:0;font-size:18px;line-height:1}
   /* Nov 1: room for the cast button on the same row. */
-  .library-player:has(.cast-btn:not([hidden])){grid-template-columns:44px minmax(0,1fr) auto auto auto;gap:8px}
+  .library-player.has-cast{grid-template-columns:44px minmax(0,1fr) auto auto auto;gap:8px}
   .library-player .cast-btn{min-width:44px;min-height:44px;padding:0 10px;justify-content:center}
   .library-player.is-minimized .cast-btn{display:none}
   .library-player.is-minimized{left:auto;grid-template-columns:auto auto auto;min-height:0;padding:6px}
@@ -2401,4 +2401,16 @@ a.mention-link:hover{text-decoration:underline}
   .profile-social-link { padding:4px; min-height:40px; }
   .profile-social-link .social-icon { width:32px; height:32px; }
   .profile-actions { flex-wrap:wrap; }
+}
+
+/* Nov 1: phone battles fixes. Keep the list right under the tabs (filters fold away behind a
+   Filters button) and keep page titles clear of the iPhone status bar / notch. */
+.battle-filters-toggle{display:none}
+@media(max-width:760px){
+  .main{padding-top:calc(14px + env(safe-area-inset-top,0px))!important;padding-left:calc(12px + env(safe-area-inset-left,0px))!important;padding-right:calc(12px + env(safe-area-inset-right,0px))!important}
+  .battle-layout-switch .battle-filters-toggle{display:inline-flex;margin-left:auto}
+  #battles:not(.filters-open) .battle-filter-row,
+  #battles:not(.filters-open) #saved-searches,
+  #battles:not(.filters-open) .battle-format-tour{display:none}
+  #battle-grid{scroll-margin-top:calc(12px + env(safe-area-inset-top,0px))}
 }

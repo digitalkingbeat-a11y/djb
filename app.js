@@ -1961,6 +1961,46 @@ function wireBattleInvitesPanel(){
   });
 }
 
+const BATTLE_TAB_EMPTY = {
+  open: ['No open battles right now.', 'New battles show up here as soon as someone opens one. Create a battle to start one yourself.'],
+  mine: ['You are not in any battles yet.', 'Battles you create or join show up here. Pick one from Open Battles or create your own.'],
+  completed: ['No completed battles yet.', 'Finished battles and their results show up here.']
+};
+function battleFiltersActive(){
+  const f = (state.battleLobby && state.battleLobby.filters) || {};
+  const any = Object.keys(f).some(k => f[k] != null && f[k] !== '' && f[k] !== false && f[k] !== 'all' && k !== 'sort');
+  const search = document.getElementById('battle-lobby-search-filter');
+  return any || Boolean(search && search.value.trim());
+}
+function battleTabEmptyHtml(tab){
+  const copy = BATTLE_TAB_EMPTY[tab] || BATTLE_TAB_EMPTY.open;
+  if(battleFiltersActive()) return `<div class="panel battle-empty" data-empty-tab="${esc(tab)}"><strong>No battles match these filters.</strong><p>Adjust or clear the filters to see more.</p></div>`;
+  return `<div class="panel battle-empty" data-empty-tab="${esc(tab)}"><strong>${esc(copy[0])}</strong><p>${esc(copy[1])}</p></div>`;
+}
+// On phones the list sits under the tabs; make sure a tab tap visibly lands on it.
+function revealBattleList(){
+  const grid = document.getElementById('battle-grid');
+  if(!grid || !grid.getBoundingClientRect) return;
+  const top = grid.getBoundingClientRect().top;
+  const limit = (window.innerHeight || 800) * 0.6;
+  if(top > limit || top < 0){
+    try { grid.scrollIntoView({ block:'start', behavior:'smooth' }); } catch(_) { grid.scrollIntoView(true); }
+  }
+}
+function wireBattleFiltersToggle(){
+  const toggle = document.getElementById('battle-filters-toggle');
+  const section = document.getElementById('battles');
+  if(!toggle || !section) return;
+  const sync = () => {
+    const open = section.classList.contains('filters-open');
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    toggle.classList.toggle('active', open || battleFiltersActive());
+    toggle.textContent = battleFiltersActive() ? 'Filters •' : 'Filters';
+  };
+  toggle.onclick = () => { section.classList.toggle('filters-open'); sync(); };
+  sync();
+}
+
 function renderBattles(filter='All'){
   syncBattleFilterControls();
   const grid = document.getElementById('battle-grid');
@@ -1989,7 +2029,7 @@ function renderBattles(filter='All'){
     return;
   }
   const list = filteredBattleRows(filter);
-  const empty = `<div class="panel battle-empty"><strong>No battles match these filters.</strong><p>Adjust the filters or create a battle for this lane.</p></div>`;
+  const empty = battleTabEmptyHtml(state.battleViewTab || 'open');
   if(grid){ grid.classList.toggle('battle-grid-view', state.battleLayout === 'grid'); grid.innerHTML=battleLobbyStatusStripHtml()+(list.length ? list.map(battleCard).join('') : empty); }
   const featured = document.getElementById('featured-battles');
   if(featured) featured.innerHTML=filteredBattleRows('All').slice(0,3).map(battleCard).join('');
@@ -2124,8 +2164,10 @@ function wireBattleLobbyControls(currentGenre = 'All'){
         state.djChallenges.status = 'idle';
       }
       renderBattles(currentGenre);
+      revealBattleList();
     };
   });
+  wireBattleFiltersToggle();
   document.querySelectorAll('[data-battle-layout]').forEach(button => {
     button.classList.toggle('active', button.dataset.battleLayout === state.battleLayout);
     button.onclick = () => {
@@ -16761,3 +16803,6 @@ Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), {
   watchForAppUpdate, showUpdateBar, applyAppUpdate, setAppReload, getAppUpdateState: () => appUpdate,
   renamePracticeSession, deletePracticeSessionWithUndo, undoPracticeDelete, commitPracticeDelete, PRACTICE_UNDO_MS
 });
+
+// Nov 1: boot marker for the safety net in index.html (set only if this whole file ran).
+window.__djbAppLoaded = true;

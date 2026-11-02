@@ -95,7 +95,7 @@ test('battle replay players get their own cast button', async () => {
   const w = loadApp(withRemote());
   const a = w.document.createElement('audio'); a.className = 'timed-audio'; a.src = 'https://cdn.example.com/replay.mp3';
   w.document.body.appendChild(a);
-  await new Promise(r => setTimeout(r, 0));
+  await new Promise(r => setTimeout(r, 80));
   const btn = a.nextElementSibling && a.nextElementSibling.querySelector('.cast-btn');
   assert.ok(btn); assert.equal(btn.hidden, false);
   w.DJBCast.wireAll(w);
@@ -111,4 +111,22 @@ test('Safari AirPlay path uses the AirPlay picker', async () => {
   assert.equal(btn.hidden, false);
   const r = await w.DJBCast.startCast(audio, btn, w);
   assert.equal(r.via, 'airplay'); assert.equal(shown, 1);
+});
+
+test('a broken cast setup never stops the rest of the app from loading', () => {
+  const w = loadApp(win => { Object.defineProperty(win.HTMLMediaElement.prototype, 'remote', { configurable:true, get(){ throw new Error('boom'); } }); });
+  assert.equal(typeof w.__DJBattleTestHooks.switchView, 'function');
+  w.__DJBattleTestHooks.switchView('studio');
+  assert.equal(w.document.querySelector('.view.active').id, 'studio');
+});
+
+test('the watcher ignores DOM changes that add no audio', async () => {
+  const w = loadApp(withRemote());
+  const spy = w.document.createElement('div'); w.document.body.appendChild(spy);
+  for(let i = 0; i < 50; i++) spy.textContent = String(i);
+  await new Promise(r => setTimeout(r, 80));
+  const a = w.document.createElement('audio'); a.className = 'timed-audio'; a.src = 'https://cdn.example.com/r.mp3';
+  w.document.body.appendChild(a);
+  await new Promise(r => setTimeout(r, 80));
+  assert.ok(a.nextElementSibling && a.nextElementSibling.querySelector('.cast-btn'), 'new replay player still gets a button');
 });
