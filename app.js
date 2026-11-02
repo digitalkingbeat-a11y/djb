@@ -16761,3 +16761,6 @@ Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), {
   watchForAppUpdate, showUpdateBar, applyAppUpdate, setAppReload, getAppUpdateState: () => appUpdate,
   renamePracticeSession, deletePracticeSessionWithUndo, undoPracticeDelete, commitPracticeDelete, PRACTICE_UNDO_MS
 });
+
+// Nov 1: boot marker for the safety net in index.html (set only if this whole file ran).
+window.__djbAppLoaded = true;

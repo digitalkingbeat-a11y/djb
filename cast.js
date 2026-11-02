@@ -72,6 +72,10 @@
       audio.addEventListener('webkitplaybacktargetavailabilitychanged', e => { btn.hidden = e.availability !== 'available'; });
     }
     if(opts && opts.before) host.insertBefore(btn, opts.before); else host.appendChild(btn);
+    // A class instead of CSS :has(), so older iPhones lay the player out the same way.
+    const syncHost = () => host.classList.toggle('has-cast', !btn.hidden);
+    syncHost();
+    if(s.airplay && !s.remote) audio.addEventListener('webkitplaybacktargetavailabilitychanged', () => setTimeout(syncHost, 0));
     return btn;
   }
 
