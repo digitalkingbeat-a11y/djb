@@ -2402,3 +2402,15 @@ a.mention-link:hover{text-decoration:underline}
   .profile-social-link .social-icon { width:32px; height:32px; }
   .profile-actions { flex-wrap:wrap; }
 }
+
+/* Nov 1: phone battles fixes. Keep the list right under the tabs (filters fold away behind a
+   Filters button) and keep page titles clear of the iPhone status bar / notch. */
+.battle-filters-toggle{display:none}
+@media(max-width:760px){
+  .main{padding-top:calc(14px + env(safe-area-inset-top,0px))!important;padding-left:calc(12px + env(safe-area-inset-left,0px))!important;padding-right:calc(12px + env(safe-area-inset-right,0px))!important}
+  .battle-layout-switch .battle-filters-toggle{display:inline-flex;margin-left:auto}
+  #battles:not(.filters-open) .battle-filter-row,
+  #battles:not(.filters-open) #saved-searches,
+  #battles:not(.filters-open) .battle-format-tour{display:none}
+  #battle-grid{scroll-margin-top:calc(12px + env(safe-area-inset-top,0px))}
+}
