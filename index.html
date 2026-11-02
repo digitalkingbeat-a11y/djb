@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
   <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon-64.png" />
   <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon-180.png" />
@@ -15,6 +15,67 @@
   <script>
     // Apply the saved theme before anything paints (Settings > Appearance), so light mode never flashes dark.
     (function(){try{var p=localStorage.getItem('djbTheme');var t=p==='light'?'light':p==='system'&&window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';document.documentElement.setAttribute('data-theme',t);var m=document.querySelector('meta[name="theme-color"]');if(m)m.setAttribute('content',t==='light'?'#f3f5f9':'#0b0f14');}catch(e){}})();
+  </script>
+  <script>
+    // Nov 1: boot safety net. If the app fails to start (a script error, or nav taps that don't
+    // change the screen), clear this app's offline cache + service worker and reload once. If that
+    // doesn't help, show a small bar with the error text and a "Repair app" button. Plain ES5 so it
+    // runs on any iPhone. Visiting ?repair=1 does the same clean-up.
+    (function(){
+      var errs = []; window.__djbBootErrors = errs;
+      window.addEventListener('error', function(e){
+        if(errs.length < 5 && e && e.message) errs.push(String(e.message).slice(0, 160) + (e.filename ? ' (' + String(e.filename).split('/').pop().split('?')[0] + ':' + (e.lineno || 0) + ')' : ''));
+      });
+      function ss(k, v){ try{ if(v === undefined) return sessionStorage.getItem(k); if(v === null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); }catch(e){} return null; }
+      function repair(){
+        ss('djbRepairTried', '1');
+        var jobs = [];
+        try{ if(navigator.serviceWorker && navigator.serviceWorker.getRegistrations) jobs.push(navigator.serviceWorker.getRegistrations().then(function(rs){ return Promise.all(rs.map(function(r){ return r.unregister(); })); })); }catch(e){}
+        try{ if(window.caches && caches.keys) jobs.push(caches.keys().then(function(ks){ return Promise.all(ks.filter(function(k){ return /^djb-/.test(k); }).map(function(k){ return caches.delete(k); })); })); }catch(e){}
+        var go = function(){ location.replace(location.pathname + '?fresh=' + Date.now() + '#battles'); };
+        Promise.all(jobs).then(go, go);
+        setTimeout(go, 3000);
+      }
+      function showBar(reason){
+        if(document.getElementById('djb-boot-bar')) return;
+        var bar = document.createElement('div');
+        bar.id = 'djb-boot-bar'; bar.setAttribute('role', 'alert');
+        bar.style.cssText = 'position:fixed;left:8px;right:8px;top:calc(8px + env(safe-area-inset-top,0px));z-index:2147483647;background:#2a1215;color:#fff;border:1px solid #ff5d6c;border-radius:12px;padding:10px 12px;font:14px/1.35 system-ui,-apple-system,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.5)';
+        var msg = document.createElement('div'); msg.textContent = 'DJ Battle didn\u2019t start properly. Tap Repair app to load a fresh copy.';
+        var det = document.createElement('small'); det.style.cssText = 'display:block;opacity:.75;margin-top:4px;word-break:break-word'; det.textContent = (reason ? reason + '. ' : '') + (errs.length ? 'Error: ' + errs.join(' | ') : '');
+        var btn = document.createElement('button'); btn.type = 'button'; btn.id = 'djb-boot-repair'; btn.textContent = 'Repair app';
+        btn.style.cssText = 'margin-top:8px;min-height:44px;padding:0 16px;border-radius:10px;border:0;background:#ff5d6c;color:#000;font-weight:700';
+        btn.onclick = repair;
+        var close = document.createElement('button'); close.type = 'button'; close.textContent = 'Dismiss'; close.style.cssText = 'margin:8px 0 0 8px;min-height:44px;padding:0 12px;border-radius:10px;border:1px solid #fff3;background:transparent;color:#fff';
+        close.onclick = function(){ bar.parentNode && bar.parentNode.removeChild(bar); };
+        bar.appendChild(msg); bar.appendChild(det); bar.appendChild(btn); bar.appendChild(close);
+        (document.body || document.documentElement).appendChild(bar);
+      }
+      function booted(){ return window.__djbAppLoaded === true && typeof window.switchView === 'function' && !!document.querySelector('.view.active'); }
+      function failed(reason){ if(!ss('djbRepairTried')) repair(); else showBar(reason); }
+      window.__djbBoot = { repair:repair, showBar:showBar, booted:booted, failed:failed };
+      if(/[?&]repair=1(&|$)/.test(location.search)){ repair(); return; }
+      window.addEventListener('load', function(){
+        setTimeout(function(){
+          if(booted()){ ss('djbRepairTried', null); return; }
+          failed('The app didn\u2019t finish loading');
+        }, 2500);
+      });
+      // A nav tap that doesn't change the screen twice in a row also counts as a failed start.
+      var misses = 0;
+      document.addEventListener('click', function(e){
+        var t = e.target && e.target.closest ? e.target.closest('.sidebar [data-view], nav [data-view]') : null;
+        if(!t) return;
+        var want = t.getAttribute('data-view');
+        var target = document.getElementById(want);
+        if(!target || !/(^|\s)view(\s|$)/.test(target.className)) return;
+        setTimeout(function(){
+          var active = document.querySelector('.view.active');
+          if(active && active.id === want){ misses = 0; return; }
+          if(++misses >= 2) showBar('Menu taps aren\u2019t switching screens');
+        }, 1200);
+      }, true);
+    })();
   </script>
   <meta name="description" content="Battle other DJs, get AI-judged scores and climb the rankings." />
   <meta property="og:type" content="website" />
@@ -29,7 +90,7 @@
   <meta name="twitter:description" content="Battle other DJs, get AI-judged scores and climb the rankings." />
   <meta name="twitter:image" content="assets/og-image.png" />
   <title>DJ Battle — Battle Studio</title>
-  <link rel="stylesheet" href="styles.bundle.5fbbc510eb.css" />
+  <link rel="stylesheet" href="styles.bundle.bb7d2a3946.css" />
   <style>
     /* Ensure battle meta has 4 columns for additional metadata */
     .battle-meta{grid-template-columns:repeat(4,1fr) !important}
@@ -157,8 +218,9 @@
         <div class="battle-layout-switch" role="group" aria-label="Battle layout">
           <button class="active" data-battle-layout="list" type="button">List</button>
           <button data-battle-layout="grid" type="button">Grid</button>
+          <button class="battle-filters-toggle" id="battle-filters-toggle" type="button" aria-expanded="false" aria-controls="battle-filter-row">Filters</button>
         </div>
-        <div class="battle-filter-row" aria-label="Battle filters">
+        <div class="battle-filter-row" id="battle-filter-row" aria-label="Battle filters">
           <label>Mode<select id="battle-lobby-mode-filter"></select></label>
           <label>Genre<select id="battle-lobby-genre-filter"></select></label>
           <label>Duration<select id="battle-lobby-duration-filter"><option value="all">Any</option><option value="short">2-10 min</option><option value="medium">20-30 min</option><option value="long">60 min</option></select></label>
@@ -560,7 +622,7 @@
   <script src="studio/deck_perf.eb57473d92.js"></script>
   <script src="studio/studio_browser.5254d06105.js"></script>
   <script src="studio/deck_runtime.8c9ada762b.js"></script>
-  <script src="app.754817da67.js"></script>
+  <script src="app.3be1c1e980.js"></script>
   <script src="social.5f0113f17f.js"></script>
   <script src="connect.c14e239b8e.js"></script>
   <script src="oct20.cbedc4eb0e.js"></script>
@@ -576,8 +638,8 @@
   <script src="studio_five.bb455c4d98.js"></script>
   <script src="assets/vendor/qrcode.3d6cd68c78.js"></script>
   <script src="oct29_five.acdb7f93d7.js"></script>
-  <script src="share_target.999f21abde.js"></script>
-  <script src="cast.ea96472e34.js"></script>
+  <script src="share_target.acedea560a.js"></script>
+  <script src="cast.21e9e1a904.js"></script>
   <script>
     // Wire timing analysis to create practice events from loaded audio.
     const timingInspectorButton = document.getElementById('hc-run-timing');
