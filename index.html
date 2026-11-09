@@ -309,7 +309,7 @@
                 <button class="ghost small" id="open-studio-library-drawer" type="button">Library Drawer</button>
               </div>
               <div id="studio-library-rule-status" class="library-rule-status"></div>
-              <div class="table-wrap" style="margin-top:6px"><table style="width:100%"><thead><tr><th></th><th>Track</th><th>Artist</th><th>BPM</th><th>Key</th><th>Genre</th><th>Source</th><th>Rights</th><th>Elig.</th><th>Dur</th></tr></thead><tbody id="studio-library-table"></tbody></table></div>
+              <div class="table-wrap" style="margin-top:6px"><table style="width:100%"><thead><tr><th></th><th data-studio-sort="title" class="sortable-th">Track</th><th data-studio-sort="artist" class="sortable-th">Artist</th><th data-studio-sort="bpm" class="sortable-th">BPM</th><th data-studio-sort="key" class="sortable-th">Key</th><th>Genre</th><th>Source</th><th>Rights</th><th>Elig.</th><th>Dur</th></tr></thead><tbody id="studio-library-table"></tbody></table></div>
             </div>
             <div id="studio-library-drawer" class="studio-library-drawer hidden"></div>
 
@@ -360,7 +360,8 @@
       </section>
 
       <section id="library" class="view">
-        <div class="toolbar"><div><span class="eyebrow">CENTRAL DJ LIBRARY</span><h2>My Music</h2><p>Upload once, then reuse the track in your profile, forum posts, own-selection battles and Battle Studio. <span class="dd-hint">Tip: drag audio files here to upload.</span></p></div><div class="library-head-actions"><button class="ghost" type="button" id="library-import-dj-software" title="Bring in playlists, BPMs, keys and cue points from Rekordbox (XML) or Serato (.crate)">Import from Rekordbox / Serato</button><label class="primary file-button">＋ Upload Tracks<input type="file" id="library-upload" accept="audio/*" multiple hidden></label></div></div>
+        <div class="toolbar"><div><span class="eyebrow">CENTRAL DJ LIBRARY</span><h2>My Music</h2><p>Upload once, then reuse the track in your profile, forum posts, own-selection battles and Battle Studio. <span class="dd-hint">Tip: drag audio files here to upload.</span></p></div><div class="library-head-actions"><button class="ghost" type="button" id="library-find-missing-bpm" title="Detect BPM for every track that still has none">Find missing BPMs</button><button class="ghost" type="button" id="library-import-dj-software" title="Bring in playlists, BPMs, keys and cue points from Rekordbox (XML) or Serato (.crate)">Import from Rekordbox / Serato</button><label class="primary file-button">＋ Upload Tracks<input type="file" id="library-upload" accept="audio/*" multiple hidden></label></div></div>
+        <div class="library-missing-bpm-progress" id="library-missing-bpm-progress" hidden role="status" aria-live="polite"><div class="progress"><i id="library-missing-bpm-bar" style="width:0%"></i></div><strong id="library-missing-bpm-label">Detecting…</strong><button class="ghost small" type="button" id="library-missing-bpm-cancel" hidden>Cancel</button></div>
         <div class="storage"><span>Local storage tier</span><div class="progress"><i id="storage-progress" style="width:0%"></i></div><strong id="storage-label">0 / 5 tracks</strong></div>
         <div id="library-sync-status" class="library-sync-status offline"><span></span><strong>OFFLINE CACHE</strong><small>Local mode</small></div>
         <div class="music-library-workstation" id="music-library-workstation">
@@ -401,7 +402,7 @@
             </div>
             <div id="library-filter-chips" class="library-filter-chips" aria-label="Active library filters" hidden></div>
             <div class="library-status-strip" id="library-status-strip"></div>
-            <div class="table-wrap library-table-wrap"><table><thead><tr><th>Art</th><th>Track</th><th>Artist</th><th>Source</th><th>Genre</th><th>BPM</th><th>Key</th><th>Rights</th><th>Actions</th></tr></thead><tbody id="library-table"></tbody></table></div>
+            <div class="table-wrap library-table-wrap"><table><thead><tr><th>Art</th><th data-library-sort="title" class="sortable-th">Track</th><th data-library-sort="artist" class="sortable-th">Artist</th><th>Source</th><th>Genre</th><th data-library-sort="bpm" class="sortable-th">BPM</th><th data-library-sort="key" class="sortable-th">Key</th><th>Rights</th><th>Actions</th></tr></thead><tbody id="library-table"></tbody></table></div>
           </section>
           <aside class="library-panel library-inspector" id="library-inspector">
             <div id="library-detail"></div>

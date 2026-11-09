@@ -277,7 +277,8 @@
   /* ============================== 3. Watch battles live ============================== */
   const WATCH_POLL_MS = 5000;
   const WATCH_BEAT_MS = 20000;
-  const watch = { status:'idle', list:[], current:null, data:null, error:'', timer:null, beat:null, voted:null };
+  const WATCH_LIST_MS = 8000;
+  const watch = { status:'idle', list:[], current:null, data:null, error:'', timer:null, beat:null, listTimer:null, voted:null };
   function viewerKey(){
     let k = store.get('djbViewerKey', null);
     if(!k || !/^[a-z0-9]{8,40}$/.test(k)){ k = Math.random().toString(36).slice(2, 12) + Date.now().toString(36); store.set('djbViewerKey', k); }
@@ -326,6 +327,7 @@
     if(r.error || !r.data){ watch.status = 'error'; watch.list = []; watch.error = setupNote(r, 'Watching live'); renderWatch(); return r; }
     watch.status = 'ready'; watch.list = r.data.battles || [];
     renderWatch();
+    startWatchTimers();
     return r;
   }
   async function openLive(battleId){
@@ -355,13 +357,46 @@
     if(r && r.data && watch.data){ watch.data.watching = r.data.watching; const el = D.getElementById('watch-count'); if(el) el.textContent = `👀 Watching: ${r.data.watching}`; }
     return r;
   }
+  function watchPageVisible(){
+    try{ if(D.hidden) return false; if(typeof W.document !== 'undefined' && W.document.visibilityState === 'hidden') return false; }catch(e){}
+    return isActive('watch');
+  }
   function startWatchTimers(){
     stopWatchTimers();
-    if(isJsdom() || !watch.data || watch.data.battle.status !== 'live') return;
-    watch.timer = setInterval(() => { if(!D.hidden) refreshLive(); }, WATCH_POLL_MS);
-    watch.beat = setInterval(() => { if(!D.hidden) sendHeartbeat(); }, WATCH_BEAT_MS);
+    if(isJsdom()) return;
+    // Detail view: keep the live battle fresh while it's on screen.
+    if(watch.current && watch.data && watch.data.battle && watch.data.battle.status === 'live'){
+      watch.timer = setInterval(() => { if(watchPageVisible()) refreshLive(); }, WATCH_POLL_MS);
+      watch.beat = setInterval(() => { if(watchPageVisible()) sendHeartbeat(); }, WATCH_BEAT_MS);
+    }
+    // List view: refresh the live lobby every few seconds.
+    if(!watch.current){
+      watch.listTimer = setInterval(() => { if(watchPageVisible()) loadLiveBattlesQuiet(); }, WATCH_LIST_MS);
+    }
   }
-  function stopWatchTimers(){ if(watch.timer) clearInterval(watch.timer); if(watch.beat) clearInterval(watch.beat); watch.timer = watch.beat = null; }
+  async function loadLiveBattlesQuiet(){
+    // Same as loadLiveBattles but without clearing a selected room or flashing "Loading…".
+    if(watch.current) return refreshLive();
+    const r = await api('/api/liveBattles', { public:true });
+    if(watch.current) return r;
+    if(r.error || !r.data){ watch.error = setupNote(r, 'Watching live'); renderWatch(); return r; }
+    watch.status = 'ready'; watch.list = r.data.battles || []; watch.error = '';
+    renderWatch();
+    return r;
+  }
+  function stopWatchTimers(){ if(watch.timer) clearInterval(watch.timer); if(watch.beat) clearInterval(watch.beat); if(watch.listTimer) clearInterval(watch.listTimer); watch.timer = watch.beat = watch.listTimer = null; }
+  // Pause polling while the tab is hidden / app is in the background; resume when Dan comes back.
+  if(!isJsdom() && !W.__djbWatchVisibilityWired){
+    W.__djbWatchVisibilityWired = true;
+    D.addEventListener('visibilitychange', () => {
+      if(!isActive('watch')) return;
+      if(D.hidden) stopWatchTimers();
+      else {
+        startWatchTimers();
+        if(watch.current) refreshLive(); else loadLiveBattlesQuiet();
+      }
+    });
+  }
   function closeLive(){ stopWatchTimers(); watch.current = null; watch.data = null; loadLiveBattles(); }
   async function crowdVote(publicProfileId){
     if(!signedIn()){ watch.error = 'Sign in to vote.'; renderWatch(); return { skipped:true }; }
@@ -563,7 +598,7 @@
     onView,
     loadConversations, openConversation, refreshThread, sendMessage, unsendMessage, muteCurrent, blockCurrent, dmState:() => dm,
     searchDjs, followDj, challengeDj, saveListing, findState:() => find,
-    loadLiveBattles, openLive, refreshLive, sendHeartbeat, crowdVote, closeLive, watchState:() => watch, viewerKey,
+    loadLiveBattles, loadLiveBattlesQuiet, openLive, refreshLive, sendHeartbeat, crowdVote, closeLive, watchState:() => watch, viewerKey, startWatchTimers, stopWatchTimers, watchPageVisible,
     renderSharePanel, shareCrate, crateTracklist, openSharedTracklist, copyToFind, toFindLists, removeToFind, toggleToFind, shareState:() => share,
     weekStart, goalProgress, renderGoal, loadGoal, setGoal, goalState:() => goal
   };

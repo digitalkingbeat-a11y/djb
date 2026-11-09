@@ -397,6 +397,10 @@ html[data-theme="light"] .eq-kill{border:1px solid rgba(15,23,42,0.12)}
 html[data-theme="light"] .eq-kill.active{color:#1a1a1a}
 html[data-theme="light"] .eq-band.eq-killed label output{color:#99001a}
 html[data-theme="light"] .profile-social-link{border:1px solid rgba(15,23,42,0.12);background:rgba(15,23,42,0.06)}
+html[data-theme="light"] .sortable-th:hover,html[data-theme="light"] .sortable-th:focus{color:var(--accent-text)}
+html[data-theme="light"] .sortable-th.is-sorted{color:var(--accent-text)}
+html[data-theme="light"] .library-missing-bpm-progress{background:#edf0f5}
+html[data-theme="light"] .library-missing-bpm-progress strong{color:#1b2129}
 /* rankings.css */
 html[data-theme="light"] .rankings-console{background:#f1f3f7}
 html[data-theme="light"] .rankings-tab{border:1px solid #c4ccd8;background:#edf1f5;color:#232b36}

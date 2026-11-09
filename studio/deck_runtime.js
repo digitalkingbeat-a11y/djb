@@ -1137,6 +1137,7 @@
       state.decks[deck].cues.push({ time, created:now() });
       persistDecks();
       renderDeckCues(deck);
+      if(deps.syncDeckCuesToTrack) deps.syncDeckCuesToTrack(deck);
       renderWaveformForDeck(deck, {});
       return { ok:true, deck, time };
     }
@@ -1173,6 +1174,7 @@
       state.decks[deck].hotcues = state.decks[deck].hotcues.filter(h => h.slot !== slot).concat([{ slot, time, pct, created:now() }]);
       persistDecks();
       renderHotcuePads(deck);
+      if(deps.syncDeckCuesToTrack) deps.syncDeckCuesToTrack(deck);
       renderWaveformForDeck(deck, {});
       return { ok:true, deck, slot, time };
     }
@@ -1183,6 +1185,7 @@
       state.decks[deck].hotcues = state.decks[deck].hotcues.filter(h => h.slot !== slot);
       persistDecks();
       renderHotcuePads(deck);
+      if(deps.syncDeckCuesToTrack) deps.syncDeckCuesToTrack(deck);
       renderWaveformForDeck(deck, {});
       return { ok:true, deck, slot };
     }
@@ -1260,6 +1263,7 @@
       state.decks[deck].hotcues.push({ slot:free, pct, time:audio ? Math.round((audio.currentTime || 0) * 1000) / 1000 : 0, created:now() });
       persistDecks();
       renderDeckCues(deck);
+      if(deps.syncDeckCuesToTrack) deps.syncDeckCuesToTrack(deck);
       renderHotcuePads(deck);
       renderWaveformForDeck(deck, {});
       return { ok:true, deck, pct };
@@ -1276,6 +1280,10 @@
       const deck = validDeck(deckInput);
       if(!rec) return { ok:false, error:'Track is unavailable.' };
       try{
+        // Save the previous track's deck cues, then restore this track's cues (per-track, not per-deck).
+        if(deps.syncDeckCuesToTrack) deps.syncDeckCuesToTrack(deck);
+        if(deps.applyTrackCuesToDeck) deps.applyTrackCuesToDeck(rec && rec.libraryId, deck);
+
         const artEl = doc.getElementById(`art-${deck}`);
         const nameEl = doc.getElementById(`name-${deck}`);
         const artistEl = doc.getElementById(`artist-${deck}`);
@@ -1606,6 +1614,9 @@
         masterMeter:Boolean(masterTap)
       };
     }
+
+    // One-shot: copy any cues still stuck on a deck onto the track that was loaded there.
+    if(deps.migrateDeckCuesToTracks){ try{ deps.migrateDeckCuesToTracks(); }catch(e){} }
 
     return {
       applyMix,
