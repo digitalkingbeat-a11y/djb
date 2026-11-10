@@ -15682,6 +15682,145 @@ async function handleLibraryDrop(fileList){
   handleLibraryFilesWithMeta(audio, map);
   return { ok:true, accepted:audio.length, rejected:rejected.length };
 }
+
+// ---- Nov 9: Import a music folder (webkitdirectory where the browser supports it) ----
+function folderImportSupported(){
+  try{
+    const input = document.createElement('input');
+    // Browsers that support folder picking expose webkitdirectory as a real boolean (false by
+    // default). iPhone Safari leaves it undefined / missing, so Upload Tracks stays the path.
+    return typeof input.webkitdirectory === 'boolean' || typeof input.directory === 'boolean';
+  }catch(e){ return false; }
+}
+function setFolderImportProgress(done, total, label){
+  const wrap = document.getElementById('library-folder-progress');
+  const bar = document.getElementById('library-folder-progress-bar');
+  const text = document.getElementById('library-folder-progress-label');
+  if(!wrap) return;
+  if(total <= 0 && !label){ wrap.hidden = true; return; }
+  wrap.hidden = false;
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  if(bar) bar.style.width = pct + '%';
+  if(text) text.textContent = label || `Importing ${done} of ${total}…`;
+}
+function clearFolderImportProgress(delayMs){
+  const hide = () => setFolderImportProgress(0, 0, '');
+  if(delayMs){ const t = setTimeout(hide, delayMs); if(t && typeof t.unref === 'function') t.unref(); }
+  else hide();
+}
+// Add one audio file using the same metadata / storage path as the Upload Tracks modal, without a per-file dialog.
+async function importOneLibraryFile(file, prefill){
+  const title = (prefill && prefill.title) || String(file.name || '').replace(/\.[^/.]+$/, '') || 'Untitled';
+  const artist = (prefill && prefill.artist) || 'Unknown';
+  const genre = (prefill && prefill.genre) || 'Unsorted';
+  const rights = 'Unsure';
+  const declared = false;
+  const serverUpload = await createServerBackedLibraryTrackFromFile(file, {
+    title, artist, genre,
+    rightsClassification: rightsCategoryToClassification(rights),
+    rightsConfirmed: declared
+  }).catch(error => ({ error:String(error && error.message || error) }));
+  if(serverUpload && serverUpload.data && serverUpload.data.track){
+    await attachLibraryAudioBlob(serverUpload.data.track.id, file);
+    return { ok:true, track:serverUpload.data.track };
+  }
+  const realDuration = await readAudioDuration(file);
+  const track = {
+    id: 'u-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+    title, name: title, artist,
+    uploader: (document.getElementById('profile-name')?.textContent || 'You'),
+    album: null,
+    artwork: (prefill && prefill.artwork) || null,
+    artworkDataUrl: (prefill && prefill.artwork) || null,
+    genre, bpm: '--', key: '--',
+    duration: realDuration || '--',
+    uploadDate: new Date().toISOString(),
+    size: file.size || 0,
+    fileName: file.name,
+    webkitRelativePath: file.webkitRelativePath || '',
+    source: 'MY_LIBRARY',
+    rightsCategory: rights,
+    rightsDeclared: declared,
+    rightsConfirmed: declared,
+    rightsConfirmedAt: null,
+    battleEligible: rights !== 'Commercial / Copyrighted Music',
+    permissions: defaultPermissions(),
+    stems: false,
+    localAudioPersisted: false,
+    audioMissing: false,
+    importedFromFolder: true
+  };
+  state.library.push(track);
+  await attachLibraryAudioBlob(track.id, file);
+  return { ok:true, track };
+}
+async function handleLibraryFolderFiles(fileList){
+  const incoming = Array.from(fileList || []);
+  const { audio, rejected } = splitDroppedFiles(incoming);
+  const list = [];
+  const skippedDup = [];
+  audio.forEach(f => {
+    if(findDuplicateUpload(f, list)) skippedDup.push(f.name);
+    else list.push(f);
+  });
+  if(!list.length){
+    const bits = [];
+    if(skippedDup.length) bits.push(`skipped ${skippedDup.length} duplicate${skippedDup.length === 1 ? '' : 's'}`);
+    if(rejected.length) bits.push(`skipped ${rejected.length} non-audio`);
+    showAppToast('Nothing new to import', bits.join(', ') || 'That folder had no audio files.');
+    return { ok:false, added:0, skipped:skippedDup.length, rejected:rejected.length };
+  }
+  setFolderImportProgress(0, list.length, `Importing 0 of ${list.length}…`);
+  let added = 0, failed = 0;
+  for(let i = 0; i < list.length; i++){
+    const f = list[i];
+    setFolderImportProgress(i, list.length, `Importing ${i + 1} of ${list.length}: ${f.name}`);
+    try{
+      const pre = await extractAudioFileMetadata(f);
+      const result = await importOneLibraryFile(f, pre);
+      if(result && result.ok) added += 1;
+      else failed += 1;
+    }catch(e){ failed += 1; console.warn('Folder import failed for', f && f.name, e); }
+  }
+  persist();
+  persistPlatform();
+  renderLibrary();
+  renderPlatformLibrary();
+  if(typeof renderStreamingServices === 'function') renderStreamingServices();
+  const skipped = skippedDup.length + rejected.length;
+  setFolderImportProgress(list.length, list.length, `Added ${added}, skipped ${skipped}`);
+  clearFolderImportProgress(3200);
+  const parts = [`Added ${added}`];
+  if(skippedDup.length) parts.push(`skipped ${skippedDup.length} duplicate${skippedDup.length === 1 ? '' : 's'}`);
+  if(rejected.length) parts.push(`skipped ${rejected.length} non-audio`);
+  if(failed) parts.push(`${failed} failed`);
+  showAppToast(added ? 'Folder imported' : 'Folder import finished', parts.join(', '));
+  return { ok:added > 0, added, skipped:skippedDup.length, rejected:rejected.length, failed };
+}
+function wireLibraryFolderImport(){
+  const label = document.getElementById('library-folder-import-label');
+  const input = document.getElementById('library-folder-import');
+  const hint = document.getElementById('library-folder-hint');
+  if(!label || !input) return { supported:false };
+  const supported = folderImportSupported();
+  if(!supported){
+    label.hidden = true;
+    if(hint) hint.hidden = false;
+    return { supported:false };
+  }
+  label.hidden = false;
+  if(hint) hint.hidden = true;
+  if(input.dataset.folderWired) return { supported:true };
+  input.dataset.folderWired = '1';
+  input.onchange = async e => {
+    const files = e.target.files;
+    try{ await handleLibraryFolderFiles(files); }
+    finally{ try{ e.target.value = ''; }catch(_){} }
+  };
+  return { supported:true };
+}
+wireLibraryFolderImport();
+
 // Files chosen with the Upload Tracks picker get the same treatment as dropped files.
 function handleLibraryPickedFiles(fileList){
   return handleLibraryDrop(Array.from(fileList || []));
@@ -15730,7 +15869,7 @@ if(typeof MutationObserver !== 'undefined'){
 }
 
 Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), {
-  isAudioFile, parseArtistTitleFromFilename, parseId3Tags, extractAudioFileMetadata, splitDroppedFiles, handleLibraryDrop, handleLibraryPickedFiles, setupPhoneStudioSections, setLibraryPlayerMinimized, libraryPlayerMinimized, handleDeckDrop, wireDragAndDrop
+  isAudioFile, parseArtistTitleFromFilename, parseId3Tags, extractAudioFileMetadata, splitDroppedFiles, handleLibraryDrop, handleLibraryPickedFiles, setupPhoneStudioSections, setLibraryPlayerMinimized, libraryPlayerMinimized, handleDeckDrop, wireDragAndDrop, folderImportSupported, handleLibraryFolderFiles, wireLibraryFolderImport, importOneLibraryFile, findDuplicateUpload
 });
 
 Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), {

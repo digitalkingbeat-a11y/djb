@@ -2415,6 +2415,14 @@ a.mention-link:hover{text-decoration:underline}
   #battle-grid{scroll-margin-top:calc(12px + env(safe-area-inset-top,0px))}
 }
 
+/* Nov 9: Import folder — progress + unsupported note */
+.library-folder-hint{margin:8px 0 0;color:var(--muted);font-size:12px;line-height:1.45;max-width:52rem}
+.library-folder-progress{display:flex;align-items:center;gap:12px;margin:10px 0 0;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#121720}
+.library-folder-progress .progress{flex:1;height:8px}
+.library-folder-progress strong{font-size:12px;white-space:nowrap;color:#dce1e8}
+.library-head-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+#library-folder-import-label[hidden],#library-folder-hint[hidden],#library-folder-progress[hidden]{display:none!important}
+
 /* Nov 9 five: sortable headers, missing-BPM progress, track edit */
 .sortable-th{cursor:pointer;user-select:none;white-space:nowrap}
 .sortable-th:hover,.sortable-th:focus{color:var(--accent)}
