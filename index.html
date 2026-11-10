@@ -102,7 +102,7 @@
   <meta name="twitter:description" content="Battle other DJs, get AI-judged scores and climb the rankings." />
   <meta name="twitter:image" content="assets/og-image.png" />
   <title>DJ Battle — Battle Studio</title>
-  <link rel="stylesheet" href="styles.bundle.33ec8be1c9.css" />
+  <link rel="stylesheet" href="styles.bundle.dd1c3a7203.css" />
   <style>
     /* Ensure battle meta has 4 columns for additional metadata */
     .battle-meta{grid-template-columns:repeat(4,1fr) !important}
@@ -381,7 +381,9 @@
       </section>
 
       <section id="library" class="view">
-        <div class="toolbar"><div><span class="eyebrow">CENTRAL DJ LIBRARY</span><h2>My Music</h2><p>Upload once, then reuse the track in your profile, forum posts, own-selection battles and Battle Studio. <span class="dd-hint">Tip: drag audio files here to upload.</span></p></div><div class="library-head-actions"><button class="ghost" type="button" id="library-import-dj-software" title="Bring in playlists, BPMs, keys and cue points from Rekordbox (XML) or Serato (.crate)">Import from Rekordbox / Serato</button><label class="primary file-button">＋ Upload Tracks<input type="file" id="library-upload" accept="audio/*" multiple hidden></label></div></div>
+        <div class="toolbar"><div><span class="eyebrow">CENTRAL DJ LIBRARY</span><h2>My Music</h2><p>Upload once, then reuse the track in your profile, forum posts, own-selection battles and Battle Studio. <span class="dd-hint">Tip: drag audio files here to upload.</span></p></div><div class="library-head-actions"><button class="ghost" type="button" id="library-import-dj-software" title="Bring in playlists, BPMs, keys and cue points from Rekordbox (XML) or Serato (.crate)">Import from Rekordbox / Serato</button><label class="primary file-button">＋ Upload Tracks<input type="file" id="library-upload" accept="audio/*" multiple hidden></label><label class="ghost file-button" id="library-folder-import-label" hidden title="Add every audio file in a folder at once"><span id="library-folder-import-label-text">Import folder</span><input type="file" id="library-folder-import" accept="audio/*" multiple webkitdirectory directory hidden></label></div></div>
+        <p class="library-folder-hint" id="library-folder-hint" hidden>Folder import needs a desktop browser (Chrome, Edge, Firefox or Safari on a computer). On iPhone, use Upload Tracks and pick several songs at once.</p>
+        <div class="library-folder-progress" id="library-folder-progress" hidden role="status" aria-live="polite"><div class="progress"><i id="library-folder-progress-bar" style="width:0%"></i></div><strong id="library-folder-progress-label">Importing…</strong></div>
         <div class="storage"><span>Local storage tier</span><div class="progress"><i id="storage-progress" style="width:0%"></i></div><strong id="storage-label">0 / 5 tracks</strong></div>
         <div id="library-sync-status" class="library-sync-status offline"><span></span><strong>OFFLINE CACHE</strong><small>Local mode</small></div>
         <div class="music-library-workstation" id="music-library-workstation">
@@ -656,7 +658,7 @@
   <script src="studio/deck_perf.eb57473d92.js"></script>
   <script src="studio/studio_browser.5254d06105.js"></script>
   <script src="studio/deck_runtime.8c9ada762b.js"></script>
-  <script src="app.3be1c1e980.js"></script>
+  <script src="app.3dec7c7a98.js"></script>
   <script src="social.5f0113f17f.js"></script>
   <script src="connect.c14e239b8e.js"></script>
   <script src="oct20.cbedc4eb0e.js"></script>
