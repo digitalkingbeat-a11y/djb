@@ -2,7 +2,7 @@
 // offline page instead of a blank screen. API, auth and any cross-origin (Supabase) traffic is
 // never cached. CACHE_VERSION is stamped by `npm run build` (scripts/stamp-sw-version.js) from a
 // hash of every shell file, so each change ships a new worker and the app shows "Update ready".
-const CACHE_VERSION = 'djb-shell-ed037ad2b228';
+const CACHE_VERSION = 'djb-shell-3f0e5619d6c9';
 const CACHE_PREFIX = 'djb-shell-';
 const OFFLINE_URL = 'offline.html';
 const SHELL_FILES = [
@@ -10,7 +10,7 @@ const SHELL_FILES = [
   './',
   'index.html',
   'manifest.webmanifest',
-  'styles.bundle.bb7d2a3946.css',
+  'styles.bundle.33ec8be1c9.css',
   'api_client.20bb2c98c3.js',
   'submission_upload.859ddd1bbc.js',
   'battle_modes.6bd2a08bd2.js',
@@ -62,11 +62,12 @@ function isNeverCached(url, request){
 
 // Only the app's own static files are cached (not audio, uploads or anything else).
 function isShellPath(pathname){
-  const path = String(pathname || '').replace(/^.*?\/(?=(studio\/|assets\/)?[^/]*$)/, '/');
+  const path = String(pathname || '').replace(/^.*?\/(?=(studio\/|assets\/splash\/|assets\/)?[^/]*$)/, '/');
   return /^\/$/.test(path)
     || /^\/[A-Za-z0-9_.-]+\.(html|css|js|webmanifest)$/.test(path)
     || /^\/studio\/[A-Za-z0-9_.-]+\.js$/.test(path)
-    || /^\/assets\/[A-Za-z0-9_.-]+\.(png|svg)$/.test(path);
+    || /^\/assets\/[A-Za-z0-9_.-]+\.(png|svg)$/.test(path)
+    || /^\/assets\/splash\/splash-[0-9]+x[0-9]+\.png$/.test(path);
 }
 
 function isSameOrigin(url, origin){ return url.origin === origin; }
