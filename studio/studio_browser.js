@@ -75,9 +75,9 @@
             : { ...row, source:row.playlist || row.source, compatibility:row.access || 'Metadata only', metadataOnly:true });
       }else{
         const pool = deps.filterByTrackPrefs ? deps.filterByTrackPrefs(deps.allLibraryTracks(), state.studioPrefsFilter || 'all') : deps.allLibraryTracks();
-        rows = pool
-          .filter(track => !q || deps.matchesLibrarySearch(track, q))
-          .map(track => ({ ...deps.normalizedDeckRecord(track), libraryId:track.libraryId, _sourceTrack:track, compatibility:deps.compatibleTracksFor(track).length ? 'Compatible matches' : 'Ready' }));
+        const filtered = pool.filter(track => !q || deps.matchesLibrarySearch(track, q));
+        const sorted = deps.sortLibraryTracks ? deps.sortLibraryTracks(filtered) : filtered;
+        rows = sorted.map(track => ({ ...deps.normalizedDeckRecord(track), libraryId:track.libraryId, _sourceTrack:track, compatibility:deps.compatibleTracksFor(track).length ? 'Compatible matches' : 'Ready' }));
       }
       if(!rows.length){
         const pm = state.studioPrefsFilter || 'all';
@@ -116,6 +116,17 @@
       out.querySelectorAll('[data-import-stream]').forEach(button => button.onclick = () => deps.importStreamingMetadataRow(rows[Number(button.dataset.importStream)]));
       win._studioRows = rows;
       if(deps.wireTrackStars) deps.wireTrackStars(out, () => renderLibrary(filterQ));
+      if(deps.wireStudioSortHeaders) deps.wireStudioSortHeaders();
+      const table = out.closest('table');
+      if(table) table.querySelectorAll('[data-studio-sort]').forEach(th => {
+        const field = th.dataset.studioSort;
+        const base = ({ title:'Title', artist:'Artist', bpm:'BPM', key:'Key' })[field] || field;
+        const sort = state.librarySort || { field:'title', direction:'asc' };
+        const active = sort.field === field;
+        th.textContent = base + (active ? (sort.direction === 'desc' ? ' ↓' : ' ↑') : '');
+        th.classList.toggle('is-sorted', active);
+        th.classList.toggle('is-desc', active && sort.direction === 'desc');
+      });
       out.querySelectorAll('tr[data-studio-idx]').forEach(row => row.ondblclick = () => {
         const rec = rows[Number(row.dataset.studioIdx)];
         if(rec && rec.libraryId) deps.loadLibraryTrackToDeck(rec.libraryId, deps.getFocusedDeck());

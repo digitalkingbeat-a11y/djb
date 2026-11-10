@@ -1479,7 +1479,7 @@ function installProfessionalShell(){
           <div id="studio-library-rule-status" class="library-rule-status"></div>
           <div id="streaming-services" class="streaming-service-selector"></div>
           <div id="stream-browser" class="stream-browser"></div>
-          <div class="table-wrap studio-table-wrap"><table><thead><tr><th>Load</th><th>Artwork</th><th>Title</th><th>Artist</th><th>BPM</th><th>Key</th><th>Genre</th><th>Source</th><th>Compatibility</th><th>Duration</th></tr></thead><tbody id="studio-library-table"></tbody></table></div>
+          <div class="table-wrap studio-table-wrap"><table><thead><tr><th>Load</th><th>Artwork</th><th data-studio-sort="title" class="sortable-th">Title</th><th data-studio-sort="artist" class="sortable-th">Artist</th><th data-studio-sort="bpm" class="sortable-th">BPM</th><th data-studio-sort="key" class="sortable-th">Key</th><th>Genre</th><th>Source</th><th>Compatibility</th><th>Duration</th></tr></thead><tbody id="studio-library-table"></tbody></table></div>
         </section>
       </div>
       <div class="studio-utility-grid">
@@ -7451,6 +7451,8 @@ function librarySortValue(track, field){
   if(field === 'key') return parseCamelotKey(track.key) || normalizeKeyName(track.key);
   if(field === 'uploaded') return Date.parse(track.uploadDate || track.createdAt || '') || 0;
   if(field === 'source') return trackSource(track).toLowerCase();
+  if(field === 'artist') return String(trackArtist(track) || '').toLowerCase();
+  if(field === 'title') return String(trackTitle(track) || '').toLowerCase();
   return String(track[field] || trackTitle(track)).toLowerCase();
 }
 function sortLibraryTracks(rows, sort=state.librarySort){
@@ -7720,7 +7722,7 @@ function renderLibraryDetail(track){
     ${editable ? `<label class="artwork-control">Track artwork<input type="file" accept="image/*" data-artwork-track="${esc(track.libraryId)}"></label>` : '<small style="color:var(--muted)">Platform artwork is controlled by the approved source catalog.</small>'}
     ${editable && !track.serverBacked ? `<div class="library-audio-status ${track.audioMissing ? 'missing' : ''}" id="library-audio-status"><strong>${esc(libraryAudioStatusLabel(track))}</strong>${track.audioMissing || (!securePlaybackSource(track) && track.localAudioPersisted) ? '<p style="color:var(--muted);margin:4px 0 0">Local audio was not found after refresh. Re-attach the file to restore playback.</p><label class="artwork-control">Re-attach audio<input type="file" accept="audio/*" data-reattach-audio="' + esc(track.id || track.libraryId) + '"></label>' : ''}</div>` : ''}
     ${track.sourceType === 'draft_take' ? `<div class="draft-take-panel"><span class="eyebrow accent">DRAFT TAKE</span><p>Saved from Battle Studio. Submit it to your active battle when you're ready.</p><button class="primary small" type="button" data-submit-draft="${esc(track.id)}">Submit draft</button></div>` : ''}
-    ${editable ? `<div class="track-tempo-editor"><span class="eyebrow">EDIT BPM / KEY</span><div class="form-grid">${bpmKeyFieldsHtml('edit', track)}</div><button class="primary small" id="edit-bpmkey-save" type="button" data-edit-track="${esc(track.libraryId)}">Save BPM / Key</button></div>` : ''}
+    ${editable ? `<div class="track-edit-actions"><button class="ghost small" type="button" id="edit-track-open" data-edit-track-open="${esc(track.libraryId)}">Edit</button></div><div class="track-tempo-editor"><span class="eyebrow">EDIT BPM / KEY</span><div class="form-grid">${bpmKeyFieldsHtml('edit', track)}</div><button class="primary small" id="edit-bpmkey-save" type="button" data-edit-track="${esc(track.libraryId)}">Save BPM / Key</button></div>` : ''}
     ${trackPrefs ? `<div class="track-note-editor"><span class="eyebrow">MY PRIVATE NOTE</span><div class="track-note-row">${trackStarHtml(track.libraryId)}<small>${trackPrefs.get(track.libraryId).playCount ? `Played ${esc(trackPrefs.get(track.libraryId).playCount)} time${trackPrefs.get(track.libraryId).playCount === 1 ? '' : 's'}` : 'Not played in the Studio yet'}</small></div><textarea id="track-note-input" data-track-note="${esc(track.libraryId)}" maxlength="500" rows="2" placeholder="Only you see this, e.g. drop at 1:12">${esc(trackPrefs.get(track.libraryId).note)}</textarea><small class="track-note-status" id="track-note-status" aria-live="polite"></small></div>` : ''}
     ${renderCrateEditorPanel()}
   `;
@@ -7736,6 +7738,8 @@ function renderLibraryDetail(track){
     button.onclick = event => submitDraftTake(event.currentTarget.dataset.submitDraft).catch(err => console.warn('Draft submit failed', err));
   });
   if(editable){
+    const editOpen = document.getElementById('edit-track-open');
+    if(editOpen) editOpen.onclick = () => openTrackEditModal(editOpen.dataset.editTrackOpen || track.libraryId);
     wireTapTempo('edit');
     const save = document.getElementById('edit-bpmkey-save');
     if(save) save.onclick = async () => {
@@ -7945,6 +7949,253 @@ function applyTrackPatchLocal(track, patch){
   if(patch.usageRelationships != null) track.usageRelationships = patch.usageRelationships;
   track.syncStatus = track.serverBacked ? 'optimistic' : track.syncStatus;
   return track;
+}
+
+
+/* ---- Nov 9: hot cues / cue points live on the track, not the deck ---- */
+function normalizeCueList(list){
+  return (Array.isArray(list) ? list : []).filter(c => c && (Number.isFinite(Number(c.time)) || Number.isFinite(Number(c.pct)))).map(c => ({
+    time: Number.isFinite(Number(c.time)) ? Math.round(Number(c.time) * 1000) / 1000 : null,
+    pct: Number.isFinite(Number(c.pct)) ? Math.max(0, Math.min(1, Number(c.pct))) : null,
+    slot: Number.isInteger(c.slot) ? c.slot : (Number.isInteger(Number(c.hotCue)) ? Number(c.hotCue) : null),
+    created: c.created || Date.now(),
+    name: c.name || '',
+    type: c.type || 'cue'
+  })).slice(0, 64);
+}
+function normalizeHotcueList(list){
+  const slots = [null, null, null, null];
+  normalizeCueList(list).forEach(h => {
+    const slot = Number.isInteger(h.slot) && h.slot >= 0 && h.slot < 4 ? h.slot : slots.indexOf(null);
+    if(slot < 0 || slot > 3 || slots[slot]) return;
+    slots[slot] = { slot, time:h.time, pct:h.pct, created:h.created, name:h.name };
+  });
+  return slots.filter(Boolean);
+}
+function trackCueSnapshot(track){
+  if(!track) return { cues:[], hotcues:[] };
+  // cuePoints come from Rekordbox/Serato imports; hotcues are Studio pads.
+  const imported = normalizeCueList(track.cuePoints).map(c => ({ time:c.time, created:c.created, name:c.name, type:c.type }));
+  const cues = normalizeCueList(track.cues).concat(imported.filter(c => !normalizeCueList(track.cues).some(x => x.time === c.time)));
+  const hotFromImport = normalizeHotcueList((track.cuePoints || []).filter(c => c && (c.hotCue != null || c.slot != null)));
+  const hotcues = normalizeHotcueList([...(track.hotcues || []), ...hotFromImport]);
+  return { cues: cues.slice(0, 32), hotcues };
+}
+function writeTrackCues(track, cues, hotcues){
+  if(!track) return false;
+  track.cues = normalizeCueList(cues);
+  track.hotcues = normalizeHotcueList(hotcues);
+  // Keep cuePoints in sync so imports / exports still see them.
+  const fromHot = track.hotcues.map(h => ({ time:h.time, pct:h.pct, hotCue:h.slot, slot:h.slot, type:'cue', name:h.name || '', created:h.created }));
+  track.cuePoints = [...track.cues.map(c => ({ time:c.time, type:c.type || 'cue', name:c.name || '', created:c.created })), ...fromHot].slice(0, 64);
+  return true;
+}
+function syncDeckCuesToTrack(deckInput){
+  const deck = String(deckInput) === 'b' ? 'b' : 'a';
+  const deckEl = document.querySelector(`.deck[data-deck="${deck}"]`);
+  const trackId = (state.studioDecks && state.studioDecks[deck] && state.studioDecks[deck].trackId) || (deckEl && deckEl.dataset.libraryTrackId) || '';
+  if(!trackId) return { ok:false, skipped:true };
+  const editable = getEditableLibraryTrack(trackId);
+  if(!editable || !editable.track) return { ok:false, skipped:true };
+  const data = state.decks && state.decks[deck] || { cues:[], hotcues:[] };
+  writeTrackCues(editable.track, data.cues, data.hotcues);
+  persist();
+  return { ok:true, trackId };
+}
+function applyTrackCuesToDeck(trackId, deckInput){
+  const deck = String(deckInput) === 'b' ? 'b' : 'a';
+  state.decks[deck] = state.decks[deck] || { cues:[], hotcues:[] };
+  const track = trackId ? getLibraryTrackById(trackId) : null;
+  if(!track){
+    state.decks[deck].cues = [];
+    state.decks[deck].hotcues = [];
+  } else {
+    const snap = trackCueSnapshot(track);
+    state.decks[deck].cues = snap.cues.map(c => ({ time:c.time, created:c.created }));
+    state.decks[deck].hotcues = snap.hotcues.map(h => ({ slot:h.slot, time:h.time, pct:h.pct, created:h.created }));
+  }
+  if(typeof persistDecks === 'function') persistDecks();
+  return { ok:true, deck, count:(state.decks[deck].cues.length + state.decks[deck].hotcues.length) };
+}
+function migrateDeckCuesToTracks(){
+  let moved = 0;
+  ['a', 'b'].forEach(deck => {
+    const data = state.decks && state.decks[deck];
+    if(!data) return;
+    const has = (data.cues && data.cues.length) || (data.hotcues && data.hotcues.length);
+    if(!has) return;
+    const trackId = (state.studioDecks && state.studioDecks[deck] && state.studioDecks[deck].trackId) || '';
+    if(!trackId) return;
+    const editable = getEditableLibraryTrack(trackId);
+    if(!editable || !editable.track) return;
+    const snap = trackCueSnapshot(editable.track);
+    if(snap.cues.length || snap.hotcues.length) return; // track already has cues
+    writeTrackCues(editable.track, data.cues, data.hotcues);
+    moved += 1;
+  });
+  if(moved) persist();
+  return { moved };
+}
+
+/* ---- Nov 9: edit title/artist/genre/BPM/key after upload ---- */
+function validateTrackEditFields(fields){
+  const title = String(fields.title || '').trim().slice(0, 160);
+  const artist = String(fields.artist || '').trim().slice(0, 120);
+  const genre = String(fields.genre || '').trim().slice(0, 60);
+  const key = String(fields.key || '').trim().slice(0, 12);
+  const bpmRaw = fields.bpm;
+  const bpmNum = bpmRaw === '' || bpmRaw == null ? null : Number(bpmRaw);
+  if(!title) return { ok:false, error:'Title is required.' };
+  if(bpmNum != null && !(bpmNum >= 40 && bpmNum <= 220)) return { ok:false, error:'BPM must be between 40 and 220, or blank.' };
+  return {
+    ok:true,
+    patch:{
+      title,
+      artist: artist || 'Unknown',
+      genre: genre || 'Unsorted',
+      ...(bpmNum != null ? { bpm: Math.round(bpmNum * 10) / 10, bpmSource:'manual' } : {}),
+      ...(key ? { key } : { key:'--' })
+    }
+  };
+}
+function openTrackEditModal(trackId){
+  const editable = getEditableLibraryTrack(trackId);
+  if(!editable){ showAppToast('Cannot edit', 'Only tracks in My Uploads can be edited.'); return; }
+  const t = editable.track;
+  const bpm = parseBpm(t) || '';
+  const key = t.key && t.key !== '--' && t.key !== '—' ? t.key : '';
+  openModal(`<span class="eyebrow accent">EDIT TRACK</span><h3>Edit details</h3><p style="color:var(--muted)">Changes save on this device and sync to the server when you're signed in.</p><div class="form-grid"><label>Title<input id="edit-track-title" maxlength="160" value="${esc(trackTitle(t))}"></label><label>Artist<input id="edit-track-artist" maxlength="120" value="${esc(trackArtist(t))}"></label><label>Genre<input id="edit-track-genre" maxlength="60" value="${esc(t.genre || '')}"></label><label>BPM<input id="edit-track-bpm" type="number" min="40" max="220" step="0.1" inputmode="decimal" value="${esc(bpm)}"></label><label>Key<input id="edit-track-key" maxlength="12" value="${esc(key)}" placeholder="e.g. 8A or A minor"></label></div><p id="edit-track-error" class="hidden" role="alert" style="color:var(--danger)"></p><div class="modal-actions"><button class="ghost" value="cancel">Cancel</button><button class="primary" type="button" id="edit-track-save">Save</button></div>`);
+  setTimeout(() => {
+    const save = document.getElementById('edit-track-save');
+    if(!save) return;
+    save.onclick = async () => {
+      const checked = validateTrackEditFields({
+        title: document.getElementById('edit-track-title')?.value,
+        artist: document.getElementById('edit-track-artist')?.value,
+        genre: document.getElementById('edit-track-genre')?.value,
+        bpm: document.getElementById('edit-track-bpm')?.value,
+        key: document.getElementById('edit-track-key')?.value
+      });
+      const err = document.getElementById('edit-track-error');
+      if(!checked.ok){ if(err){ err.textContent = checked.error; err.classList.remove('hidden'); } return; }
+      const result = await updateLibraryTrackMetadataOptimistic(editable.track.id, checked.patch);
+      if(result && result.ok){ document.getElementById('modal')?.close(); showAppToast('Track updated', `${checked.patch.title} saved.`); }
+      else if(err){ err.textContent = (result && result.error) || 'Could not save.'; err.classList.remove('hidden'); }
+    };
+  }, 0);
+}
+
+/* ---- Nov 9: Find missing BPMs ---- */
+const missingBpmJob = { running:false, cancel:false };
+function trackNeedsBpm(track){ return track && track._libraryOrigin === 'my' && !parseBpm(track); }
+async function audioBlobForBpm(track){
+  if(!track) return null;
+  const key = String(track.id || track.originalId || '');
+  if(key){
+    const blob = await loadLibraryAudioBlob(key);
+    if(blob) return blob;
+  }
+  const src = securePlaybackSource(track);
+  if(src && typeof fetch === 'function' && !String(src).startsWith('data:')){
+    try{ const res = await fetch(src); if(res.ok) return await res.blob(); }catch(e){}
+  }
+  return null;
+}
+function setMissingBpmProgress(done, total, label){
+  const wrap = document.getElementById('library-missing-bpm-progress');
+  const bar = document.getElementById('library-missing-bpm-bar');
+  const text = document.getElementById('library-missing-bpm-label');
+  const cancel = document.getElementById('library-missing-bpm-cancel');
+  if(!wrap) return;
+  if(total <= 0 && !label){ wrap.hidden = true; if(cancel) cancel.hidden = true; return; }
+  wrap.hidden = false;
+  if(cancel) cancel.hidden = !missingBpmJob.running;
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  if(bar) bar.style.width = pct + '%';
+  if(text) text.textContent = label || `Detecting ${done} of ${total}…`;
+}
+async function findMissingBpms(){
+  if(missingBpmJob.running) return { ok:false, busy:true };
+  const targets = (state.library || []).filter(trackNeedsBpm);
+  if(!targets.length){ showAppToast('All set', 'Every track in My Uploads already has a BPM.'); return { ok:true, added:0, skipped:0 }; }
+  missingBpmJob.running = true; missingBpmJob.cancel = false;
+  setMissingBpmProgress(0, targets.length, `Detecting 0 of ${targets.length}…`);
+  let added = 0, skipped = 0, failed = 0;
+  for(let i = 0; i < targets.length; i++){
+    if(missingBpmJob.cancel) break;
+    const track = targets[i];
+    setMissingBpmProgress(i, targets.length, `Detecting ${i + 1} of ${targets.length}: ${trackTitle(track)}`);
+    try{
+      const blob = await audioBlobForBpm(track);
+      if(!blob){ skipped += 1; continue; }
+      const file = blob instanceof File ? blob : new File([blob], track.fileName || `${trackTitle(track)}.mp3`, { type: blob.type || 'audio/mpeg' });
+      const result = await detectBpmFromFile(file);
+      if(!result || !result.bpm){ failed += 1; continue; }
+      const saved = await saveDetectedBpm(track.id, result.bpm);
+      if(saved && saved.ok) added += 1; else skipped += 1;
+    }catch(e){ failed += 1; }
+  }
+  const cancelled = missingBpmJob.cancel;
+  missingBpmJob.running = false; missingBpmJob.cancel = false;
+  setMissingBpmProgress(targets.length, targets.length, `Updated ${added}${cancelled ? ' (cancelled)' : ''}`);
+  setTimeout(() => setMissingBpmProgress(0, 0, ''), 2800);
+  renderLibrary(); renderStudioLibrary();
+  const parts = [`Updated ${added}`];
+  if(skipped) parts.push(`skipped ${skipped}`);
+  if(failed) parts.push(`${failed} failed`);
+  if(cancelled) parts.push('cancelled');
+  showAppToast(cancelled ? 'BPM scan stopped' : 'BPM scan finished', parts.join(', '));
+  return { ok:true, added, skipped, failed, cancelled };
+}
+function wireMissingBpmControls(){
+  const btn = document.getElementById('library-find-missing-bpm');
+  const cancel = document.getElementById('library-missing-bpm-cancel');
+  if(btn && !btn.dataset.wired){ btn.dataset.wired = '1'; btn.onclick = () => findMissingBpms(); }
+  if(cancel && !cancel.dataset.wired){ cancel.dataset.wired = '1'; cancel.onclick = () => { missingBpmJob.cancel = true; }; }
+}
+
+/* ---- Nov 9: clickable Title/Artist/BPM/Key headers ---- */
+function sortHeaderLabel(field, label){
+  const sort = state.librarySort || { field:'title', direction:'asc' };
+  const active = sort.field === field;
+  const arrow = !active ? '' : (sort.direction === 'desc' ? ' ↓' : ' ↑');
+  return `${label}${arrow}`;
+}
+function wireLibrarySortHeaders(){
+  document.querySelectorAll('[data-library-sort]').forEach(th => {
+    th.setAttribute('role', 'button');
+    th.tabIndex = 0;
+    th.classList.toggle('is-sorted', (state.librarySort || {}).field === th.dataset.librarySort);
+    th.classList.toggle('is-desc', (state.librarySort || {}).field === th.dataset.librarySort && (state.librarySort || {}).direction === 'desc');
+    const activate = () => {
+      const field = th.dataset.librarySort;
+      if((state.librarySort || {}).field === field) state.librarySort.direction = state.librarySort.direction === 'desc' ? 'asc' : 'desc';
+      else state.librarySort = { field, direction:'asc' };
+      persistLibraryUiState();
+      renderLibrary();
+      renderStudioLibrary();
+    };
+    th.onclick = activate;
+    th.onkeydown = e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); activate(); } };
+  });
+}
+function wireStudioSortHeaders(){
+  document.querySelectorAll('[data-studio-sort]').forEach(th => {
+    th.setAttribute('role', 'button');
+    th.tabIndex = 0;
+    th.classList.toggle('is-sorted', (state.librarySort || {}).field === th.dataset.studioSort);
+    th.classList.toggle('is-desc', (state.librarySort || {}).field === th.dataset.studioSort && (state.librarySort || {}).direction === 'desc');
+    const activate = () => {
+      const field = th.dataset.studioSort;
+      if((state.librarySort || {}).field === field) state.librarySort.direction = state.librarySort.direction === 'desc' ? 'asc' : 'desc';
+      else state.librarySort = { field, direction:'asc' };
+      persistLibraryUiState();
+      renderStudioLibrary();
+      renderLibrary();
+    };
+    th.onclick = activate;
+    th.onkeydown = e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); activate(); } };
+  });
 }
 
 // Auto BPM: save a detected tempo through the normal track patch path, only when the track has none.
@@ -8346,6 +8597,14 @@ function renderLibrary(){
   if(playerProgress) playerProgress.oninput = e => { state.libraryPlayer.progress = Number(e.target.value || 0); persistLibraryUiState(); renderLibraryPlayer(); };
   if(sortField) sortField.value = state.librarySort.field || 'title';
   if(sortDirection) sortDirection.textContent = (state.librarySort.direction || 'asc').toUpperCase();
+  wireMissingBpmControls();
+  wireLibrarySortHeaders();
+  // Refresh sortable header labels
+  document.querySelectorAll('[data-library-sort]').forEach(th => {
+    const field = th.dataset.librarySort;
+    const base = ({ title:'Track', artist:'Artist', bpm:'BPM', key:'Key' })[field] || field;
+    th.textContent = sortHeaderLabel(field, base);
+  });
   if(search && search.value !== state.libraryFilters.search) search.value = state.libraryFilters.search || '';
   if(compatibleOnly) compatibleOnly.checked = Boolean(state.libraryFilters.compatibleOnly);
   const rows = filterLibraryTracks();
@@ -12765,6 +13024,8 @@ studioBrowserManager = StudioModules.browser.create({
   state,
   esc,
   allLibraryTracks,
+  sortLibraryTracks,
+  wireStudioSortHeaders,
   matchesLibrarySearch,
   normalizedDeckRecord,
   compatibleTracksFor,
@@ -12820,7 +13081,10 @@ deckRuntimeManager = StudioModules.deckRuntime.create({
   loadNextFromBattlePrepCrate,
   parseCamelotKey,
   onTrackPlayed: id => onStudioTrackPlayed(id),
-  deckPerf: window.DJBattleDeckPerf
+  deckPerf: window.DJBattleDeckPerf,
+  syncDeckCuesToTrack,
+  applyTrackCuesToDeck,
+  migrateDeckCuesToTracks
 });
 function openPremium(msg='Premium unlocks stems, higher storage limits, own-selection battles and advanced analysis.') {openModal(`<span class="eyebrow accent">DJ BATTLE PREMIUM</span><h3>More tools. Same fair rules.</h3><p style="color:var(--muted);line-height:1.6">${esc(msg)}</p><div class="panel" style="margin:16px 0"><strong>Premium benefits</strong><p>AI stem separation<br>Stem-enabled battles<br>More cloud-library storage<br>Own-selection battles<br>Advanced analysis</p></div><div class="modal-actions"><button class="ghost" value="cancel">Not now</button><button class="primary" type="button" id="enable-premium">Enable Premium</button></div>`);setTimeout(()=>document.getElementById('enable-premium').onclick=()=>{state.premium=true;document.getElementById('modal').close();renderLibrary();appAlert('Premium enabled for this session.');},0)}
 document.querySelector('[data-action="premium"]').onclick=()=>openPremium();
@@ -16943,5 +17207,11 @@ Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), {
   renamePracticeSession, deletePracticeSessionWithUndo, undoPracticeDelete, commitPracticeDelete, PRACTICE_UNDO_MS
 });
 
+Object.assign(window.__DJBattleTestHooks || (window.__DJBattleTestHooks = {}), {
+  syncDeckCuesToTrack, applyTrackCuesToDeck, migrateDeckCuesToTracks, trackCueSnapshot, writeTrackCues,
+  validateTrackEditFields, openTrackEditModal, findMissingBpms, trackNeedsBpm, wireLibrarySortHeaders, wireStudioSortHeaders, sortHeaderLabel
+});
+
 // Nov 1: boot marker for the safety net in index.html (set only if this whole file ran).
 window.__djbAppLoaded = true;
+
