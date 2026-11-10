@@ -499,3 +499,7 @@ html[data-theme="light"] .verified-chip{border:1px solid #c6cddb;background:#ede
 html[data-theme="light"] .verified-chip b{color:#1a1a1a}
 html[data-theme="light"] .verified-ranking-category{border:1px solid #c6cdd9;background:#eff2f6}
 html[data-theme="light"] .verified-ranking-row{border-top:1px solid #c6cedc}
+/* index.html <style> */
+html[data-theme="light"] #djb-boot-splash{background:#f2f5f8 radial-gradient(circle at 50% 42%,rgba(185,255,49,.14),transparent 45%)}
+html[data-theme="light"] #djb-boot-splash b{color:#2c426d}
+html[data-theme="light"] #djb-boot-splash small{color:#436600}
