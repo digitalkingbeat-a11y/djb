@@ -30,11 +30,12 @@ function isNeverCached(url, request){
 
 // Only the app's own static files are cached (not audio, uploads or anything else).
 function isShellPath(pathname){
-  const path = String(pathname || '').replace(/^.*?\/(?=(studio\/|assets\/)?[^/]*$)/, '/');
+  const path = String(pathname || '').replace(/^.*?\/(?=(studio\/|assets\/splash\/|assets\/)?[^/]*$)/, '/');
   return /^\/$/.test(path)
     || /^\/[A-Za-z0-9_.-]+\.(html|css|js|webmanifest)$/.test(path)
     || /^\/studio\/[A-Za-z0-9_.-]+\.js$/.test(path)
-    || /^\/assets\/[A-Za-z0-9_.-]+\.(png|svg)$/.test(path);
+    || /^\/assets\/[A-Za-z0-9_.-]+\.(png|svg)$/.test(path)
+    || /^\/assets\/splash\/splash-[0-9]+x[0-9]+\.png$/.test(path);
 }
 
 function isSameOrigin(url, origin){ return url.origin === origin; }
